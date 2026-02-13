@@ -1,18 +1,227 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  serial,
+  integer,
+  text,
+  varchar,
+  boolean,
+  timestamp,
+  real,
+  jsonb,
+} from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-export const users = pgTable("users", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  username: text("username").notNull().unique(),
-  password: text("password").notNull(),
+export const rawTickets = pgTable("raw_tickets", {
+  id: serial("id").primaryKey(),
+  ticketId: integer("ticket_id").notNull().unique(),
+  category: text("category"),
+  categoryId: integer("category_id"),
+  subject: text("subject"),
+  customerQuestion: text("customer_question"),
+  agentAnswer: text("agent_answer"),
+  messages: jsonb("messages"),
+  resolution: text("resolution"),
+  tags: text("tags"),
+  autoClosed: boolean("auto_closed").default(false),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
+  closedAt: timestamp("closed_at"),
+  processingStatus: text("processing_status").default("pending"),
+  processedAt: timestamp("processed_at"),
 });
 
-export const insertUserSchema = createInsertSchema(users).pick({
-  username: true,
-  password: true,
+export const scrubbedTickets = pgTable("scrubbed_tickets", {
+  id: serial("id").primaryKey(),
+  ticketId: integer("ticket_id").notNull().unique(),
+  category: text("category"),
+  categoryId: integer("category_id"),
+  subject: text("subject"),
+  customerQuestion: text("customer_question"),
+  agentAnswer: text("agent_answer"),
+  messages: jsonb("messages"),
+  resolution: text("resolution"),
+  tags: text("tags"),
+  autoClosed: boolean("auto_closed").default(false),
+  categoryMappingStatus: text("category_mapping_status").default("pending"),
+  hjelpesenterCategory: text("hjelpesenter_category"),
+  hjelpesenterSubcategory: text("hjelpesenter_subcategory"),
+  analysisStatus: text("analysis_status").default("pending"),
+  scrubbedAt: timestamp("scrubbed_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
-export type InsertUser = z.infer<typeof insertUserSchema>;
-export type User = typeof users.$inferSelect;
+export const hjelpesenterCategories = pgTable("hjelpesenter_categories", {
+  id: serial("id").primaryKey(),
+  categoryName: text("category_name").notNull(),
+  subcategoryName: text("subcategory_name").notNull(),
+  urlSlug: text("url_slug"),
+  description: text("description"),
+});
+
+export const categoryMappings = pgTable("category_mappings", {
+  id: serial("id").primaryKey(),
+  ticketId: integer("ticket_id").notNull(),
+  pureserviceCategory: text("pureservice_category"),
+  hjelpesenterCategory: text("hjelpesenter_category"),
+  hjelpesenterSubcategory: text("hjelpesenter_subcategory"),
+  confidence: real("confidence"),
+  reasoning: text("reasoning"),
+  mappedAt: timestamp("mapped_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const intentClassifications = pgTable("intent_classifications", {
+  id: serial("id").primaryKey(),
+  ticketId: integer("ticket_id").notNull(),
+  intent: text("intent"),
+  intentConfidence: real("intent_confidence"),
+  isNewIntent: boolean("is_new_intent").default(false),
+  keywords: text("keywords"),
+  requiredRuntimeData: text("required_runtime_data"),
+  requiredAction: text("required_action"),
+  actionEndpoint: text("action_endpoint"),
+  paymentRequired: boolean("payment_required").default(false),
+  autoClosePossible: boolean("auto_close_possible").default(false),
+  reasoning: text("reasoning"),
+  classifiedAt: timestamp("classified_at").default(sql`CURRENT_TIMESTAMP`),
+  resolutionExtracted: boolean("resolution_extracted").default(false),
+  manuallyReviewed: boolean("manually_reviewed").default(false),
+  reviewerEmail: text("reviewer_email"),
+  reviewNotes: text("review_notes"),
+  reviewedAt: timestamp("reviewed_at"),
+  uncertaintyReviewed: boolean("uncertainty_reviewed").default(false),
+});
+
+export const resolutionPatterns = pgTable("resolution_patterns", {
+  id: serial("id").primaryKey(),
+  ticketId: integer("ticket_id").notNull(),
+  intent: text("intent"),
+  customerNeed: text("customer_need"),
+  dataGathered: text("data_gathered"),
+  resolutionSteps: text("resolution_steps"),
+  successIndicators: text("success_indicators"),
+  followUpNeeded: boolean("follow_up_needed").default(false),
+  extractedAt: timestamp("extracted_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const playbookEntries = pgTable("playbook_entries", {
+  id: serial("id").primaryKey(),
+  intent: text("intent").notNull(),
+  hjelpesenterCategory: text("hjelpesenter_category"),
+  hjelpesenterSubcategory: text("hjelpesenter_subcategory"),
+  keywords: text("keywords"),
+  requiredRuntimeData: text("required_runtime_data"),
+  primaryAction: text("primary_action"),
+  primaryEndpoint: text("primary_endpoint"),
+  resolutionSteps: text("resolution_steps"),
+  successIndicators: text("success_indicators"),
+  avgConfidence: real("avg_confidence"),
+  ticketCount: integer("ticket_count").default(0),
+  paymentRequiredProbability: real("payment_required_probability"),
+  autoCloseProbability: real("auto_close_probability"),
+  lastUpdated: timestamp("last_updated").default(sql`CURRENT_TIMESTAMP`),
+  isActive: boolean("is_active").default(true),
+});
+
+export const uncategorizedThemes = pgTable("uncategorized_themes", {
+  id: serial("id").primaryKey(),
+  themeName: text("theme_name").notNull(),
+  description: text("description"),
+  ticketCount: integer("ticket_count").default(0),
+  ticketIds: text("ticket_ids"),
+  shouldBeNewCategory: boolean("should_be_new_category").default(false),
+  suggestedExistingCategory: text("suggested_existing_category"),
+  analyzedAt: timestamp("analyzed_at").default(sql`CURRENT_TIMESTAMP`),
+  reviewed: boolean("reviewed").default(false),
+  reviewerNotes: text("reviewer_notes"),
+});
+
+export const uncertaintyCases = pgTable("uncertainty_cases", {
+  id: serial("id").primaryKey(),
+  ticketId: integer("ticket_id").notNull(),
+  uncertaintyType: text("uncertainty_type"),
+  missingInformation: text("missing_information"),
+  suggestedQuestions: text("suggested_questions"),
+  needsHumanReview: boolean("needs_human_review").default(true),
+  reviewPriority: text("review_priority").default("medium"),
+  detectedAt: timestamp("detected_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const reviewQueue = pgTable("review_queue", {
+  id: serial("id").primaryKey(),
+  reviewType: text("review_type").notNull(),
+  referenceId: integer("reference_id"),
+  priority: text("priority").default("medium"),
+  data: jsonb("data"),
+  status: text("status").default("pending"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
+  reviewedBy: text("reviewed_by"),
+  reviewedAt: timestamp("reviewed_at"),
+  decision: text("decision"),
+});
+
+export const conversations = pgTable("conversations", {
+  id: serial("id").primaryKey(),
+  title: text("title").notNull(),
+  sessionType: text("session_type").default("customer"),
+  ownerId: text("owner_id"),
+  authenticated: boolean("authenticated").default(false),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const messages = pgTable("messages", {
+  id: serial("id").primaryKey(),
+  conversationId: integer("conversation_id")
+    .notNull()
+    .references(() => conversations.id, { onDelete: "cascade" }),
+  role: text("role").notNull(),
+  content: text("content").notNull(),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const trainingRuns = pgTable("training_runs", {
+  id: serial("id").primaryKey(),
+  workflow: text("workflow").notNull(),
+  status: text("status").default("pending"),
+  totalTickets: integer("total_tickets").default(0),
+  processedTickets: integer("processed_tickets").default(0),
+  errorCount: integer("error_count").default(0),
+  startedAt: timestamp("started_at").default(sql`CURRENT_TIMESTAMP`),
+  completedAt: timestamp("completed_at"),
+  errorLog: text("error_log"),
+});
+
+export const insertRawTicketSchema = createInsertSchema(rawTickets).omit({ id: true });
+export const insertScrubbedTicketSchema = createInsertSchema(scrubbedTickets).omit({ id: true });
+export const insertCategoryMappingSchema = createInsertSchema(categoryMappings).omit({ id: true });
+export const insertIntentClassificationSchema = createInsertSchema(intentClassifications).omit({ id: true });
+export const insertResolutionPatternSchema = createInsertSchema(resolutionPatterns).omit({ id: true });
+export const insertPlaybookEntrySchema = createInsertSchema(playbookEntries).omit({ id: true });
+export const insertUncategorizedThemeSchema = createInsertSchema(uncategorizedThemes).omit({ id: true });
+export const insertUncertaintyCaseSchema = createInsertSchema(uncertaintyCases).omit({ id: true });
+export const insertReviewQueueSchema = createInsertSchema(reviewQueue).omit({ id: true });
+export const insertConversationSchema = createInsertSchema(conversations).omit({ id: true, createdAt: true });
+export const insertMessageSchema = createInsertSchema(messages).omit({ id: true, createdAt: true });
+export const insertTrainingRunSchema = createInsertSchema(trainingRuns).omit({ id: true });
+
+export type RawTicket = typeof rawTickets.$inferSelect;
+export type InsertRawTicket = z.infer<typeof insertRawTicketSchema>;
+export type ScrubbedTicket = typeof scrubbedTickets.$inferSelect;
+export type InsertScrubbedTicket = z.infer<typeof insertScrubbedTicketSchema>;
+export type HjelpesenterCategory = typeof hjelpesenterCategories.$inferSelect;
+export type CategoryMapping = typeof categoryMappings.$inferSelect;
+export type InsertCategoryMapping = z.infer<typeof insertCategoryMappingSchema>;
+export type IntentClassification = typeof intentClassifications.$inferSelect;
+export type InsertIntentClassification = z.infer<typeof insertIntentClassificationSchema>;
+export type ResolutionPattern = typeof resolutionPatterns.$inferSelect;
+export type InsertResolutionPattern = z.infer<typeof insertResolutionPatternSchema>;
+export type PlaybookEntry = typeof playbookEntries.$inferSelect;
+export type InsertPlaybookEntry = z.infer<typeof insertPlaybookEntrySchema>;
+export type UncategorizedTheme = typeof uncategorizedThemes.$inferSelect;
+export type UncertaintyCase = typeof uncertaintyCases.$inferSelect;
+export type ReviewQueueItem = typeof reviewQueue.$inferSelect;
+export type Conversation = typeof conversations.$inferSelect;
+export type InsertConversation = z.infer<typeof insertConversationSchema>;
+export type Message = typeof messages.$inferSelect;
+export type InsertMessage = z.infer<typeof insertMessageSchema>;
+export type TrainingRun = typeof trainingRuns.$inferSelect;
