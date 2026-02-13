@@ -3,44 +3,78 @@
 ## Overview
 AI-powered support automation system for DyreID (Norway's national pet ID registry). Two integrated parts:
 
-1. **Training Agent**: Ingests ~40,000 historical support tickets from Pureservice API, GDPR-scrubs them, maps to 9 help center categories, classifies intents, extracts resolution patterns, and builds a "Support Playbook"
-2. **Customer Chatbot**: Uses the playbook to provide automated support, authenticates via Min Side OTP, retrieves owner/pet context, and executes actions
+1. **Training Agent (DEL 1)**: 9-workflow pipeline that ingests ~40,000 historical support tickets from Pureservice API, GDPR-scrubs them, maps to 9 help center categories, analyzes uncategorized tickets, classifies intents (34 known intents), extracts resolution patterns, detects uncertainty, builds a Support Playbook, and provides manual review UI
+2. **Customer Chatbot (DEL 2)**: Uses the playbook to provide automated support, authenticates via Min Side OTP, retrieves owner/pet context, and executes actions
 
 ## Architecture
 - **Stack**: Express + Vite + React + PostgreSQL + Drizzle ORM
-- **AI**: Claude via Anthropic API (Haiku for training, Sonnet for chatbot)
+- **AI**: Claude via Anthropic API (Haiku for training workflows, Sonnet for complex analysis/chatbot)
 - **Auth**: OTP-based via Min Side sandbox (demo phones: 91000001-91000005)
 
 ## Project Structure
 ```
 shared/
-  schema.ts          - Drizzle schema: 10 training tables + conversations/messages + training_runs
+  schema.ts          - Drizzle schema: 12 tables (raw_tickets, scrubbed_tickets, hjelpesenter_categories, category_mappings, intent_classifications, resolution_patterns, playbook_entries, uncategorized_themes, uncertainty_cases, review_queue, conversations/messages, training_runs)
 server/
-  routes.ts          - API routes for training pipeline, chat, MinSide actions
-  storage.ts         - IStorage interface + DatabaseStorage implementation
-  training-agent.ts  - 6-step training pipeline: ingest > scrub > categorize > classify > extract > playbook
+  routes.ts          - API routes: 9 SSE training endpoints, review queue, chat, MinSide actions
+  storage.ts         - IStorage interface + DatabaseStorage with full CRUD for all 12 tables
+  training-agent.ts  - 9-workflow pipeline with all workflow functions + manual review handler
   chatbot.ts         - Streaming AI chatbot with playbook context and action execution
   pureservice.ts     - Pureservice API client for ticket fetching
-  gdpr-scrubber.ts   - GDPR PII removal: names, phones, emails, addresses, chip numbers
+  gdpr-scrubber.ts   - GDPR PII removal: names, phones, emails, addresses, chip numbers, IPs, payment refs
   minside-sandbox.ts - Demo sandbox with 5 users simulating various pet/owner scenarios
   db.ts              - Database connection (Neon serverless)
 client/src/
   App.tsx            - Sidebar layout with Dashboard and Chatbot routes
   pages/
-    dashboard.tsx    - Training pipeline controls, stats, playbook viewer, run history
+    dashboard.tsx    - 9-workflow pipeline controls, 9 stat cards, 6 tabs (Pipeline, Playbook, Review Queue, Themes, Uncertainty, History)
     chatbot.tsx      - Chat interface with streaming messages, OTP auth, suggestions
   components/
     theme-provider.tsx - Light/dark mode toggle
     theme-toggle.tsx
 ```
 
+## 9 Training Workflows
+1. **Pureservice Ticket Ingestion** - Fetch closed tickets from Pureservice API with pagination
+2. **GDPR Scrubbing** - Remove PII (phones, emails, chips, names, addresses, postcodes, IPs, payment refs)
+3. **Hjelpesenter Category Mapping** - Map to 9 DyreID categories via Claude AI (categories loaded from CSV)
+4. **Uncategorized Ticket Analysis** - Cluster analysis of "Ukategorisert" tickets for theme identification
+5. **Intent Classification** - Classify customer intent using 34 known intents via Claude AI
+6. **Resolution Extraction** - Extract step-by-step resolution patterns from ticket dialogues
+7. **Uncertainty Detector** - Identify low-confidence classifications and flag for review
+8. **Playbook Builder** - Aggregate all data into final Support Playbook
+9. **Manual Review Handler** - Human review of uncertain cases via Review Queue UI
+
 ## Key Features
-- **Training Pipeline**: 6-step SSE-streamed workflow with real-time progress
+- **9-Step Pipeline**: SSE-streamed workflows with real-time progress monitoring
 - **GDPR Compliance**: Regex-based PII masking before AI analysis
-- **9 Help Center Categories**: Min side, Eierskifte, Registrering, QR Tag, Smart Tag, Abonnement, Savnet/Funnet, Familiedeling, App
+- **CSV-Loaded Categories**: 9 hjelpesenter categories with 36 subcategories loaded from CSV file
+- **34 Known Intents**: Comprehensive intent classification (LoginIssue, OwnershipTransfer, QRTagActivation, etc.)
+- **Review Queue**: Manual review UI for uncertain classifications and new intents
 - **Sandbox Users**: 5 demo profiles (91000001-91000005) with varied scenarios
 - **Chatbot Actions**: Mark lost/found, activate QR, initiate transfers, send payment links
 - **Streaming Responses**: SSE-based real-time AI responses
+
+## API Endpoints
+### Training Pipeline
+- POST /api/training/ingest (SSE)
+- POST /api/training/scrub (SSE)
+- POST /api/training/categorize (SSE)
+- POST /api/training/analyze-uncategorized (SSE)
+- POST /api/training/classify (SSE)
+- POST /api/training/extract-resolutions (SSE)
+- POST /api/training/detect-uncertainty (SSE)
+- POST /api/training/generate-playbook (SSE)
+- GET /api/training/review-queue
+- POST /api/training/submit-review
+- GET /api/training/uncategorized-themes
+- GET /api/training/uncertainty-cases
+- GET /api/training/stats
+
+### Data
+- GET /api/playbook
+- GET /api/categories
+- POST /api/categories/reload-csv
 
 ## Environment Variables
 - `PURESERVICE_API_KEY` - API key for Pureservice ticket system
@@ -49,4 +83,4 @@ client/src/
 - `AI_INTEGRATIONS_ANTHROPIC_API_KEY` - Claude API key (auto-provided via integration)
 
 ## Recent Changes
-- 2026-02-13: Initial build - complete schema, training pipeline, chatbot, MinSide sandbox, dashboard and chatbot UI
+- 2026-02-13: Complete 9-workflow Training Agent with dashboard, review queue UI, CSV-loaded categories, 34 known intents, uncertainty detection, uncategorized theme analysis

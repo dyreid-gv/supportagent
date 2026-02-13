@@ -8,10 +8,15 @@ import {
   runIngestion,
   runGdprScrubbing,
   runCategoryMapping,
+  runUncategorizedAnalysis,
   runIntentClassification,
   runResolutionExtraction,
+  runUncertaintyDetection,
   runPlaybookGeneration,
+  submitManualReview,
 } from "./training-agent";
+import fs from "fs";
+import path from "path";
 
 const createConversationSchema = z.object({
   title: z.string().min(1).max(200).optional().default("Ny samtale"),
@@ -32,68 +37,94 @@ const actionSchema = z.object({
   params: z.record(z.string()).optional().default({}),
 });
 
-const HJELPESENTER_CATEGORIES_DATA = [
-  { categoryName: "Min side", subcategoryName: "Logg inn på Min side", urlSlug: "logg-inn", description: "Hvordan logge inn på Min side" },
-  { categoryName: "Min side", subcategoryName: "Hvorfor har jeg fått sms/e-post?", urlSlug: "sms-epost", description: "Informasjon om mottatte meldinger" },
-  { categoryName: "Min side", subcategoryName: "Har jeg en Min side?", urlSlug: "har-min-side", description: "Verifisere om profil eksisterer" },
-  { categoryName: "Min side", subcategoryName: "Hvorfor får jeg ikke logget meg inn?", urlSlug: "login-problem", description: "Feilsøke innloggingsproblemer" },
-  { categoryName: "Min side", subcategoryName: "Det mangler et kjæledyr på Min side", urlSlug: "mangler-dyr", description: "Dyr vises ikke i profil" },
-  { categoryName: "Min side", subcategoryName: "Kjæledyret mitt er dødt", urlSlug: "dyr-dod", description: "Håndtere avdøde kjæledyr" },
-  { categoryName: "Min side", subcategoryName: "Slett meg", urlSlug: "gdpr-slett", description: "GDPR sletting av profil" },
-  { categoryName: "Min side", subcategoryName: "Eksporter mine data", urlSlug: "gdpr-eksport", description: "GDPR dataeksport" },
-  { categoryName: "Eierskifte", subcategoryName: "Hva koster eierskifte?", urlSlug: "kostnad-eierskifte", description: "Priser for eierskifte" },
-  { categoryName: "Eierskifte", subcategoryName: "Hvordan foreta eierskifte?", urlSlug: "eierskifte-prosess", description: "Prosess for eierskifte" },
-  { categoryName: "Eierskifte", subcategoryName: "Eierskifte når eier er død", urlSlug: "eier-dod", description: "Eierskifte ved dødsfall" },
-  { categoryName: "Eierskifte", subcategoryName: "Eierskifte av NKK-registrert hund", urlSlug: "nkk-eierskifte", description: "NKK-spesifikk prosess" },
-  { categoryName: "Registrering", subcategoryName: "Kjæledyret mitt er ikke søkbart", urlSlug: "ikke-sokbart", description: "Dyr ikke synlig i søk" },
-  { categoryName: "Registrering", subcategoryName: "Hvordan få dyret registrert i Norge?", urlSlug: "registrering-norge", description: "Registreringsprosess" },
-  { categoryName: "Registrering", subcategoryName: "Hva koster det å registrere et dyr?", urlSlug: "kostnad-registrering", description: "Registreringspriser" },
-  { categoryName: "Registrering", subcategoryName: "Utenlandsregistrering", urlSlug: "utenlands-chip", description: "Registrere utenlandsk chip" },
-  { categoryName: "Produkter - QR Tag", subcategoryName: "Hvordan aktivere QR-brikken?", urlSlug: "aktivere-qr", description: "Aktivering av QR-brikke" },
-  { categoryName: "Produkter - QR Tag", subcategoryName: "Er kontaktinformasjonen min tilgjengelig?", urlSlug: "kontaktinfo-synlig", description: "Synlighet av kontaktinfo" },
-  { categoryName: "Produkter - QR Tag", subcategoryName: "Jeg har mistet tag'en", urlSlug: "mistet-qr", description: "Erstatte tapt QR-brikke" },
-  { categoryName: "Produkter - QR Tag", subcategoryName: "Hva skjer hvis abonnementet utløper?", urlSlug: "abonnement-utloper", description: "Konsekvenser ved utløp" },
-  { categoryName: "Produkter - Smart Tag", subcategoryName: "Kan ikke koble til taggen", urlSlug: "smarttag-kobling", description: "Koblingsproblemer Smart Tag" },
-  { categoryName: "Produkter - Smart Tag", subcategoryName: "Taggen var lagt til før men jeg finner den ikke", urlSlug: "smarttag-forsvunnet", description: "Smart Tag ikke synlig" },
-  { categoryName: "Produkter - Smart Tag", subcategoryName: "Posisjonen har ikke oppdatert seg", urlSlug: "smarttag-posisjon", description: "Posisjonsproblemer" },
-  { categoryName: "Produkter - Smart Tag", subcategoryName: "Flere tagger men får bare koblet til en", urlSlug: "smarttag-flere", description: "Flere tagger samtidig" },
-  { categoryName: "Abonnement", subcategoryName: "DyreID basis vs DyreID+", urlSlug: "basis-vs-plus", description: "Forskjeller mellom planer" },
-  { categoryName: "Abonnement", subcategoryName: "Koster appen noe?", urlSlug: "app-kostnad", description: "Priser for app" },
-  { categoryName: "Abonnement", subcategoryName: "Avslutte abonnement", urlSlug: "avslutte-abo", description: "Oppsigelse av abonnement" },
-  { categoryName: "Savnet/Funnet", subcategoryName: "Hvordan melde mitt kjæledyr savnet?", urlSlug: "melde-savnet", description: "Prosess for savnetmelding" },
-  { categoryName: "Savnet/Funnet", subcategoryName: "Kjæledyret har kommet til rette", urlSlug: "funnet-igjen", description: "Markere som funnet" },
-  { categoryName: "Savnet/Funnet", subcategoryName: "Hvordan fungerer Savnet & Funnet?", urlSlug: "savnet-funnet-info", description: "Informasjon om tjenesten" },
-  { categoryName: "Familiedeling", subcategoryName: "Hvordan dele tilgang med familiemedlemmer?", urlSlug: "dele-tilgang", description: "Prosess for deling" },
-  { categoryName: "Familiedeling", subcategoryName: "Kan jeg bruke familiedeling med noen som har kjæledyr?", urlSlug: "familiedeling-eksisterende", description: "Deling med eksisterende brukere" },
-  { categoryName: "Familiedeling", subcategoryName: "Jeg ser ikke lenger kjæledyret som har blitt delt", urlSlug: "deling-forsvunnet", description: "Tilgang mistet" },
-  { categoryName: "App", subcategoryName: "Hvordan få tilgang til DyreID-appen?", urlSlug: "app-tilgang", description: "Laste ned og logge inn" },
-  { categoryName: "App", subcategoryName: "Innlogging app", urlSlug: "app-login", description: "Innloggingsprosess i app" },
-  { categoryName: "App", subcategoryName: "Hvorfor app?", urlSlug: "app-fordeler", description: "Fordeler med app" },
-];
+const reviewSubmitSchema = z.object({
+  queueId: z.number(),
+  reviewerEmail: z.string().email(),
+  decision: z.object({
+    approved: z.boolean(),
+    correctIntent: z.string().optional(),
+    correctCategory: z.string().optional(),
+    notes: z.string().optional(),
+    addToPlaybook: z.boolean().optional(),
+  }),
+});
+
+function parseCsvLine(line: string): string[] {
+  const result: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && i + 1 < line.length && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === "," && !inQuotes) {
+      result.push(current.trim());
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  result.push(current.trim());
+  return result;
+}
+
+function loadCategoriesFromCsv(): { categoryName: string; subcategoryName: string; urlSlug: string; description: string }[] {
+  const csvPath = path.resolve("attached_assets/hjelpesenter_categories_1771024423412.csv");
+  if (!fs.existsSync(csvPath)) {
+    console.log("CSV file not found, using fallback categories");
+    return [];
+  }
+  const raw = fs.readFileSync(csvPath, "utf-8");
+  const lines = raw.trim().split("\n").slice(1);
+  return lines
+    .filter((line) => line.trim().length > 0)
+    .map((line) => {
+      const parts = parseCsvLine(line);
+      return {
+        categoryName: parts[0] || "",
+        subcategoryName: parts[1] || "",
+        urlSlug: parts[2] || "",
+        description: parts[3] || "",
+      };
+    })
+    .filter((c) => c.categoryName && c.subcategoryName);
+}
+
+function sseHeaders(res: any) {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+}
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  await storage.seedHjelpesenterCategories(HJELPESENTER_CATEGORIES_DATA);
+  const csvCategories = loadCategoriesFromCsv();
+  if (csvCategories.length > 0) {
+    await storage.seedHjelpesenterCategories(csvCategories);
+  }
 
+  // ─── TRAINING STATS ──────────────────────────────────────────────
   app.get("/api/training/stats", async (_req, res) => {
     try {
       const stats = await storage.getTrainingStats();
-      const runs = await storage.getLatestTrainingRuns(10);
+      const runs = await storage.getLatestTrainingRuns(20);
       res.json({ stats, runs });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
   });
 
+  // ─── WORKFLOW 1: INGESTION ────────────────────────────────────────
   app.post("/api/training/ingest", async (_req, res) => {
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
-
+    sseHeaders(res);
     const runId = await storage.createTrainingRun("ingestion", 0);
-    let errorCount = 0;
 
     try {
       const result = await runIngestion((msg, pct) => {
@@ -108,11 +139,9 @@ export async function registerRoutes(
     res.end();
   });
 
+  // ─── WORKFLOW 2: GDPR SCRUBBING ──────────────────────────────────
   app.post("/api/training/scrub", async (_req, res) => {
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
-
+    sseHeaders(res);
     const runId = await storage.createTrainingRun("gdpr_scrubbing", 0);
 
     try {
@@ -128,11 +157,9 @@ export async function registerRoutes(
     res.end();
   });
 
+  // ─── WORKFLOW 3: CATEGORY MAPPING ────────────────────────────────
   app.post("/api/training/categorize", async (_req, res) => {
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
-
+    sseHeaders(res);
     const runId = await storage.createTrainingRun("category_mapping", 0);
 
     try {
@@ -148,11 +175,27 @@ export async function registerRoutes(
     res.end();
   });
 
-  app.post("/api/training/classify", async (_req, res) => {
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
+  // ─── WORKFLOW 4: UNCATEGORIZED ANALYSIS ──────────────────────────
+  app.post("/api/training/analyze-uncategorized", async (_req, res) => {
+    sseHeaders(res);
+    const runId = await storage.createTrainingRun("uncategorized_analysis", 0);
 
+    try {
+      const result = await runUncategorizedAnalysis((msg, pct) => {
+        res.write(`data: ${JSON.stringify({ message: msg, progress: pct })}\n\n`);
+      });
+      await storage.completeTrainingRun(runId, result.errors);
+      res.write(`data: ${JSON.stringify({ done: true, ...result })}\n\n`);
+    } catch (error: any) {
+      await storage.completeTrainingRun(runId, 1, error.message);
+      res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+    }
+    res.end();
+  });
+
+  // ─── WORKFLOW 5: INTENT CLASSIFICATION ───────────────────────────
+  app.post("/api/training/classify", async (_req, res) => {
+    sseHeaders(res);
     const runId = await storage.createTrainingRun("intent_classification", 0);
 
     try {
@@ -168,11 +211,9 @@ export async function registerRoutes(
     res.end();
   });
 
+  // ─── WORKFLOW 6: RESOLUTION EXTRACTION ───────────────────────────
   app.post("/api/training/extract-resolutions", async (_req, res) => {
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
-
+    sseHeaders(res);
     const runId = await storage.createTrainingRun("resolution_extraction", 0);
 
     try {
@@ -188,11 +229,27 @@ export async function registerRoutes(
     res.end();
   });
 
-  app.post("/api/training/generate-playbook", async (_req, res) => {
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
+  // ─── WORKFLOW 7: UNCERTAINTY DETECTION ───────────────────────────
+  app.post("/api/training/detect-uncertainty", async (_req, res) => {
+    sseHeaders(res);
+    const runId = await storage.createTrainingRun("uncertainty_detection", 0);
 
+    try {
+      const result = await runUncertaintyDetection((msg, pct) => {
+        res.write(`data: ${JSON.stringify({ message: msg, progress: pct })}\n\n`);
+      });
+      await storage.completeTrainingRun(runId, result.errors);
+      res.write(`data: ${JSON.stringify({ done: true, ...result })}\n\n`);
+    } catch (error: any) {
+      await storage.completeTrainingRun(runId, 1, error.message);
+      res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+    }
+    res.end();
+  });
+
+  // ─── WORKFLOW 8: PLAYBOOK GENERATION ─────────────────────────────
+  app.post("/api/training/generate-playbook", async (_req, res) => {
+    sseHeaders(res);
     const runId = await storage.createTrainingRun("playbook_generation", 0);
 
     try {
@@ -208,6 +265,54 @@ export async function registerRoutes(
     res.end();
   });
 
+  // ─── WORKFLOW 9: MANUAL REVIEW ───────────────────────────────────
+  app.get("/api/training/review-queue", async (_req, res) => {
+    try {
+      const items = await storage.getPendingReviewItems();
+      res.json(items);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/training/submit-review", async (req, res) => {
+    try {
+      const parsed = reviewSubmitSchema.parse(req.body);
+      const result = await submitManualReview(
+        parsed.queueId,
+        parsed.reviewerEmail,
+        parsed.decision
+      );
+      res.json(result);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors[0].message });
+      }
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ─── UNCATEGORIZED THEMES ────────────────────────────────────────
+  app.get("/api/training/uncategorized-themes", async (_req, res) => {
+    try {
+      const themes = await storage.getUncategorizedThemes();
+      res.json(themes);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ─── UNCERTAINTY CASES ───────────────────────────────────────────
+  app.get("/api/training/uncertainty-cases", async (_req, res) => {
+    try {
+      const cases = await storage.getUncertaintyCases();
+      res.json(cases);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ─── PLAYBOOK & CATEGORIES ──────────────────────────────────────
   app.get("/api/playbook", async (_req, res) => {
     try {
       const entries = await storage.getPlaybookEntries();
@@ -226,6 +331,20 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/categories/reload-csv", async (_req, res) => {
+    try {
+      const cats = loadCategoriesFromCsv();
+      if (cats.length === 0) {
+        return res.status(400).json({ error: "No categories found in CSV" });
+      }
+      await storage.replaceHjelpesenterCategories(cats);
+      res.json({ loaded: cats.length });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ─── CHAT / CONVERSATIONS ──────────────────────────────────────
   app.post("/api/chat/conversations", async (req, res) => {
     try {
       const parsed = createConversationSchema.parse(req.body);
@@ -280,9 +399,7 @@ export async function registerRoutes(
       const conversation = await storage.getConversation(conversationId);
       if (!conversation) return res.status(404).json({ error: "Not found" });
 
-      res.setHeader("Content-Type", "text/event-stream");
-      res.setHeader("Cache-Control", "no-cache");
-      res.setHeader("Connection", "keep-alive");
+      sseHeaders(res);
 
       const generator = streamChatResponse(
         conversationId,

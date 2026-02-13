@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { eq, desc, sql, count, and, isNull } from "drizzle-orm";
+import { eq, desc, sql, count, and, isNull, lt, or } from "drizzle-orm";
 import {
   rawTickets,
   scrubbedTickets,
@@ -34,11 +34,13 @@ export interface IStorage {
   getScrubbedTicketCount(): Promise<number>;
   getUnmappedScrubbedTickets(limit: number): Promise<typeof scrubbedTickets.$inferSelect[]>;
   getUnclassifiedScrubbedTickets(limit: number): Promise<typeof scrubbedTickets.$inferSelect[]>;
+  getUncategorizedScrubbedTickets(limit: number): Promise<typeof scrubbedTickets.$inferSelect[]>;
   updateScrubbedTicketMapping(ticketId: number, category: string, subcategory: string): Promise<void>;
   updateScrubbedTicketAnalysis(ticketId: number, status: string): Promise<void>;
 
   getHjelpesenterCategories(): Promise<typeof hjelpesenterCategories.$inferSelect[]>;
   seedHjelpesenterCategories(categories: { categoryName: string; subcategoryName: string; urlSlug: string; description: string }[]): Promise<void>;
+  replaceHjelpesenterCategories(categories: { categoryName: string; subcategoryName: string; urlSlug: string; description: string }[]): Promise<void>;
 
   insertCategoryMapping(mapping: InsertCategoryMapping): Promise<void>;
   getCategoryMappingCount(): Promise<number>;
@@ -46,6 +48,9 @@ export interface IStorage {
   insertIntentClassification(classification: InsertIntentClassification): Promise<void>;
   getIntentClassificationCount(): Promise<number>;
   getClassifiedTicketsWithoutResolution(limit: number): Promise<typeof intentClassifications.$inferSelect[]>;
+  getLowConfidenceClassifications(limit: number): Promise<typeof intentClassifications.$inferSelect[]>;
+  updateIntentClassificationReview(ticketId: number, data: { intent?: string; manuallyReviewed: boolean; reviewerEmail: string; reviewNotes: string; uncertaintyReviewed: boolean }): Promise<void>;
+  markResolutionExtracted(ticketId: number): Promise<void>;
 
   insertResolutionPattern(pattern: InsertResolutionPattern): Promise<void>;
   getResolutionPatternCount(): Promise<number>;
@@ -55,6 +60,20 @@ export interface IStorage {
   upsertPlaybookEntry(entry: InsertPlaybookEntry): Promise<void>;
   getPlaybookEntryCount(): Promise<number>;
 
+  insertUncategorizedTheme(theme: { themeName: string; description: string; ticketCount: number; ticketIds: string; shouldBeNewCategory: boolean; suggestedExistingCategory: string | null }): Promise<number>;
+  getUncategorizedThemes(): Promise<typeof uncategorizedThemes.$inferSelect[]>;
+  getUncategorizedThemeCount(): Promise<number>;
+  updateThemeReview(id: number, reviewed: boolean, reviewerNotes: string): Promise<void>;
+
+  insertUncertaintyCase(uc: { ticketId: number; uncertaintyType: string; missingInformation: string; suggestedQuestions: string; needsHumanReview: boolean; reviewPriority: string }): Promise<void>;
+  getUncertaintyCases(): Promise<typeof uncertaintyCases.$inferSelect[]>;
+  getUncertaintyCaseCount(): Promise<number>;
+
+  insertReviewQueueItem(item: { reviewType: string; referenceId: number; priority: string; data: any }): Promise<number>;
+  getPendingReviewItems(): Promise<typeof reviewQueue.$inferSelect[]>;
+  getReviewQueueCount(): Promise<number>;
+  submitReview(id: number, reviewedBy: string, decision: string): Promise<void>;
+
   getTrainingStats(): Promise<{
     rawTickets: number;
     scrubbedTickets: number;
@@ -63,6 +82,8 @@ export interface IStorage {
     resolutionPatterns: number;
     playbookEntries: number;
     uncertaintyCases: number;
+    uncategorizedThemes: number;
+    reviewQueuePending: number;
   }>;
 
   createTrainingRun(workflow: string, totalTickets: number): Promise<number>;
@@ -127,7 +148,25 @@ export class DatabaseStorage implements IStorage {
     return db
       .select()
       .from(scrubbedTickets)
-      .where(eq(scrubbedTickets.analysisStatus, "pending"))
+      .where(
+        and(
+          eq(scrubbedTickets.categoryMappingStatus, "mapped"),
+          eq(scrubbedTickets.analysisStatus, "pending")
+        )
+      )
+      .limit(limit);
+  }
+
+  async getUncategorizedScrubbedTickets(limit: number) {
+    return db
+      .select()
+      .from(scrubbedTickets)
+      .where(
+        and(
+          eq(scrubbedTickets.hjelpesenterCategory, "Ukategorisert"),
+          eq(scrubbedTickets.analysisStatus, "pending")
+        )
+      )
       .limit(limit);
   }
 
@@ -159,6 +198,13 @@ export class DatabaseStorage implements IStorage {
     await db.insert(hjelpesenterCategories).values(categories);
   }
 
+  async replaceHjelpesenterCategories(categories: { categoryName: string; subcategoryName: string; urlSlug: string; description: string }[]): Promise<void> {
+    await db.delete(hjelpesenterCategories);
+    if (categories.length > 0) {
+      await db.insert(hjelpesenterCategories).values(categories);
+    }
+  }
+
   async insertCategoryMapping(mapping: InsertCategoryMapping): Promise<void> {
     await db.insert(categoryMappings).values(mapping);
   }
@@ -181,8 +227,53 @@ export class DatabaseStorage implements IStorage {
     return db
       .select()
       .from(intentClassifications)
-      .where(eq(intentClassifications.resolutionExtracted, false))
+      .where(
+        and(
+          eq(intentClassifications.resolutionExtracted, false),
+          sql`${intentClassifications.intentConfidence} > 0.7`
+        )
+      )
       .limit(limit);
+  }
+
+  async getLowConfidenceClassifications(limit: number) {
+    return db
+      .select()
+      .from(intentClassifications)
+      .where(
+        and(
+          eq(intentClassifications.uncertaintyReviewed, false),
+          or(
+            sql`${intentClassifications.intentConfidence} < 0.7`,
+            eq(intentClassifications.isNewIntent, true)
+          )
+        )
+      )
+      .limit(limit);
+  }
+
+  async updateIntentClassificationReview(ticketId: number, data: { intent?: string; manuallyReviewed: boolean; reviewerEmail: string; reviewNotes: string; uncertaintyReviewed: boolean }): Promise<void> {
+    const updateData: any = {
+      manuallyReviewed: data.manuallyReviewed,
+      reviewerEmail: data.reviewerEmail,
+      reviewNotes: data.reviewNotes,
+      reviewedAt: new Date(),
+      uncertaintyReviewed: data.uncertaintyReviewed,
+    };
+    if (data.intent) {
+      updateData.intent = data.intent;
+    }
+    await db
+      .update(intentClassifications)
+      .set(updateData)
+      .where(eq(intentClassifications.ticketId, ticketId));
+  }
+
+  async markResolutionExtracted(ticketId: number): Promise<void> {
+    await db
+      .update(intentClassifications)
+      .set({ resolutionExtracted: true })
+      .where(eq(intentClassifications.ticketId, ticketId));
   }
 
   async insertResolutionPattern(pattern: InsertResolutionPattern): Promise<void> {
@@ -195,7 +286,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getPlaybookEntries() {
-    return db.select().from(playbookEntries);
+    return db.select().from(playbookEntries).orderBy(desc(playbookEntries.ticketCount));
   }
 
   async getActivePlaybookEntries() {
@@ -214,8 +305,78 @@ export class DatabaseStorage implements IStorage {
     return result[0].count;
   }
 
+  async insertUncategorizedTheme(theme: { themeName: string; description: string; ticketCount: number; ticketIds: string; shouldBeNewCategory: boolean; suggestedExistingCategory: string | null }): Promise<number> {
+    const [row] = await db.insert(uncategorizedThemes).values(theme).returning();
+    return row.id;
+  }
+
+  async getUncategorizedThemes() {
+    return db.select().from(uncategorizedThemes).orderBy(desc(uncategorizedThemes.ticketCount));
+  }
+
+  async getUncategorizedThemeCount(): Promise<number> {
+    const result = await db.select({ count: count() }).from(uncategorizedThemes);
+    return result[0].count;
+  }
+
+  async updateThemeReview(id: number, reviewed: boolean, reviewerNotes: string): Promise<void> {
+    await db
+      .update(uncategorizedThemes)
+      .set({ reviewed, reviewerNotes })
+      .where(eq(uncategorizedThemes.id, id));
+  }
+
+  async insertUncertaintyCase(uc: { ticketId: number; uncertaintyType: string; missingInformation: string; suggestedQuestions: string; needsHumanReview: boolean; reviewPriority: string }): Promise<void> {
+    await db.insert(uncertaintyCases).values(uc);
+  }
+
+  async getUncertaintyCases() {
+    return db.select().from(uncertaintyCases).orderBy(desc(uncertaintyCases.detectedAt));
+  }
+
+  async getUncertaintyCaseCount(): Promise<number> {
+    const result = await db.select({ count: count() }).from(uncertaintyCases);
+    return result[0].count;
+  }
+
+  async insertReviewQueueItem(item: { reviewType: string; referenceId: number; priority: string; data: any }): Promise<number> {
+    const [row] = await db.insert(reviewQueue).values(item).returning();
+    return row.id;
+  }
+
+  async getPendingReviewItems() {
+    return db
+      .select()
+      .from(reviewQueue)
+      .where(eq(reviewQueue.status, "pending"))
+      .orderBy(
+        sql`CASE WHEN ${reviewQueue.priority} = 'high' THEN 1 WHEN ${reviewQueue.priority} = 'medium' THEN 2 ELSE 3 END`,
+        desc(reviewQueue.createdAt)
+      );
+  }
+
+  async getReviewQueueCount(): Promise<number> {
+    const result = await db
+      .select({ count: count() })
+      .from(reviewQueue)
+      .where(eq(reviewQueue.status, "pending"));
+    return result[0].count;
+  }
+
+  async submitReview(id: number, reviewedBy: string, decision: string): Promise<void> {
+    await db
+      .update(reviewQueue)
+      .set({
+        status: "reviewed",
+        reviewedBy,
+        reviewedAt: new Date(),
+        decision,
+      })
+      .where(eq(reviewQueue.id, id));
+  }
+
   async getTrainingStats() {
-    const [raw, scrubbed, catMap, intents, resolutions, playbook, uncertainty] = await Promise.all([
+    const [raw, scrubbed, catMap, intents, resolutions, playbook, uncertainty, uncat, pendingReview] = await Promise.all([
       db.select({ count: count() }).from(rawTickets),
       db.select({ count: count() }).from(scrubbedTickets),
       db.select({ count: count() }).from(categoryMappings),
@@ -223,6 +384,8 @@ export class DatabaseStorage implements IStorage {
       db.select({ count: count() }).from(resolutionPatterns),
       db.select({ count: count() }).from(playbookEntries),
       db.select({ count: count() }).from(uncertaintyCases),
+      db.select({ count: count() }).from(uncategorizedThemes),
+      db.select({ count: count() }).from(reviewQueue).where(eq(reviewQueue.status, "pending")),
     ]);
     return {
       rawTickets: raw[0].count,
@@ -232,6 +395,8 @@ export class DatabaseStorage implements IStorage {
       resolutionPatterns: resolutions[0].count,
       playbookEntries: playbook[0].count,
       uncertaintyCases: uncertainty[0].count,
+      uncategorizedThemes: uncat[0].count,
+      reviewQueuePending: pendingReview[0].count,
     };
   }
 

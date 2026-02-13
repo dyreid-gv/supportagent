@@ -2,7 +2,6 @@ import Anthropic from "@anthropic-ai/sdk";
 import { storage } from "./storage";
 import { scrubTicket } from "./gdpr-scrubber";
 import { fetchTicketsFromPureservice, mapPureserviceToRawTicket } from "./pureservice";
-import { batchProcess } from "./replit_integrations/batch/utils";
 import { log } from "./index";
 
 const anthropic = new Anthropic({
@@ -10,28 +9,88 @@ const anthropic = new Anthropic({
   baseURL: process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL,
 });
 
-const HJELPESENTER_CATEGORIES = [
-  "Min side",
-  "Eierskifte",
-  "Registrering",
-  "Produkter - QR Tag",
-  "Produkter - Smart Tag",
-  "Abonnement",
-  "Savnet/Funnet",
-  "Familiedeling",
-  "App",
+const KNOWN_INTENTS = [
+  "LoginIssue",
+  "ProfileUpdate",
+  "MissingPet",
+  "PetDeceased",
+  "GDPRDelete",
+  "GDPRExport",
+  "OwnershipTransfer",
+  "OwnershipTransferDead",
+  "NKKOwnership",
+  "OwnershipError",
+  "InactiveRegistration",
+  "ForeignChip",
+  "RegistrationPayment",
+  "ActivationIssue",
+  "ProductComplaint",
+  "QRTagActivation",
+  "QRTagLost",
+  "TagInactive",
+  "ProductReplace",
+  "SmartTagIssue",
+  "SmartTagConnection",
+  "CancelSubscription",
+  "UpgradeSubscription",
+  "BillingIssue",
+  "SubscriptionManagement",
+  "LostPetReport",
+  "FoundPet",
+  "AlertIssue",
+  "FamilySharing",
+  "FamilyAccessLost",
+  "AppLoginIssue",
+  "AppSubscriptionInfo",
+  "AppSupport",
+  "GeneralInquiry",
 ];
 
+async function callClaude(prompt: string, model: string = "claude-haiku-4-5", maxTokens: number = 4096): Promise<string> {
+  const response = await anthropic.messages.create({
+    model,
+    max_tokens: maxTokens,
+    messages: [{ role: "user", content: prompt }],
+  });
+  return response.content[0].type === "text" ? response.content[0].text : "";
+}
+
+function extractJson(text: string): any {
+  const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (codeBlockMatch) {
+    try {
+      return JSON.parse(codeBlockMatch[1].trim());
+    } catch {}
+  }
+
+  const arrayMatch = text.match(/\[[\s\S]*\]/);
+  if (arrayMatch) {
+    try {
+      return JSON.parse(arrayMatch[0]);
+    } catch {}
+  }
+
+  const objMatch = text.match(/\{[\s\S]*\}/);
+  if (objMatch) {
+    try {
+      return JSON.parse(objMatch[0]);
+    } catch {}
+  }
+
+  throw new Error("No valid JSON found in AI response");
+}
+
+// ─── WORKFLOW 1: PURESERVICE TICKET INGESTION ─────────────────────────────
 export async function runIngestion(
   onProgress?: (msg: string, pct: number) => void
 ): Promise<{ ingested: number; errors: number }> {
   let totalIngested = 0;
   let totalErrors = 0;
   let page = 1;
-  const pageSize = 50;
+  const pageSize = 100;
   let hasMore = true;
 
-  onProgress?.("Starting ticket ingestion from Pureservice...", 0);
+  onProgress?.("Starter ticket-innhenting fra Pureservice...", 0);
 
   while (hasMore) {
     try {
@@ -47,7 +106,7 @@ export async function runIngestion(
       totalIngested += tickets.length;
 
       const pct = Math.min(100, Math.round((totalIngested / Math.max(total, 1)) * 100));
-      onProgress?.(`Ingested ${totalIngested} of ~${total} tickets`, pct);
+      onProgress?.(`Hentet ${totalIngested} av ~${total} tickets (side ${page})`, pct);
 
       if (totalIngested >= total || tickets.length < pageSize) {
         hasMore = false;
@@ -58,6 +117,7 @@ export async function runIngestion(
     } catch (err: any) {
       totalErrors++;
       log(`Ingestion error page ${page}: ${err.message}`, "training");
+      onProgress?.(`Feil på side ${page}: ${err.message}`, -1);
       if (totalErrors > 5) {
         hasMore = false;
       }
@@ -65,10 +125,11 @@ export async function runIngestion(
     }
   }
 
-  onProgress?.(`Ingestion complete: ${totalIngested} tickets, ${totalErrors} errors`, 100);
+  onProgress?.(`Innhenting ferdig: ${totalIngested} tickets, ${totalErrors} feil`, 100);
   return { ingested: totalIngested, errors: totalErrors };
 }
 
+// ─── WORKFLOW 2: GDPR SCRUBBING ──────────────────────────────────────────
 export async function runGdprScrubbing(
   onProgress?: (msg: string, pct: number) => void
 ): Promise<{ scrubbed: number; errors: number }> {
@@ -76,7 +137,9 @@ export async function runGdprScrubbing(
   let totalScrubbed = 0;
   let totalErrors = 0;
 
-  onProgress?.("Starting GDPR scrubbing...", 0);
+  onProgress?.("Starter GDPR-rensing...", 0);
+
+  const totalRaw = await storage.getRawTicketCount();
 
   while (true) {
     const unprocessed = await storage.getUnprocessedRawTickets(batchSize);
@@ -105,15 +168,15 @@ export async function runGdprScrubbing(
       }
     }
 
-    const rawCount = await storage.getRawTicketCount();
-    const pct = Math.round((totalScrubbed / Math.max(rawCount, 1)) * 100);
-    onProgress?.(`Scrubbed ${totalScrubbed} tickets`, pct);
+    const pct = Math.round((totalScrubbed / Math.max(totalRaw, 1)) * 100);
+    onProgress?.(`Renset ${totalScrubbed} av ${totalRaw} tickets`, pct);
   }
 
-  onProgress?.(`Scrubbing complete: ${totalScrubbed} tickets, ${totalErrors} errors`, 100);
+  onProgress?.(`GDPR-rensing ferdig: ${totalScrubbed} tickets, ${totalErrors} feil`, 100);
   return { scrubbed: totalScrubbed, errors: totalErrors };
 }
 
+// ─── WORKFLOW 3: HJELPESENTER CATEGORY MAPPING ───────────────────────────
 export async function runCategoryMapping(
   onProgress?: (msg: string, pct: number) => void
 ): Promise<{ mapped: number; errors: number }> {
@@ -121,88 +184,172 @@ export async function runCategoryMapping(
   let totalMapped = 0;
   let totalErrors = 0;
 
-  onProgress?.("Starting category mapping...", 0);
+  onProgress?.("Starter kategorimapping...", 0);
 
   const categories = await storage.getHjelpesenterCategories();
   const categoryList = categories
-    .map((c) => `${c.categoryName} > ${c.subcategoryName}: ${c.description}`)
+    .map((c) => `${c.categoryName} > ${c.subcategoryName}: ${c.description || ""}`)
     .join("\n");
 
   while (true) {
     const unmapped = await storage.getUnmappedScrubbedTickets(batchSize);
     if (unmapped.length === 0) break;
 
-    const results = await batchProcess(
-      unmapped,
-      async (ticket) => {
-        const prompt = `Du er en AI-assistent for DyreID, Norges nasjonale kjæledyrregister. Klassifiser denne support-ticketen til riktig hjelpesenter-kategori.
+    for (const ticket of unmapped) {
+      try {
+        const prompt = `Du er en ekspert på DyreID sin support-struktur.
 
-TILGJENGELIGE KATEGORIER:
+OPPGAVE: Mapper denne Pureservice-ticketen til riktig kategori i DyreID hjelpesenter.
+
+PURESERVICE TICKET:
+- Pureservice Kategori: ${ticket.category || "Ingen"}
+- Emne: ${ticket.subject || "Ingen"}
+- Kundespørsmål: ${ticket.customerQuestion || "Ingen"}
+- Agentsvar: ${ticket.agentAnswer || "Ingen"}
+
+HJELPESENTER KATEGORIER:
 ${categoryList}
 
-TICKET:
-Emne: ${ticket.subject || "Ingen"}
-Kundespørsmål: ${ticket.customerQuestion || "Ingen"}
-Agentsvar: ${ticket.agentAnswer || "Ingen"}
-Opprinnelig kategori: ${ticket.category || "Ingen"}
+INSTRUKSJONER:
+1. Analyser ticket-innholdet
+2. Finn beste match i hjelpesenter-struktur
+3. Hvis ingen god match: sett category til "Ukategorisert"
 
-Svar i JSON-format:
+SVAR I JSON:
 {
-  "hjelpesenter_category": "kategoriNavn",
-  "hjelpesenter_subcategory": "underkategoriNavn",
+  "hjelpesenter_category": "Category name",
+  "hjelpesenter_subcategory": "Subcategory name",
   "confidence": 0.0-1.0,
-  "reasoning": "kort begrunnelse"
+  "reasoning": "Why this mapping?"
 }`;
 
-        const response = await anthropic.messages.create({
-          model: "claude-haiku-4-5",
-          max_tokens: 8192,
-          messages: [{ role: "user", content: prompt }],
+        const text = await callClaude(prompt);
+        const result = extractJson(text);
+
+        await storage.insertCategoryMapping({
+          ticketId: ticket.ticketId,
+          pureserviceCategory: ticket.category,
+          hjelpesenterCategory: result.hjelpesenter_category,
+          hjelpesenterSubcategory: result.hjelpesenter_subcategory,
+          confidence: result.confidence,
+          reasoning: result.reasoning,
         });
-
-        const text = response.content[0].type === "text" ? response.content[0].text : "";
-        const jsonMatch = text.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) throw new Error("No JSON in response");
-
-        return JSON.parse(jsonMatch[0]);
-      },
-      { concurrency: 2, retries: 3 }
-    );
-
-    for (let i = 0; i < unmapped.length; i++) {
-      const ticket = unmapped[i];
-      const result = results[i];
-      if (result && result.hjelpesenter_category) {
-        try {
-          await storage.insertCategoryMapping({
-            ticketId: ticket.ticketId,
-            pureserviceCategory: ticket.category,
-            hjelpesenterCategory: result.hjelpesenter_category,
-            hjelpesenterSubcategory: result.hjelpesenter_subcategory,
-            confidence: result.confidence,
-            reasoning: result.reasoning,
-          });
-          await storage.updateScrubbedTicketMapping(
-            ticket.ticketId,
-            result.hjelpesenter_category,
-            result.hjelpesenter_subcategory
-          );
-          totalMapped++;
-        } catch (err: any) {
-          totalErrors++;
-        }
-      } else {
+        await storage.updateScrubbedTicketMapping(
+          ticket.ticketId,
+          result.hjelpesenter_category,
+          result.hjelpesenter_subcategory
+        );
+        totalMapped++;
+      } catch (err: any) {
         totalErrors++;
+        log(`Category mapping error ticket ${ticket.ticketId}: ${err.message}`, "training");
       }
     }
 
-    onProgress?.(`Mapped ${totalMapped} tickets`, 50);
+    const scrubbedCount = await storage.getScrubbedTicketCount();
+    const pct = Math.round((totalMapped / Math.max(scrubbedCount, 1)) * 100);
+    onProgress?.(`Mappet ${totalMapped} tickets`, pct);
   }
 
-  onProgress?.(`Category mapping complete: ${totalMapped}, ${totalErrors} errors`, 100);
+  onProgress?.(`Kategorimapping ferdig: ${totalMapped} mappet, ${totalErrors} feil`, 100);
   return { mapped: totalMapped, errors: totalErrors };
 }
 
+// ─── WORKFLOW 4: UNCATEGORIZED TICKET ANALYSIS ───────────────────────────
+export async function runUncategorizedAnalysis(
+  onProgress?: (msg: string, pct: number) => void
+): Promise<{ themes: number; errors: number }> {
+  let totalThemes = 0;
+  let totalErrors = 0;
+
+  onProgress?.("Starter analyse av ukategoriserte tickets...", 0);
+
+  const uncategorized = await storage.getUncategorizedScrubbedTickets(100);
+
+  if (uncategorized.length === 0) {
+    onProgress?.("Ingen ukategoriserte tickets å analysere", 100);
+    return { themes: 0, errors: 0 };
+  }
+
+  onProgress?.(`Fant ${uncategorized.length} ukategoriserte tickets. Kjører klyngeanalyse...`, 20);
+
+  try {
+    const ticketSummaries = uncategorized.map((t, i) =>
+      `TICKET ${i + 1} (ID: ${t.ticketId}):\nEmne: ${t.subject || "Ingen"}\nSpørsmål: ${t.customerQuestion || "Ingen"}\nSvar: ${t.agentAnswer || "Ingen"}\n---`
+    ).join("\n");
+
+    const prompt = `Du er en ekspert på å analysere support-tickets og finne mønstre.
+
+OPPGAVE: Analyser disse ukategoriserte tickets og identifiser felles temaer/problemtyper.
+
+TICKETS:
+${ticketSummaries}
+
+INSTRUKSJONER:
+1. Identifiser felles temaer på tvers av tickets
+2. Foreslå nye kategorier hvis temaene ikke finnes i hjelpesenter
+3. Grupper tickets etter tema
+4. Vurder om noen tickets faktisk burde vært i eksisterende kategori
+
+EKSISTERENDE KATEGORIER: Min side, Eierskifte, Registrering, Produkter - QR Tag, Produkter - Smart Tag, Abonnement, Savnet/Funnet, Familiedeling, App
+
+SVAR I JSON:
+{
+  "identified_themes": [
+    {
+      "theme_name": "Tema navn",
+      "description": "Hva handler dette om?",
+      "ticket_ids": [1, 5, 12],
+      "should_be_new_category": true,
+      "suggested_existing_category": "Kategori hvis det passer eksisterende"
+    }
+  ]
+}`;
+
+    const text = await callClaude(prompt, "claude-sonnet-4-5", 8192);
+    const result = extractJson(text);
+
+    const themes = result.identified_themes || result;
+
+    for (const theme of themes) {
+      try {
+        const themeId = await storage.insertUncategorizedTheme({
+          themeName: theme.theme_name,
+          description: theme.description,
+          ticketCount: theme.ticket_ids?.length || 0,
+          ticketIds: JSON.stringify(theme.ticket_ids || []),
+          shouldBeNewCategory: theme.should_be_new_category || false,
+          suggestedExistingCategory: theme.suggested_existing_category || null,
+        });
+
+        await storage.insertReviewQueueItem({
+          reviewType: "uncategorized_theme",
+          referenceId: themeId,
+          priority: "medium",
+          data: theme,
+        });
+
+        totalThemes++;
+      } catch (err: any) {
+        totalErrors++;
+        log(`Theme storage error: ${err.message}`, "training");
+      }
+    }
+
+    for (const ticket of uncategorized) {
+      await storage.updateScrubbedTicketAnalysis(ticket.ticketId, "analyzed");
+    }
+  } catch (err: any) {
+    totalErrors++;
+    log(`Cluster analysis error: ${err.message}`, "training");
+    onProgress?.(`Feil i klyngeanalyse: ${err.message}`, -1);
+  }
+
+  onProgress?.(`Analyse ferdig: ${totalThemes} temaer identifisert, ${totalErrors} feil`, 100);
+  return { themes: totalThemes, errors: totalErrors };
+}
+
+// ─── WORKFLOW 5: INTENT CLASSIFICATION ───────────────────────────────────
 export async function runIntentClassification(
   onProgress?: (msg: string, pct: number) => void
 ): Promise<{ classified: number; errors: number }> {
@@ -210,16 +357,19 @@ export async function runIntentClassification(
   let totalClassified = 0;
   let totalErrors = 0;
 
-  onProgress?.("Starting intent classification...", 0);
+  onProgress?.("Starter intent-klassifisering...", 0);
+
+  const intentsStr = KNOWN_INTENTS.map((i) => `- ${i}`).join("\n");
 
   while (true) {
     const unclassified = await storage.getUnclassifiedScrubbedTickets(batchSize);
     if (unclassified.length === 0) break;
 
-    const results = await batchProcess(
-      unclassified,
-      async (ticket) => {
-        const prompt = `Du er en AI-ekspert for DyreID support. Analyser denne ticketen og identifiser kundens intent, nødvendig handling, og om saken kan løses automatisk.
+    for (const ticket of unclassified) {
+      try {
+        const prompt = `Du er en support intent classifier for DyreID.
+
+OPPGAVE: Klassifiser intent for denne ticketen basert på dialog.
 
 TICKET:
 Kategori: ${ticket.hjelpesenterCategory || ticket.category || "Ukjent"}
@@ -229,89 +379,72 @@ Kundespørsmål: ${ticket.customerQuestion || "Ingen"}
 Agentsvar: ${ticket.agentAnswer || "Ingen"}
 Løsning: ${ticket.resolution || "Ingen"}
 
-KJENTE INTENTS:
-- OwnershipTransfer (eierskifte)
-- RegistrationPayment (registreringsbetaling)
-- RegistrationInactive (registrering ikke aktiv)
-- QRTagActivation (aktivere QR-brikke)
-- QRTagLost (mistet QR-brikke)
-- SmartTagConnection (Smart Tag tilkobling)
-- LostPetReport (melde dyr savnet)
-- FoundPet (dyr funnet igjen)
-- ProfileUpdate (oppdatere profil)
-- LoginHelp (hjelp med innlogging)
-- SubscriptionManagement (abonnement)
-- FamilySharing (familiedeling)
-- ForeignRegistration (utenlandsregistrering)
-- AnimalDeceased (dyr død)
-- GDPRRequest (GDPR forespørsel)
-- AppSupport (app-hjelp)
-- GeneralInquiry (generelt spørsmål)
+KJENTE INTENTS (bruk disse hvis mulig):
+${intentsStr}
 
-Svar i JSON:
+INSTRUKSJONER:
+1. Analyser hva kunden faktisk ønsker å oppnå
+2. Klassifiser til en av kjente intents ELLER foreslå ny intent
+3. Ekstraher nøkkelord som trigger denne intent
+4. Identifiser hvilke runtime-data som trengs
+5. Identifiser hvilken action som løste saken
+
+SVAR I JSON:
 {
-  "intent": "IntentName",
+  "intent": "Intent name",
   "intent_confidence": 0.0-1.0,
   "is_new_intent": false,
-  "keywords": "nøkkelord1, nøkkelord2",
-  "required_runtime_data": "owner_profile, animals, tags",
-  "required_action": "kort beskrivelse av handling",
-  "action_endpoint": "/api/endpoint",
+  "keywords": "keyword1, keyword2",
+  "required_runtime_data": "PetId, PaymentStatus",
+  "required_action": "Send betalingslink",
+  "action_endpoint": "POST /Registration/PaymentLink",
   "payment_required": false,
   "auto_close_possible": false,
-  "reasoning": "kort begrunnelse"
+  "reasoning": "Why this classification?"
 }`;
 
-        const response = await anthropic.messages.create({
-          model: "claude-haiku-4-5",
-          max_tokens: 8192,
-          messages: [{ role: "user", content: prompt }],
+        const text = await callClaude(prompt);
+        const result = extractJson(text);
+
+        await storage.insertIntentClassification({
+          ticketId: ticket.ticketId,
+          intent: result.intent,
+          intentConfidence: result.intent_confidence,
+          isNewIntent: result.is_new_intent || false,
+          keywords: result.keywords,
+          requiredRuntimeData: result.required_runtime_data,
+          requiredAction: result.required_action,
+          actionEndpoint: result.action_endpoint,
+          paymentRequired: result.payment_required || false,
+          autoClosePossible: result.auto_close_possible || false,
+          reasoning: result.reasoning,
         });
+        await storage.updateScrubbedTicketAnalysis(ticket.ticketId, "classified");
 
-        const text = response.content[0].type === "text" ? response.content[0].text : "";
-        const jsonMatch = text.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) throw new Error("No JSON in response");
-
-        return JSON.parse(jsonMatch[0]);
-      },
-      { concurrency: 2, retries: 3 }
-    );
-
-    for (let i = 0; i < unclassified.length; i++) {
-      const ticket = unclassified[i];
-      const result = results[i];
-      if (result && result.intent) {
-        try {
-          await storage.insertIntentClassification({
-            ticketId: ticket.ticketId,
-            intent: result.intent,
-            intentConfidence: result.intent_confidence,
-            isNewIntent: result.is_new_intent || false,
-            keywords: result.keywords,
-            requiredRuntimeData: result.required_runtime_data,
-            requiredAction: result.required_action,
-            actionEndpoint: result.action_endpoint,
-            paymentRequired: result.payment_required || false,
-            autoClosePossible: result.auto_close_possible || false,
-            reasoning: result.reasoning,
+        if (result.is_new_intent) {
+          await storage.insertReviewQueueItem({
+            reviewType: "new_intent",
+            referenceId: ticket.ticketId,
+            priority: "high",
+            data: result,
           });
-          await storage.updateScrubbedTicketAnalysis(ticket.ticketId, "classified");
-          totalClassified++;
-        } catch (err: any) {
-          totalErrors++;
         }
-      } else {
+
+        totalClassified++;
+      } catch (err: any) {
         totalErrors++;
+        log(`Intent classification error ticket ${ticket.ticketId}: ${err.message}`, "training");
       }
     }
 
-    onProgress?.(`Classified ${totalClassified} tickets`, 50);
+    onProgress?.(`Klassifisert ${totalClassified} tickets`, 50);
   }
 
-  onProgress?.(`Intent classification complete: ${totalClassified}, ${totalErrors} errors`, 100);
+  onProgress?.(`Intent-klassifisering ferdig: ${totalClassified}, ${totalErrors} feil`, 100);
   return { classified: totalClassified, errors: totalErrors };
 }
 
+// ─── WORKFLOW 6: RESOLUTION EXTRACTION ───────────────────────────────────
 export async function runResolutionExtraction(
   onProgress?: (msg: string, pct: number) => void
 ): Promise<{ extracted: number; errors: number }> {
@@ -319,7 +452,7 @@ export async function runResolutionExtraction(
   let totalExtracted = 0;
   let totalErrors = 0;
 
-  onProgress?.("Starting resolution extraction...", 0);
+  onProgress?.("Starter løsningsekstraksjon...", 0);
 
   while (true) {
     const unextracted = await storage.getClassifiedTicketsWithoutResolution(batchSize);
@@ -327,47 +460,49 @@ export async function runResolutionExtraction(
 
     for (const classification of unextracted) {
       try {
-        const prompt = `Du er en AI-ekspert for DyreID. Basert på denne klassifiserte ticketen, ekstraher løsningsmønsteret.
+        const prompt = `Du er en ekspert på å ekstrahere løsningssteg fra support-dialog.
+
+OPPGAVE: Analyser dialogen og ekstraher steg-for-steg løsning.
 
 TICKET:
 Intent: ${classification.intent}
 Handling: ${classification.requiredAction || "Ukjent"}
 Endepunkt: ${classification.actionEndpoint || "Ukjent"}
+Nøkkelord: ${classification.keywords || ""}
+Runtime-data: ${classification.requiredRuntimeData || ""}
 Betaling: ${classification.paymentRequired ? "Ja" : "Nei"}
-Auto-lukking: ${classification.autoClosePossible ? "Ja" : "Nei"}
 Begrunnelse: ${classification.reasoning || ""}
 
-Svar i JSON:
+INSTRUKSJONER:
+1. Identifiser hva kunden trengte
+2. Identifiser hva agenten gjorde
+3. Ekstraher stegene i løsningen
+4. Identifiser hvilke data som ble hentet
+5. Identifiser handlinger som ble utført
+
+SVAR I JSON:
 {
-  "customer_need": "kort beskrivelse av kundens behov",
-  "data_gathered": "hvilke data som trengs fra kunde/system",
-  "resolution_steps": "steg 1, steg 2, steg 3",
-  "success_indicators": "hvordan vet vi at saken er løst",
+  "customer_need": "What did customer want to achieve?",
+  "data_gathered": "from_customer: mobilnr, dyrenavn; from_system: PetId, PaymentStatus",
+  "resolution_steps": "1. Verifiser identitet via OTP; 2. Hent dyrprofil; 3. Utfør handling",
+  "success_indicators": "Betaling fullført, Dyr nå søkbart",
   "follow_up_needed": false
 }`;
 
-        const response = await anthropic.messages.create({
-          model: "claude-haiku-4-5",
-          max_tokens: 8192,
-          messages: [{ role: "user", content: prompt }],
-        });
-
-        const text = response.content[0].type === "text" ? response.content[0].text : "";
-        const jsonMatch = text.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) continue;
-
-        const result = JSON.parse(jsonMatch[0]);
+        const text = await callClaude(prompt);
+        const result = extractJson(text);
 
         await storage.insertResolutionPattern({
           ticketId: classification.ticketId,
           intent: classification.intent,
           customerNeed: result.customer_need,
-          dataGathered: result.data_gathered,
-          resolutionSteps: result.resolution_steps,
-          successIndicators: result.success_indicators,
+          dataGathered: typeof result.data_gathered === "object" ? JSON.stringify(result.data_gathered) : result.data_gathered,
+          resolutionSteps: typeof result.resolution_steps === "object" ? JSON.stringify(result.resolution_steps) : result.resolution_steps,
+          successIndicators: typeof result.success_indicators === "object" ? JSON.stringify(result.success_indicators) : result.success_indicators,
           followUpNeeded: result.follow_up_needed || false,
         });
 
+        await storage.markResolutionExtracted(classification.ticketId);
         totalExtracted++;
       } catch (err: any) {
         totalErrors++;
@@ -375,19 +510,109 @@ Svar i JSON:
       }
     }
 
-    onProgress?.(`Extracted ${totalExtracted} resolution patterns`, 50);
+    onProgress?.(`Ekstrahert ${totalExtracted} løsningsmønstre`, 50);
   }
 
-  onProgress?.(`Resolution extraction complete: ${totalExtracted}, ${totalErrors} errors`, 100);
+  onProgress?.(`Løsningsekstraksjon ferdig: ${totalExtracted}, ${totalErrors} feil`, 100);
   return { extracted: totalExtracted, errors: totalErrors };
 }
 
+// ─── WORKFLOW 7: UNCERTAINTY DETECTOR ────────────────────────────────────
+export async function runUncertaintyDetection(
+  onProgress?: (msg: string, pct: number) => void
+): Promise<{ detected: number; errors: number }> {
+  let totalDetected = 0;
+  let totalErrors = 0;
+
+  onProgress?.("Starter usikkerhetsdeteksjon...", 0);
+
+  const lowConfidence = await storage.getLowConfidenceClassifications(100);
+
+  if (lowConfidence.length === 0) {
+    onProgress?.("Ingen usikre klassifiseringer å analysere", 100);
+    return { detected: 0, errors: 0 };
+  }
+
+  onProgress?.(`Fant ${lowConfidence.length} usikre klassifiseringer. Analyserer...`, 10);
+
+  for (let i = 0; i < lowConfidence.length; i++) {
+    const classification = lowConfidence[i];
+
+    try {
+      const prompt = `Du er en kvalitetskontrollør for support intent classification.
+
+OPPGAVE: Analyser hvorfor denne klassifiseringen har lav confidence.
+
+TICKET:
+Intent: ${classification.intent}
+Confidence: ${classification.intentConfidence}
+Er ny intent: ${classification.isNewIntent ? "Ja" : "Nei"}
+Nøkkelord: ${classification.keywords || "Ingen"}
+Handling: ${classification.requiredAction || "Ingen"}
+Begrunnelse: ${classification.reasoning || "Ingen"}
+
+INSTRUKSJONER:
+Identifiser hva som gjør denne saken vanskelig:
+- Mangler context?
+- Flertydig spørsmål?
+- Ukjent problemtype?
+- Kompleks case?
+- Dårlig dokumentert løsning?
+
+SVAR I JSON:
+{
+  "uncertainty_type": "missing_context | ambiguous | unknown_problem | complex | poor_documentation",
+  "missing_information": "What info would help?",
+  "suggested_questions_to_ask": "Questions that would clarify",
+  "needs_human_review": true,
+  "review_priority": "low | medium | high"
+}`;
+
+      const text = await callClaude(prompt);
+      const result = extractJson(text);
+
+      await storage.insertUncertaintyCase({
+        ticketId: classification.ticketId,
+        uncertaintyType: result.uncertainty_type,
+        missingInformation: typeof result.missing_information === "object" ? JSON.stringify(result.missing_information) : result.missing_information,
+        suggestedQuestions: typeof result.suggested_questions_to_ask === "object" ? JSON.stringify(result.suggested_questions_to_ask) : result.suggested_questions_to_ask,
+        needsHumanReview: result.needs_human_review !== false,
+        reviewPriority: result.review_priority || "medium",
+      });
+
+      if (result.needs_human_review !== false) {
+        await storage.insertReviewQueueItem({
+          reviewType: "uncertain_classification",
+          referenceId: classification.ticketId,
+          priority: result.review_priority || "medium",
+          data: { ...result, intent: classification.intent, confidence: classification.intentConfidence },
+        });
+      }
+
+      totalDetected++;
+    } catch (err: any) {
+      totalErrors++;
+      log(`Uncertainty detection error: ${err.message}`, "training");
+    }
+
+    const pct = Math.round(((i + 1) / lowConfidence.length) * 100);
+    onProgress?.(`Analysert ${i + 1} av ${lowConfidence.length} usikre cases`, pct);
+  }
+
+  onProgress?.(`Usikkerhetsdeteksjon ferdig: ${totalDetected} oppdaget, ${totalErrors} feil`, 100);
+  return { detected: totalDetected, errors: totalErrors };
+}
+
+// ─── WORKFLOW 8: PLAYBOOK BUILDER ────────────────────────────────────────
 export async function runPlaybookGeneration(
   onProgress?: (msg: string, pct: number) => void
 ): Promise<{ entries: number }> {
-  onProgress?.("Generating playbook from classified intents and resolutions...", 0);
+  onProgress?.("Genererer playbook fra klassifiserte intents og løsninger...", 0);
 
-  const prompt = `Du er en AI-ekspert for DyreID. Basert på dine kunnskaper om kjæledyrregistrering i Norge, generer en Support Playbook med entries for alle kjente support-intents.
+  const categories = await storage.getHjelpesenterCategories();
+  const categoryNames = [...new Set(categories.map((c) => c.categoryName))].join(", ");
+
+  const prompt = `Du er en AI-ekspert for DyreID. Basert på dine kunnskaper om kjæledyrregistrering i Norge, generer en komplett Support Playbook med entries for alle kjente support-intents.
 
 For hvert intent, generer en playbook entry med:
 - intent: IntentName
@@ -403,29 +628,29 @@ For hvert intent, generer en playbook entry med:
 - auto_close_probability: 0.0-1.0
 
 INTENTS:
-OwnershipTransfer, RegistrationPayment, RegistrationInactive, QRTagActivation, QRTagLost, SmartTagConnection, LostPetReport, FoundPet, ProfileUpdate, LoginHelp, SubscriptionManagement, FamilySharing, ForeignRegistration, AnimalDeceased, GDPRRequest, AppSupport, GeneralInquiry
+${KNOWN_INTENTS.join(", ")}
 
 KATEGORIER:
-Min side, Eierskifte, Registrering, Produkter - QR Tag, Produkter - Smart Tag, Abonnement, Savnet/Funnet, Familiedeling, App
+${categoryNames}
 
 Svar som JSON-array av entries.`;
 
-  const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-5",
-    max_tokens: 8192,
-    messages: [{ role: "user", content: prompt }],
-  });
+  onProgress?.("Sender forespørsel til AI...", 20);
 
-  const text = response.content[0].type === "text" ? response.content[0].text : "";
-  const jsonMatch = text.match(/\[[\s\S]*\]/);
-  if (!jsonMatch) {
-    onProgress?.("Failed to generate playbook", 100);
+  const text = await callClaude(prompt, "claude-sonnet-4-5", 8192);
+
+  let entries: any[];
+  try {
+    entries = extractJson(text);
+    if (!Array.isArray(entries)) entries = [entries];
+  } catch {
+    onProgress?.("Feil: Kunne ikke parse playbook fra AI-respons", 100);
     return { entries: 0 };
   }
 
-  const entries = JSON.parse(jsonMatch[0]);
-  let count = 0;
+  onProgress?.(`Mottatt ${entries.length} entries. Lagrer...`, 60);
 
+  let count = 0;
   for (const entry of entries) {
     try {
       await storage.upsertPlaybookEntry({
@@ -449,6 +674,43 @@ Svar som JSON-array av entries.`;
     }
   }
 
-  onProgress?.(`Playbook generated: ${count} entries`, 100);
+  onProgress?.(`Playbook generert: ${count} entries`, 100);
   return { entries: count };
+}
+
+// ─── WORKFLOW 9: MANUAL REVIEW HANDLER ───────────────────────────────────
+export async function submitManualReview(
+  queueId: number,
+  reviewerEmail: string,
+  decision: {
+    approved: boolean;
+    correctIntent?: string;
+    correctCategory?: string;
+    notes?: string;
+    addToPlaybook?: boolean;
+  }
+): Promise<{ success: boolean; message: string }> {
+  try {
+    const decisionStr = JSON.stringify(decision);
+    await storage.submitReview(queueId, reviewerEmail, decisionStr);
+
+    if (decision.approved && decision.correctIntent) {
+      const reviewItems = await storage.getPendingReviewItems();
+      const item = reviewItems.find((r) => r.id === queueId);
+
+      if (item && item.referenceId) {
+        await storage.updateIntentClassificationReview(item.referenceId, {
+          intent: decision.correctIntent,
+          manuallyReviewed: true,
+          reviewerEmail,
+          reviewNotes: decision.notes || "",
+          uncertaintyReviewed: true,
+        });
+      }
+    }
+
+    return { success: true, message: "Review lagret" };
+  } catch (err: any) {
+    return { success: false, message: err.message };
+  }
 }
