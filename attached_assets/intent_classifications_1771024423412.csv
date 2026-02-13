@@ -1,0 +1,1 @@
+ticket_id,intent,intent_confidence,is_new_intent,keywords,required_runtime_data,required_action,action_endpoint,payment_required,auto_close_possible,reasoning,classified_at,resolution_extracted,manually_reviewed,reviewer_email,review_notes,reviewed_at,uncertainty_reviewed
