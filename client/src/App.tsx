@@ -17,14 +17,16 @@ import {
   SidebarMenuItem,
   SidebarMenuButton,
 } from "@/components/ui/sidebar";
-import { LayoutDashboard, MessageSquare, BookOpen } from "lucide-react";
+import { LayoutDashboard, MessageSquare, Settings } from "lucide-react";
 import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/dashboard";
 import Chatbot from "@/pages/chatbot";
+import AdminPanel from "@/pages/admin";
 
 const navItems = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
   { title: "Chatbot", url: "/chat", icon: MessageSquare },
+  { title: "Admin", url: "/admin", icon: Settings },
 ];
 
 function AppSidebar() {
@@ -60,6 +62,7 @@ function Router() {
     <Switch>
       <Route path="/" component={Dashboard} />
       <Route path="/chat" component={Chatbot} />
+      <Route path="/admin" component={AdminPanel} />
       <Route component={NotFound} />
     </Switch>
   );

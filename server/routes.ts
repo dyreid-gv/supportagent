@@ -1,6 +1,8 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { z } from "zod";
+import { count } from "drizzle-orm";
+import { db } from "./db";
 import { storage } from "./storage";
 import { streamChatResponse } from "./chatbot";
 import { getMinSideContext, lookupOwnerByPhone, getAllSandboxPhones, performAction } from "./minside-sandbox";
@@ -15,6 +17,19 @@ import {
   runPlaybookGeneration,
   submitManualReview,
 } from "./training-agent";
+import {
+  rawTickets,
+  scrubbedTickets,
+  hjelpesenterCategories as hjelpesenterCategoriesTable,
+  categoryMappings,
+  intentClassifications,
+  resolutionPatterns,
+  playbookEntries,
+  uncategorizedThemes,
+  uncertaintyCases,
+  reviewQueue as reviewQueueTable,
+  trainingRuns,
+} from "@shared/schema";
 import fs from "fs";
 import path from "path";
 
@@ -478,6 +493,113 @@ export async function registerRoutes(
     res.json(getAllSandboxPhones());
   });
 
+  // ─── ADMIN EXPORT ENDPOINTS ─────────────────────────────────────
+  const tableMap: Record<string, any> = {
+    raw_tickets: rawTickets,
+    scrubbed_tickets: scrubbedTickets,
+    hjelpesenter_categories: hjelpesenterCategoriesTable,
+    category_mappings: categoryMappings,
+    intent_classifications: intentClassifications,
+    resolution_patterns: resolutionPatterns,
+    playbook_entries: playbookEntries,
+    uncategorized_themes: uncategorizedThemes,
+    uncertainty_cases: uncertaintyCases,
+    review_queue: reviewQueueTable,
+    training_runs: trainingRuns,
+  };
+
+  app.get("/api/admin/tables", async (_req, res) => {
+    try {
+      const stats = await storage.getTrainingStats();
+      const tables = [];
+      for (const [name, table] of Object.entries(tableMap)) {
+        const result = await db.select({ count: count() }).from(table);
+        tables.push({ name, rows: result[0].count });
+      }
+      res.json({ tables, stats });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/admin/export/:table", async (req, res) => {
+    try {
+      const tableName = req.params.table;
+      const format = req.query.format || "json";
+      const table = tableMap[tableName];
+      if (!table) {
+        return res.status(404).json({ error: `Tabell '${tableName}' finnes ikke` });
+      }
+
+      const rows = await db.select().from(table);
+
+      if (format === "csv") {
+        if (rows.length === 0) {
+          res.setHeader("Content-Type", "text/csv; charset=utf-8");
+          res.setHeader("Content-Disposition", `attachment; filename="${tableName}.csv"`);
+          return res.send("");
+        }
+        const headers = Object.keys(rows[0]);
+        const csvLines = [headers.join(",")];
+        for (const row of rows) {
+          const values = headers.map((h) => {
+            const val = (row as any)[h];
+            if (val === null || val === undefined) return "";
+            const str = typeof val === "object" ? JSON.stringify(val) : String(val);
+            if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+              return `"${str.replace(/"/g, '""')}"`;
+            }
+            return str;
+          });
+          csvLines.push(values.join(","));
+        }
+        res.setHeader("Content-Type", "text/csv; charset=utf-8");
+        res.setHeader("Content-Disposition", `attachment; filename="${tableName}.csv"`);
+        return res.send(csvLines.join("\n"));
+      }
+
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="${tableName}.json"`);
+      res.json(rows);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/admin/export-all", async (_req, res) => {
+    try {
+      const allData: Record<string, any[]> = {};
+      for (const [name, table] of Object.entries(tableMap)) {
+        allData[name] = await db.select().from(table);
+      }
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="dyreid_full_export.json"`);
+      res.json(allData);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/admin/schema", async (_req, res) => {
+    try {
+      const schemaInfo = Object.entries(tableMap).map(([name]) => {
+        const tableConfig = tableMap[name];
+        const columns = Object.entries(tableConfig).filter(([key]) => !key.startsWith("_")).map(([key, col]: [string, any]) => ({
+          name: key,
+          dbName: col?.name || key,
+          dataType: col?.dataType || "unknown",
+          notNull: col?.notNull || false,
+          hasDefault: col?.hasDefault || false,
+        }));
+        return { tableName: name, columns };
+      });
+      res.json(schemaInfo);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ─── SEED TEST DATA ─────────────────────────────────────────────
   app.post("/api/training/seed-test-data", async (req, res) => {
     try {
       const count = req.body?.count || 100;
