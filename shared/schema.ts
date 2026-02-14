@@ -74,6 +74,12 @@ export const categoryMappings = pgTable("category_mappings", {
   confidence: real("confidence"),
   reasoning: text("reasoning"),
   mappedAt: timestamp("mapped_at").default(sql`CURRENT_TIMESTAMP`),
+  needsReclassification: boolean("needs_reclassification").default(false),
+  originalCategory: text("original_category"),
+  reclassifiedCategory: text("reclassified_category"),
+  reclassifiedSubcategory: text("reclassified_subcategory"),
+  reclassificationConfidence: real("reclassification_confidence"),
+  reclassificationReasoning: text("reclassification_reasoning"),
 });
 
 export const intentClassifications = pgTable("intent_classifications", {

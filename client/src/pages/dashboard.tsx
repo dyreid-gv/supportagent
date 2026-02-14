@@ -41,6 +41,8 @@ import {
   Link2,
   Users,
   ArrowRight,
+  Shuffle,
+  Lightbulb,
 } from "lucide-react";
 import { useState, useCallback } from "react";
 import {
@@ -688,6 +690,18 @@ export default function Dashboard() {
     queryKey: ["/api/training/dialog-pattern-stats"],
   });
 
+  const { data: reclassStats } = useQuery<{
+    totalGeneral: number;
+    reclassified: number;
+    remainGeneral: number;
+    unprocessed: number;
+    avgConfidence: number;
+    byCategory: { category: string; subcategory: string | null; count: number; avgConfidence: number }[];
+    trulyGeneral: { subject: string; reasoning: string }[];
+  }>({
+    queryKey: ["/api/training/reclassification-stats"],
+  });
+
   const [editingPrice, setEditingPrice] = useState<ServicePrice | null>(null);
   const [addingPrice, setAddingPrice] = useState(false);
   const [seedingPrices, setSeedingPrices] = useState(false);
@@ -705,7 +719,7 @@ export default function Dashboard() {
             DyreID Training Agent
           </h1>
           <p className="text-sm text-muted-foreground">
-            10-stegs treningspipeline for support-automatisering
+            11-stegs treningspipeline for support-automatisering
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -792,6 +806,9 @@ export default function Dashboard() {
           </TabsTrigger>
           <TabsTrigger value="dialog-patterns" data-testid="tab-dialog-patterns">
             Dialog-mønstre ({dialogPatternStats?.total || 0})
+          </TabsTrigger>
+          <TabsTrigger value="reclassification" data-testid="tab-reclassification">
+            Reklassifisering ({reclassStats?.reclassified || 0})
           </TabsTrigger>
         </TabsList>
 
@@ -886,6 +903,13 @@ export default function Dashboard() {
               </CardContent>
             </Card>
             <DialogPatternPipelineCard />
+            <WorkflowCard
+              step={11}
+              title="Reklassifisering"
+              description="Reklassifiser 'Generell e-post' til korrekte standardkategorier via AI"
+              endpoint="/api/training/reclassify"
+              icon={Shuffle}
+            />
           </div>
           <Card className="mt-4 border-primary/30">
             <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
@@ -1605,6 +1629,10 @@ export default function Dashboard() {
 
         <TabsContent value="dialog-patterns" className="mt-4">
           <DialogPatternTab stats={dialogPatternStats} />
+        </TabsContent>
+
+        <TabsContent value="reclassification" className="mt-4">
+          <ReclassificationTab stats={reclassStats} />
         </TabsContent>
       </Tabs>
     </div>
@@ -2451,6 +2479,198 @@ function DialogPatternTab({ stats }: {
           <CardContent className="py-8 text-center">
             <Layers className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
             <p className="text-sm text-muted-foreground">Ingen dialog-mønstre analysert ennå. Klikk "Kjør full analyse" for å kjøre alle 3 steg automatisk.</p>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function ReclassificationTab({ stats }: {
+  stats: {
+    totalGeneral: number;
+    reclassified: number;
+    remainGeneral: number;
+    unprocessed: number;
+    avgConfidence: number;
+    byCategory: { category: string; subcategory: string | null; count: number; avgConfidence: number }[];
+    trulyGeneral: { subject: string; reasoning: string }[];
+  } | undefined;
+}) {
+  const { isRunning, progress, logs, error, run } = useSSEWorkflow("/api/training/reclassify");
+
+  const totalProcessed = (stats?.reclassified || 0) + (stats?.remainGeneral || 0);
+  const pctReclassified = totalProcessed > 0 ? ((stats?.reclassified || 0) / totalProcessed * 100).toFixed(1) : "0";
+
+  const topCategory = stats?.byCategory?.[0]?.category || "-";
+  const topCategoryCount = stats?.byCategory?.[0]?.count || 0;
+  const secondCategory = stats?.byCategory?.[1]?.category;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3 flex-wrap">
+        <Button
+          data-testid="button-run-reclassify"
+          onClick={() => {
+            run();
+            setTimeout(() => {
+              queryClient.invalidateQueries({ queryKey: ["/api/training/reclassification-stats"] });
+            }, 3000);
+          }}
+          disabled={isRunning}
+          size="sm"
+        >
+          {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Shuffle className="h-4 w-4" />}
+          {isRunning ? "Reklassifiserer..." : "Kjør reklassifisering"}
+        </Button>
+        {stats?.unprocessed !== undefined && stats.unprocessed > 0 && (
+          <Badge variant="secondary">{stats.unprocessed} ubehandlet</Badge>
+        )}
+        {isRunning && <Progress value={progress} className="flex-1 min-w-[200px]" />}
+      </div>
+
+      {error && (
+        <div className="flex items-center gap-1 text-xs text-destructive">
+          <AlertCircle className="h-3 w-3 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {logs.length > 0 && (
+        <ScrollArea className="h-[120px] border rounded-md p-2">
+          {logs.map((l, i) => (
+            <p key={i} className="text-xs text-muted-foreground">{l}</p>
+          ))}
+        </ScrollArea>
+      )}
+
+      <div className="grid gap-3 md:grid-cols-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Generelle funnet</CardTitle>
+            <Search className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold" data-testid="text-reclass-total">{stats?.totalGeneral || 0}</div>
+            <p className="text-xs text-muted-foreground">tickets kategorisert som generell</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Reklassifisert</CardTitle>
+            <CheckCircle className="h-4 w-4 text-green-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-600" data-testid="text-reclass-done">{stats?.reclassified || 0}</div>
+            <p className="text-xs text-muted-foreground">{pctReclassified}% av behandlede</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Forblir generell</CardTitle>
+            <AlertTriangle className="h-4 w-4 text-yellow-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-yellow-600" data-testid="text-reclass-remain">{stats?.remainGeneral || 0}</div>
+            <p className="text-xs text-muted-foreground">virkelig generelle henvendelser</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Snitt confidence</CardTitle>
+            <Brain className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold" data-testid="text-reclass-confidence">
+              {stats?.avgConfidence ? `${(stats.avgConfidence * 100).toFixed(0)}%` : "0%"}
+            </div>
+            <p className="text-xs text-muted-foreground">gjennomsnittlig AI-sikkerhet</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {stats && stats.byCategory.length > 0 && (
+        <>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Reklassifiserings-fordeling</CardTitle>
+              <p className="text-xs text-muted-foreground">Hva "Generell e-post" faktisk inneholder</p>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {stats.byCategory.map((cat) => {
+                const pct = stats.reclassified > 0 ? (cat.count / stats.reclassified) * 100 : 0;
+                return (
+                  <div key={`${cat.category}-${cat.subcategory}`} className="space-y-1">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">{cat.category}</span>
+                        {cat.subcategory && (
+                          <Badge variant="outline" className="no-default-hover-elevate no-default-active-elevate text-xs">{cat.subcategory}</Badge>
+                        )}
+                      </div>
+                      <span className="text-sm text-muted-foreground">
+                        {cat.count} tickets ({pct.toFixed(1)}%) - snitt {(cat.avgConfidence * 100).toFixed(0)}% confidence
+                      </span>
+                    </div>
+                    <Progress value={pct} className="h-2" />
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
+
+          {topCategory !== "-" && (
+            <Card className="border-primary/30">
+              <CardContent className="py-4">
+                <div className="flex items-start gap-3">
+                  <Lightbulb className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium">Innsikt</p>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      {pctReclassified}% av "Generell e-post" handler egentlig om spesifikke temaer.
+                      Topp-kategori: <span className="font-medium text-foreground">{topCategory}</span> ({topCategoryCount} tickets)
+                      {secondCategory && <>, etterfulgt av <span className="font-medium text-foreground">{secondCategory}</span></>}.
+                      Forbedr routing ved å legge til relevante nøkkelord i e-post-parser for automatisk kategorisering.
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </>
+      )}
+
+      {stats && stats.trulyGeneral.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-yellow-500" />
+              Virkelig generelle henvendelser
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">Disse kunne ikke reklassifiseres (confidence &lt; 0.6)</p>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {stats.trulyGeneral.map((item, i) => (
+                <div key={i} className="flex items-start gap-3 py-2 border-b last:border-0">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{item.subject || "Uten emne"}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{item.reasoning}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {(!stats || (stats.totalGeneral === 0 && stats.reclassified === 0)) && !isRunning && (
+        <Card>
+          <CardContent className="py-8 text-center">
+            <Shuffle className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
+            <p className="text-sm text-muted-foreground">
+              Ingen reklassifiseringsdata ennå. Kjør kategori-mapping (steg 3) først, og deretter reklassifisering for å analysere generelle tickets.
+            </p>
           </CardContent>
         </Card>
       )}

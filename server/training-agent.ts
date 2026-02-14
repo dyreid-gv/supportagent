@@ -1617,3 +1617,120 @@ Svar med JSON: {"tickets": [{"ticket_id":12345,"hjelpesenter_category":"Min Side
 
   return { metrics };
 }
+
+export async function runReclassification(
+  onProgress?: (message: string, percent: number) => void,
+  ticketLimit?: number
+): Promise<{ metrics: BatchMetrics }> {
+  const metrics = createMetrics();
+
+  onProgress?.("Identifiserer generelle tickets...", 5);
+  const generalCount = await storage.identifyGeneralTickets();
+  onProgress?.(`Fant ${generalCount} generelle tickets. Henter ubehandlede...`, 10);
+
+  const limit = ticketLimit || 1000;
+  const tickets = await storage.getTicketsForReclassification(limit);
+  metrics.totalTickets = tickets.length;
+
+  if (tickets.length === 0) {
+    onProgress?.("Ingen tickets trenger reklassifisering (alle er allerede behandlet).", 100);
+    finalizeMetrics(metrics);
+    return { metrics };
+  }
+
+  onProgress?.(`Reklassifiserer ${tickets.length} tickets med AI...`, 15);
+
+  const BATCH_SIZE = 5;
+  const batches: any[][] = [];
+  for (let i = 0; i < tickets.length; i += BATCH_SIZE) {
+    batches.push(tickets.slice(i, i + BATCH_SIZE));
+  }
+
+  let processed = 0;
+  let reclassified = 0;
+  let remainGeneral = 0;
+
+  for (const batch of batches) {
+    const results = await Promise.all(
+      batch.map(async (ticket: any) => {
+        const prompt = `Denne support-saken kom inn som "${ticket.originalCategory || 'Generell e-post'}", men handler kanskje om noe mer spesifikt.
+
+SAKEN:
+Subject: ${ticket.subject || 'Ingen subject'}
+Kundens spørsmål: ${(ticket.customerQuestion || '').substring(0, 1500)}
+Agentens svar: ${(ticket.agentAnswer || 'Ingen svar').substring(0, 1500)}
+
+TILGJENGELIGE KATEGORIER (velg én):
+1. Min Side - Innlogging, profil, passord, tilgang, BankID
+2. Eierskifte - Overføring av eierskap mellom personer
+3. Registrering - Registrere nytt dyr, chip, søkbart register
+4. QR Tag - QR-tag bestilling, aktivering, bruk
+5. Smart Tag - GPS-tag for sporing
+6. Abonnement - Premium, fornyelse, betaling
+7. Savnet/Funnet - Melde dyr savnet eller funnet
+8. Familiedeling - Dele tilgang mellom familiemedlemmer
+9. App - DyreID+ app, nedlasting, bruk
+
+VIKTIG:
+- Analyser både spørsmål OG svar for å finne riktig kategori
+- Hvis saken tydelig handler om én kategori, sett confidence høyt (0.8-1.0)
+- Hvis usikker mellom 2-3 kategorier, sett confidence lavt (0.5-0.7)
+- Hvis VIRKELIG generell/ikke-spesifikk, sett actualCategory til null (confidence < 0.5)
+
+Return JSON: {"actualCategory":"kategori-navn eller null","actualSubcategory":"underkategori eller null","confidence":0.0-1.0,"reasoning":"Kort forklaring"}`;
+
+        try {
+          const text = await callOpenAI(prompt, "gpt-5-nano", 1024, true);
+          metrics.apiCalls++;
+          metrics.estimatedInputTokens += prompt.length / 4;
+          metrics.estimatedOutputTokens += 100;
+          metrics.estimatedCostUsd += 0.0002;
+
+          const parsed = JSON.parse(text);
+          return {
+            mappingId: ticket.mappingId,
+            actualCategory: parsed.actualCategory || null,
+            actualSubcategory: parsed.actualSubcategory || null,
+            confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0,
+            reasoning: parsed.reasoning || 'Ukjent',
+          };
+        } catch (e) {
+          metrics.errors++;
+          return {
+            mappingId: ticket.mappingId,
+            actualCategory: null,
+            actualSubcategory: null,
+            confidence: 0,
+            reasoning: 'Parsing error',
+          };
+        }
+      })
+    );
+
+    for (const result of results) {
+      const isReclassified = result.actualCategory && result.confidence >= 0.6;
+      await storage.updateReclassification(result.mappingId, {
+        reclassifiedCategory: isReclassified ? result.actualCategory : null,
+        reclassifiedSubcategory: isReclassified ? result.actualSubcategory : null,
+        reclassificationConfidence: result.confidence,
+        reclassificationReasoning: result.reasoning,
+      });
+
+      if (isReclassified) reclassified++;
+      else remainGeneral++;
+      processed++;
+      metrics.processedTickets = processed;
+    }
+
+    const pct = Math.min(95, 15 + Math.round((processed / tickets.length) * 80));
+    onProgress?.(`Behandlet ${processed}/${tickets.length} (${reclassified} reklassifisert, ${remainGeneral} forblir generell)`, pct);
+
+    await new Promise((r) => setTimeout(r, 100));
+  }
+
+  finalizeMetrics(metrics);
+  const pctReclass = tickets.length > 0 ? ((reclassified / tickets.length) * 100).toFixed(1) : '0';
+  onProgress?.(`Ferdig! ${processed} tickets analysert. ${reclassified} reklassifisert (${pctReclass}%), ${remainGeneral} forblir generell. ${metrics.apiCalls} API-kall.`, 100);
+
+  return { metrics };
+}

@@ -1,0 +1,457 @@
+OPPGAVE C: Reklassifiser "Generell e-post" til standardkategorier
+
+KONTEKST:
+Mange kundehenvendelser kommer inn som "Generell e-post til DyreID" eller lignende generiske kategorier,
+men handler egentlig om spesifikke ting som eierskifte, innlogging, QR Tag, etc.
+
+FORMÅL:
+- Identifisere tickets feilkategorisert som "Generell"
+- Analysere hva de EGENTLIG handler om
+- Reklassifisere til korrekt standardkategori
+- Vise statistikk over hva "Generell" faktisk inneholder
+- Forbedre fremtidig routing av henvendelser
+
+9 STANDARDKATEGORIER:
+1. Min Side (innlogging, profil, passord)
+2. Eierskifte (overføring av eierskap)
+3. Registrering (nytt dyr, chip)
+4. QR Tag (aktivering, bestilling)
+5. Smart Tag (GPS-tag)
+6. Abonnement (Premium, fornyelse)
+7. Savnet/Funnet (miste/finne dyr)
+8. Familiedeling (deling mellom brukere)
+9. App (DyreID+, nedlasting)
+
+IMPLEMENTERING:
+
+══════════════════════════════════════════════════════════════
+DEL 1: UTVID DATABASE
+══════════════════════════════════════════════════════════════
+```sql
+-- Utvid category_mappings tabell
+ALTER TABLE category_mappings ADD COLUMN IF NOT EXISTS
+  original_category TEXT,
+  reclassified_category TEXT,
+  reclassified_subcategory TEXT,
+  reclassification_confidence FLOAT,
+  reclassification_reasoning TEXT,
+  needs_reclassification BOOLEAN DEFAULT false;
+
+CREATE INDEX idx_reclassified ON category_mappings(reclassified_category);
+CREATE INDEX idx_needs_reclass ON category_mappings(needs_reclassification);
+```
+
+══════════════════════════════════════════════════════════════
+DEL 2: IDENTIFISER "GENERELLE" TICKETS
+══════════════════════════════════════════════════════════════
+```typescript
+async function identifyGeneralTickets() {
+  // Finn tickets kategorisert som "Generell" eller lignende
+  const generalTickets = await db.query(`
+    SELECT 
+      st.id,
+      st.subject,
+      st.customer_question,
+      st.agent_answer,
+      cm.hjelpesenter_category,
+      cm.hjelpesenter_subcategory
+    FROM scrubbed_tickets st
+    JOIN category_mappings cm ON cm.ticket_id = st.id
+    WHERE 
+      cm.hjelpesenter_category ILIKE '%generell%'
+      OR cm.hjelpesenter_category ILIKE '%general%'
+      OR cm.hjelpesenter_category ILIKE '%annet%'
+      OR cm.hjelpesenter_category ILIKE '%other%'
+    ORDER BY st.id
+  `);
+  
+  console.log(`Found ${generalTickets.rows.length} tickets needing reclassification`);
+  
+  // Marker disse som "needs_reclassification"
+  for (const ticket of generalTickets.rows) {
+    await db.query(`
+      UPDATE category_mappings SET
+        needs_reclassification = true,
+        original_category = hjelpesenter_category
+      WHERE ticket_id = $1
+    `, [ticket.id]);
+  }
+  
+  return generalTickets.rows;
+}
+```
+
+══════════════════════════════════════════════════════════════
+DEL 3: REKLASSIFISERINGSFUNKSJON
+══════════════════════════════════════════════════════════════
+```typescript
+interface ReclassificationResult {
+  actualCategory: string | null;
+  actualSubcategory: string | null;
+  confidence: number;
+  reasoning: string;
+}
+
+async function reclassifyTicket(ticket: any): Promise<ReclassificationResult> {
+  const prompt = `
+Denne support-saken kom inn som "Generell e-post", men handler egentlig om noe spesifikt.
+
+SAKEN:
+Subject: ${ticket.subject}
+Kundens spørsmål: ${ticket.customer_question}
+Agentens svar: ${ticket.agent_answer || 'Ingen svar'}
+
+TILGJENGELIGE KATEGORIER (velg én):
+1. Min Side - Innlogging, profil, passord, tilgang, BankID
+   Underkategorier: Logg inn, Har Min side, Glemt passord, Oppdater kontaktinfo
+
+2. Eierskifte - Overføring av eierskap mellom personer
+   Underkategorier: Pris for eierskifte, Overføre eierskap, Motta overført eierskap
+
+3. Registrering - Registrere nytt dyr, chip, søkbart register
+   Underkategorier: Registrere dyr, Chip, ID-merke, Søkbart register
+
+4. QR Tag - QR-tag bestilling, aktivering, bruk
+   Underkategorier: Bestille QR Tag, Aktivere QR Tag, Bruke QR Tag
+
+5. Smart Tag - GPS-tag for sporing
+   Underkategorier: Kjøpe Smart Tag, Aktivere Smart Tag, Bruk av Smart Tag
+
+6. Abonnement - Premium, fornyelse, betaling
+   Underkategorier: Premium abonnement, Fornye abonnement, Pris
+
+7. Savnet/Funnet - Melde dyr savnet eller funnet
+   Underkategorier: Melde savnet, Funnet dyr, Gjenforening
+
+8. Familiedeling - Dele tilgang mellom familiemedlemmer
+   Underkategorier: Legge til familiemedlem, Fjerne familiemedlem
+
+9. App - DyreID+ app, nedlasting, bruk
+   Underkategorier: Laste ned app, DyreID+ funksjoner, App problemer
+
+VIKTIG:
+- Analyser både spørsmål OG svar for å finne riktig kategori
+- Hvis saken tydelig handler om én kategori, sett confidence høyt (0.8-1.0)
+- Hvis usikker mellom 2-3 kategorier, sett confidence lavt (0.5-0.7)
+- Hvis VIRKELIG generell/ikke-spesifikk, returner null (confidence < 0.5)
+
+Return JSON:
+{
+  "actualCategory": "kategori-navn eller null",
+  "actualSubcategory": "underkategori-navn eller null",
+  "confidence": 0.0-1.0,
+  "reasoning": "Kort forklaring på valg"
+}
+
+Eksempel output:
+{
+  "actualCategory": "Min Side",
+  "actualSubcategory": "Logg inn",
+  "confidence": 0.95,
+  "reasoning": "Kunden spør om innloggingsproblemer med BankID"
+}
+  `;
+  
+  try {
+    const response = await callOpenAI(prompt, { 
+      model: 'gpt-4o',
+      temperature: 0.3  // Lav temperature for konsistens
+    });
+    
+    const result = JSON.parse(response);
+    
+    return {
+      actualCategory: result.actualCategory,
+      actualSubcategory: result.actualSubcategory,
+      confidence: result.confidence,
+      reasoning: result.reasoning
+    };
+    
+  } catch (error) {
+    console.error('Reclassification error:', error);
+    return {
+      actualCategory: null,
+      actualSubcategory: null,
+      confidence: 0,
+      reasoning: 'Parsing error'
+    };
+  }
+}
+```
+
+══════════════════════════════════════════════════════════════
+DEL 4: BATCH REKLASSIFISERING
+══════════════════════════════════════════════════════════════
+```typescript
+async function runReclassification() {
+  console.log('🔄 Starting reclassification of General tickets...');
+  
+  // Hent tickets som trenger reklassifisering
+  const tickets = await db.query(`
+    SELECT 
+      st.id,
+      st.subject,
+      st.customer_question,
+      st.agent_answer,
+      cm.id as mapping_id,
+      cm.hjelpesenter_category as original_category
+    FROM scrubbed_tickets st
+    JOIN category_mappings cm ON cm.ticket_id = st.id
+    WHERE cm.needs_reclassification = true
+      AND cm.reclassified_category IS NULL
+    ORDER BY st.id
+    LIMIT 1000
+  `);
+  
+  console.log(`Reclassifying ${tickets.rows.length} tickets`);
+  
+  const stats = {
+    total: 0,
+    reclassified: 0,
+    remainGeneral: 0,
+    byNewCategory: {} as Record<string, number>
+  };
+  
+  // Batch processing (kan kjøre flere parallelt for hastighet)
+  const BATCH_SIZE = 5;
+  const batches = [];
+  for (let i = 0; i < tickets.rows.length; i += BATCH_SIZE) {
+    batches.push(tickets.rows.slice(i, i + BATCH_SIZE));
+  }
+  
+  for (const batch of batches) {
+    const results = await Promise.all(
+      batch.map(ticket => reclassifyTicket(ticket))
+    );
+    
+    // Lagre resultater
+    for (let i = 0; i < batch.length; i++) {
+      const ticket = batch[i];
+      const result = results[i];
+      
+      if (result.actualCategory && result.confidence >= 0.6) {
+        // Reklassifisert!
+        await db.query(`
+          UPDATE category_mappings SET
+            reclassified_category = $1,
+            reclassified_subcategory = $2,
+            reclassification_confidence = $3,
+            reclassification_reasoning = $4
+          WHERE id = $5
+        `, [
+          result.actualCategory,
+          result.actualSubcategory,
+          result.confidence,
+          result.reasoning,
+          ticket.mapping_id
+        ]);
+        
+        stats.reclassified++;
+        stats.byNewCategory[result.actualCategory] = 
+          (stats.byNewCategory[result.actualCategory] || 0) + 1;
+        
+      } else {
+        // Forblir generell
+        await db.query(`
+          UPDATE category_mappings SET
+            reclassification_confidence = $1,
+            reclassification_reasoning = $2
+          WHERE id = $3
+        `, [
+          result.confidence,
+          result.reasoning || 'Virkelig generell henvendelse',
+          ticket.mapping_id
+        ]);
+        
+        stats.remainGeneral++;
+      }
+      
+      stats.total++;
+    }
+    
+    if (stats.total % 50 === 0) {
+      console.log(`Processed ${stats.total}/${tickets.rows.length}...`);
+    }
+    
+    // Rate limiting
+    await sleep(100);
+  }
+  
+  console.log('✅ Reclassification complete!');
+  console.log(`
+RESULTS:
+- Total analyzed: ${stats.total}
+- Reclassified: ${stats.reclassified} (${(stats.reclassified/stats.total*100).toFixed(1)}%)
+- Remain general: ${stats.remainGeneral} (${(stats.remainGeneral/stats.total*100).toFixed(1)}%)
+
+TOP RECLASSIFICATIONS:
+${Object.entries(stats.byNewCategory)
+  .sort((a, b) => b[1] - a[1])
+  .map(([cat, count]) => `  ${cat}: ${count} tickets`)
+  .join('\n')}
+  `);
+  
+  return stats;
+}
+```
+
+══════════════════════════════════════════════════════════════
+DEL 5: STATISTIKK & INNSIKTER
+══════════════════════════════════════════════════════════════
+```typescript
+// API endpoint for stats
+app.get('/api/training/reclassification/stats', async (req, res) => {
+  try {
+    // Overall reclassification stats
+    const overall = await db.query(`
+      SELECT 
+        COUNT(*) as total_general,
+        COUNT(*) FILTER (WHERE reclassified_category IS NOT NULL) as reclassified_count,
+        AVG(reclassification_confidence) as avg_confidence
+      FROM category_mappings
+      WHERE needs_reclassification = true
+    `);
+    
+    // Breakdown by new category
+    const byCategory = await db.query(`
+      SELECT 
+        reclassified_category,
+        reclassified_subcategory,
+        COUNT(*) as count,
+        AVG(reclassification_confidence) as avg_confidence,
+        ARRAY_AGG(DISTINCT reclassification_reasoning) as example_reasons
+      FROM category_mappings
+      WHERE reclassified_category IS NOT NULL
+      GROUP BY reclassified_category, reclassified_subcategory
+      ORDER BY count DESC
+    `);
+    
+    // Examples per category
+    const examples = await db.query(`
+      SELECT 
+        cm.reclassified_category,
+        st.subject,
+        st.customer_question,
+        cm.reclassification_reasoning
+      FROM category_mappings cm
+      JOIN scrubbed_tickets st ON st.id = cm.ticket_id
+      WHERE cm.reclassified_category IS NOT NULL
+      ORDER BY cm.reclassified_category, RANDOM()
+      LIMIT 50
+    `);
+    
+    // Remaining truly general
+    const trulyGeneral = await db.query(`
+      SELECT 
+        st.subject,
+        st.customer_question,
+        cm.reclassification_reasoning
+      FROM category_mappings cm
+      JOIN scrubbed_tickets st ON st.id = cm.ticket_id
+      WHERE cm.needs_reclassification = true
+        AND cm.reclassified_category IS NULL
+      ORDER BY RANDOM()
+      LIMIT 20
+    `);
+    
+    res.json({
+      overall: overall.rows[0],
+      byCategory: byCategory.rows,
+      examples: examples.rows,
+      trulyGeneral: trulyGeneral.rows
+    });
+    
+  } catch (error) {
+    console.error('Reclassification stats error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+```
+
+══════════════════════════════════════════════════════════════
+DEL 6: DASHBOARD TAB
+══════════════════════════════════════════════════════════════
+
+NY TAB: "Reklassifisering"
+
+Vis:
+
+1. STAT CARDS (4 kort):
+   - Total "Generell" funnet
+   - Reklassifisert (grønn)
+   - Forblir generell (gul)
+   - Gjennomsnittlig confidence
+
+2. REKLASSIFISERINGS-FORDELING (bar chart):
+   "Generell e-post" faktisk inneholder:
+   - Min Side: 45 tickets
+   - Eierskifte: 32 tickets
+   - QR Tag: 28 tickets
+   - Registrering: 21 tickets
+   - ...
+
+3. EKSEMPLER PER KATEGORI (accordion/collapse):
+   For hver ny kategori, vis 2-3 eksempel-subjects med reasoning
+
+4. VIRKELIG GENERELLE (tabell):
+   - Tickets som IKKE kunne reklassifiseres (confidence < 0.6)
+   - Vis subject + reasoning
+   - "Disse er virkelig generelle henvendelser"
+
+5. INNSIKTER (alert box):
+   "💡 INNSIKT: 78% av 'Generell e-post' handler egentlig om Min Side eller Eierskifte.
+   Forbedr routing ved å legge til disse nøkkelordene i email-parser..."
+
+6. KNAPPER:
+   - "1. Identifiser generelle tickets"
+   - "2. Kjør reklassifisering"
+
+══════════════════════════════════════════════════════════════
+DEL 7: BRUK I PLAYBOOK
+══════════════════════════════════════════════════════════════
+
+Når Playbook genereres (Workflow 8), inkluder reklassifiserings-data:
+```typescript
+// I playbook entry:
+{
+  intent: "LoginIssue",
+  
+  // ...andre felt...
+  
+  // Reklassifisering:
+  wasReclassified: true,
+  originalCategories: ["Generell e-post til DyreID", "Annet"],
+  reclassifiedFrom: {
+    "Generell e-post": 45,  // 45 tickets reklassifisert fra Generell
+    "Annet": 12
+  },
+  
+  // Dette hjelper å:
+  // 1. Forstå at mange "Generell" egentlig er LoginIssue
+  // 2. Forbedre email parsing for fremtidige henvendelser
+  // 3. Identifisere gap i kategorisering
+}
+```
+
+══════════════════════════════════════════════════════════════
+KJØRING
+══════════════════════════════════════════════════════════════
+
+TRINN 1: Identifiser generelle tickets
+→ Kjør identifyGeneralTickets()
+→ Rapporter hvor mange funnet
+
+TRINN 2: Test reklassifisering på 50 tickets
+→ Kjør runReclassification() med LIMIT 50
+→ Sjekk kvalitet på reklassifiseringer
+→ Juster confidence threshold hvis nødvendig
+
+TRINN 3: Kjør på alle
+→ Fjern LIMIT eller sett til 1000
+→ Kjør full reklassifisering
+
+FORVENTET RESULTAT:
+- 70-80% av "Generell" kan reklassifiseres
+- Topp 3 faktiske kategorier: Min Side, Eierskifte, QR Tag
+- Gjennomsnittlig confidence > 0.75
+- 20-30% forblir virkelig generelle

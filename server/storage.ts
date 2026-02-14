@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { eq, desc, sql, count, and, isNull, lt, or } from "drizzle-orm";
+import { eq, desc, sql, count, and, isNull, lt, or, ilike } from "drizzle-orm";
 import {
   rawTickets,
   scrubbedTickets,
@@ -169,6 +169,19 @@ export interface IStorage {
     patterns: { pattern: string; count: number; avgMessages: number; avgTotal: number }[];
     byCategory: { category: string; pattern: string; count: number }[];
     problematic: { category: string; count: number }[];
+  }>;
+
+  identifyGeneralTickets(): Promise<number>;
+  getTicketsForReclassification(limit: number): Promise<any[]>;
+  updateReclassification(mappingId: number, data: { reclassifiedCategory: string | null; reclassifiedSubcategory: string | null; reclassificationConfidence: number; reclassificationReasoning: string }): Promise<void>;
+  getReclassificationStats(): Promise<{
+    totalGeneral: number;
+    reclassified: number;
+    remainGeneral: number;
+    unprocessed: number;
+    avgConfidence: number;
+    byCategory: { category: string; subcategory: string | null; count: number; avgConfidence: number }[];
+    trulyGeneral: { subject: string; reasoning: string }[];
   }>;
 
   logChatbotInteraction(interaction: InsertChatbotInteraction): Promise<typeof chatbotInteractions.$inferSelect>;
@@ -830,6 +843,164 @@ export class DatabaseStorage implements IStorage {
     }));
 
     return { total, unanalyzed, patterns, byCategory, problematic };
+  }
+
+  async identifyGeneralTickets(): Promise<number> {
+    const generalMappings = await db
+      .select({ id: categoryMappings.id, category: categoryMappings.hjelpesenterCategory })
+      .from(categoryMappings)
+      .where(
+        or(
+          ilike(categoryMappings.hjelpesenterCategory, '%generell%'),
+          ilike(categoryMappings.hjelpesenterCategory, '%general%'),
+          ilike(categoryMappings.hjelpesenterCategory, '%annet%'),
+          ilike(categoryMappings.hjelpesenterCategory, '%other%')
+        )
+      );
+
+    for (const mapping of generalMappings) {
+      await db
+        .update(categoryMappings)
+        .set({
+          needsReclassification: true,
+          originalCategory: mapping.category,
+        })
+        .where(eq(categoryMappings.id, mapping.id));
+    }
+
+    return generalMappings.length;
+  }
+
+  async getTicketsForReclassification(limit: number): Promise<any[]> {
+    const results = await db
+      .select({
+        mappingId: categoryMappings.id,
+        ticketId: categoryMappings.ticketId,
+        originalCategory: categoryMappings.originalCategory,
+        subject: scrubbedTickets.subject,
+        customerQuestion: scrubbedTickets.customerQuestion,
+        agentAnswer: scrubbedTickets.agentAnswer,
+      })
+      .from(categoryMappings)
+      .innerJoin(scrubbedTickets, eq(scrubbedTickets.id, categoryMappings.ticketId))
+      .where(
+        and(
+          eq(categoryMappings.needsReclassification, true),
+          isNull(categoryMappings.reclassifiedCategory),
+          isNull(categoryMappings.reclassificationConfidence)
+        )
+      )
+      .orderBy(categoryMappings.id)
+      .limit(limit);
+
+    return results;
+  }
+
+  async updateReclassification(mappingId: number, data: {
+    reclassifiedCategory: string | null;
+    reclassifiedSubcategory: string | null;
+    reclassificationConfidence: number;
+    reclassificationReasoning: string;
+  }): Promise<void> {
+    await db
+      .update(categoryMappings)
+      .set({
+        reclassifiedCategory: data.reclassifiedCategory,
+        reclassifiedSubcategory: data.reclassifiedSubcategory,
+        reclassificationConfidence: data.reclassificationConfidence,
+        reclassificationReasoning: data.reclassificationReasoning,
+      })
+      .where(eq(categoryMappings.id, mappingId));
+  }
+
+  async getReclassificationStats() {
+    const totalGeneralResult = await db
+      .select({ count: count() })
+      .from(categoryMappings)
+      .where(eq(categoryMappings.needsReclassification, true));
+    const totalGeneral = totalGeneralResult[0].count;
+
+    const reclassifiedResult = await db
+      .select({ count: count() })
+      .from(categoryMappings)
+      .where(
+        and(
+          eq(categoryMappings.needsReclassification, true),
+          sql`${categoryMappings.reclassifiedCategory} IS NOT NULL`
+        )
+      );
+    const reclassified = reclassifiedResult[0].count;
+
+    const processedResult = await db
+      .select({ count: count() })
+      .from(categoryMappings)
+      .where(
+        and(
+          eq(categoryMappings.needsReclassification, true),
+          sql`${categoryMappings.reclassificationConfidence} IS NOT NULL`
+        )
+      );
+    const processed = processedResult[0].count;
+    const remainGeneral = processed - reclassified;
+    const unprocessed = totalGeneral - processed;
+
+    const avgConfResult = await db
+      .select({ avg: sql<number>`COALESCE(AVG(${categoryMappings.reclassificationConfidence}), 0)` })
+      .from(categoryMappings)
+      .where(
+        and(
+          eq(categoryMappings.needsReclassification, true),
+          sql`${categoryMappings.reclassificationConfidence} IS NOT NULL`
+        )
+      );
+    const avgConfidence = Number(avgConfResult[0].avg);
+
+    const byCategoryResult = await db
+      .select({
+        category: categoryMappings.reclassifiedCategory,
+        subcategory: categoryMappings.reclassifiedSubcategory,
+        count: count(),
+        avgConfidence: sql<number>`AVG(${categoryMappings.reclassificationConfidence})`,
+      })
+      .from(categoryMappings)
+      .where(
+        and(
+          eq(categoryMappings.needsReclassification, true),
+          sql`${categoryMappings.reclassifiedCategory} IS NOT NULL`
+        )
+      )
+      .groupBy(categoryMappings.reclassifiedCategory, categoryMappings.reclassifiedSubcategory)
+      .orderBy(desc(count()));
+
+    const byCategory = byCategoryResult.map((r) => ({
+      category: r.category!,
+      subcategory: r.subcategory,
+      count: r.count,
+      avgConfidence: Number(r.avgConfidence),
+    }));
+
+    const trulyGeneralResult = await db
+      .select({
+        subject: scrubbedTickets.subject,
+        reasoning: categoryMappings.reclassificationReasoning,
+      })
+      .from(categoryMappings)
+      .innerJoin(scrubbedTickets, eq(scrubbedTickets.id, categoryMappings.ticketId))
+      .where(
+        and(
+          eq(categoryMappings.needsReclassification, true),
+          sql`${categoryMappings.reclassificationConfidence} IS NOT NULL`,
+          isNull(categoryMappings.reclassifiedCategory)
+        )
+      )
+      .limit(30);
+
+    const trulyGeneral = trulyGeneralResult.map((r) => ({
+      subject: r.subject || '',
+      reasoning: r.reasoning || '',
+    }));
+
+    return { totalGeneral, reclassified, remainGeneral, unprocessed, avgConfidence, byCategory, trulyGeneral };
   }
 
   async logChatbotInteraction(interaction: InsertChatbotInteraction) {
