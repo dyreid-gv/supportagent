@@ -110,7 +110,12 @@ client/src/
 - POST /api/training/detect-autoreply (SSE) - Detect autoreply patterns in scrubbed ticket dialogs
 - GET /api/training/autoreply-stats - Autoreply detection statistics
 
+### Dialog Pattern Analysis (Oppgave B)
+- POST /api/training/analyze-dialog-patterns (SSE) - Classify dialog patterns in scrubbed tickets
+- GET /api/training/dialog-pattern-stats - Dialog pattern statistics with per-category breakdown
+
 ## Recent Changes
+- 2026-02-14: Dialog pattern analysis (Oppgave B) - dialog_pattern, messages_after_autoreply, total_message_count columns added to scrubbed_tickets. 4 patterns: autosvar_only (problematic), autosvar_quick_resolution (efficient), autosvar_extended_dialog (complex), direct_human_response (good service). Dashboard Dialog-mønstre tab with stat cards, distribution bars, per-category table, and problematic cases highlight.
 - 2026-02-14: Autoreply detection (Workflow 2B) - keywords column added to response_templates, autoreply tracking columns (has_autoreply, autoreply_template_id, autoreply_confidence, human_response_starts_at) added to scrubbed_tickets. Two-step workflow: 1) Generate keywords for 22 templates via OpenAI gpt-4o, 2) Match ticket dialogs to templates using Levenshtein similarity + keyword overlap + subject matching. Dashboard Autosvar-gjenkjenning tab with stats cards, confidence bar, template distribution. Threshold: confidence > 0.6 for autoreply detection.
 - 2026-02-14: Help Center Matching (Workflow 3C) - ticket_help_center_matches table with alignment quality tracking. Dashboard Artikkel-match tab with stats, distribution, top articles, common missing points.
 - 2026-02-14: Feedback loop system - chatbot_interactions table logs all user/bot exchanges with response method, matched intent, timing. Feedback widget on assistant messages (thumbs up/down/neutral). Dashboard Tilbakemelding tab with stats cards, flagged interactions, per-intent breakdown, and recent interaction log. Interactions flagged when marked "not_resolved".

@@ -39,6 +39,8 @@ import {
   MessageSquare,
   Flag,
   Link2,
+  Users,
+  ArrowRight,
 } from "lucide-react";
 import { useState, useCallback } from "react";
 import {
@@ -221,6 +223,7 @@ function useSSEWorkflow(endpoint: string) {
       queryClient.invalidateQueries({ queryKey: ["/api/training/help-center-match-stats"] });
       queryClient.invalidateQueries({ queryKey: ["/api/training/help-center-matches"] });
       queryClient.invalidateQueries({ queryKey: ["/api/training/autoreply-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/training/dialog-pattern-stats"] });
     }
   }, [endpoint]);
 
@@ -580,6 +583,16 @@ export default function Dashboard() {
     queryKey: ["/api/training/help-center-matches"],
   });
 
+  const { data: dialogPatternStats } = useQuery<{
+    total: number;
+    unanalyzed: number;
+    patterns: { pattern: string; count: number; avgMessages: number; avgTotal: number }[];
+    byCategory: { category: string; pattern: string; count: number }[];
+    problematic: { category: string; count: number }[];
+  }>({
+    queryKey: ["/api/training/dialog-pattern-stats"],
+  });
+
   const [editingPrice, setEditingPrice] = useState<ServicePrice | null>(null);
   const [addingPrice, setAddingPrice] = useState(false);
   const [seedingPrices, setSeedingPrices] = useState(false);
@@ -681,6 +694,9 @@ export default function Dashboard() {
           </TabsTrigger>
           <TabsTrigger value="autoreply-detect" data-testid="tab-autoreply-detect">
             Autosvar-gjenkjenning
+          </TabsTrigger>
+          <TabsTrigger value="dialog-patterns" data-testid="tab-dialog-patterns">
+            Dialog-mønstre ({dialogPatternStats?.total || 0})
           </TabsTrigger>
         </TabsList>
 
@@ -1490,6 +1506,10 @@ export default function Dashboard() {
         <TabsContent value="autoreply-detect" className="mt-4">
           <AutoReplyDetectionTab stats={autoreplyStats} />
         </TabsContent>
+
+        <TabsContent value="dialog-patterns" className="mt-4">
+          <DialogPatternTab stats={dialogPatternStats} />
+        </TabsContent>
       </Tabs>
     </div>
   );
@@ -2043,5 +2063,212 @@ function PriceDialog({ open, onClose, price }: { open: boolean; onClose: () => v
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+const PATTERN_LABELS: Record<string, { label: string; color: string; icon: typeof AlertTriangle }> = {
+  autosvar_only: { label: "Kun autosvar", color: "text-red-600", icon: AlertTriangle },
+  autosvar_quick_resolution: { label: "Rask løsning", color: "text-green-600", icon: CheckCircle },
+  autosvar_extended_dialog: { label: "Utvidet dialog", color: "text-yellow-600", icon: MessageSquare },
+  direct_human_response: { label: "Direkte menneskelig", color: "text-blue-600", icon: Users },
+};
+
+function DialogPatternTab({ stats }: {
+  stats: {
+    total: number;
+    unanalyzed: number;
+    patterns: { pattern: string; count: number; avgMessages: number; avgTotal: number }[];
+    byCategory: { category: string; pattern: string; count: number }[];
+    problematic: { category: string; count: number }[];
+  } | undefined;
+}) {
+  const workflow = useSSEWorkflow("/api/training/analyze-dialog-patterns");
+
+  const getPatternCount = (p: string) => stats?.patterns.find(x => x.pattern === p)?.count || 0;
+  const getPatternAvg = (p: string) => stats?.patterns.find(x => x.pattern === p)?.avgMessages || 0;
+
+  const categories = stats?.byCategory ? Array.from(new Set(stats.byCategory.map(b => b.category))) : [];
+  const categoryRows = categories.map(cat => {
+    const rows = stats!.byCategory.filter(b => b.category === cat);
+    const patternCounts: Record<string, number> = {};
+    let total = 0;
+    for (const r of rows) {
+      patternCounts[r.pattern] = r.count;
+      total += r.count;
+    }
+    return { category: cat, patternCounts, total };
+  }).sort((a, b) => b.total - a.total);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3 flex-wrap">
+        <Button
+          data-testid="button-analyze-dialog-patterns"
+          onClick={() => workflow.run()}
+          disabled={workflow.isRunning}
+          size="sm"
+        >
+          {workflow.isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Layers className="h-4 w-4" />}
+          {workflow.isRunning ? "Analyserer..." : "Kjør dialog-analyse"}
+        </Button>
+        {stats?.unanalyzed !== undefined && stats.unanalyzed > 0 && (
+          <Badge variant="secondary">{stats.unanalyzed} uanalyserte</Badge>
+        )}
+        {workflow.isRunning && (
+          <Progress value={workflow.progress} className="flex-1 min-w-[200px]" />
+        )}
+      </div>
+
+      {workflow.error && (
+        <div className="flex items-center gap-1 text-xs text-destructive">
+          <AlertCircle className="h-3 w-3 shrink-0" />
+          <span>{workflow.error}</span>
+        </div>
+      )}
+
+      {workflow.logs.length > 0 && (
+        <ScrollArea className="h-[120px] border rounded-md p-2">
+          {workflow.logs.map((l, i) => (
+            <p key={i} className="text-xs text-muted-foreground">{l}</p>
+          ))}
+        </ScrollArea>
+      )}
+
+      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Kun autosvar</CardTitle>
+            <AlertTriangle className="h-4 w-4 text-red-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-red-600" data-testid="text-pattern-autosvar-only">{getPatternCount('autosvar_only')}</div>
+            <p className="text-xs text-muted-foreground">Ingen menneskelig oppfølging</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Rask løsning</CardTitle>
+            <CheckCircle className="h-4 w-4 text-green-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-600" data-testid="text-pattern-quick">{getPatternCount('autosvar_quick_resolution')}</div>
+            <p className="text-xs text-muted-foreground">Snitt {getPatternAvg('autosvar_quick_resolution')} meldinger etter autosvar</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Utvidet dialog</CardTitle>
+            <MessageSquare className="h-4 w-4 text-yellow-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-yellow-600" data-testid="text-pattern-extended">{getPatternCount('autosvar_extended_dialog')}</div>
+            <p className="text-xs text-muted-foreground">Snitt {getPatternAvg('autosvar_extended_dialog')} meldinger etter autosvar</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Direkte menneskelig</CardTitle>
+            <Users className="h-4 w-4 text-blue-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-blue-600" data-testid="text-pattern-direct">{getPatternCount('direct_human_response')}</div>
+            <p className="text-xs text-muted-foreground">God personlig service</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {stats && stats.total > 0 && (
+        <>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Fordeling av dialog-mønstre</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {stats.patterns.map(p => {
+                const info = PATTERN_LABELS[p.pattern] || { label: p.pattern, color: "", icon: FileText };
+                const pct = stats.total > 0 ? (p.count / stats.total) * 100 : 0;
+                return (
+                  <div key={p.pattern} className="space-y-1">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <info.icon className={`h-4 w-4 ${info.color}`} />
+                        <span className="text-sm font-medium">{info.label}</span>
+                      </div>
+                      <span className="text-sm text-muted-foreground">{p.count} ({pct.toFixed(1)}%) - snitt {p.avgTotal.toFixed(1)} meldinger totalt</span>
+                    </div>
+                    <Progress value={pct} className="h-2" />
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
+
+          {categoryRows.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Per kategori</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b">
+                        <th className="text-left py-2 pr-4 font-medium">Kategori</th>
+                        <th className="text-right py-2 px-2 font-medium text-red-600">Kun auto</th>
+                        <th className="text-right py-2 px-2 font-medium text-green-600">Rask</th>
+                        <th className="text-right py-2 px-2 font-medium text-yellow-600">Utvidet</th>
+                        <th className="text-right py-2 px-2 font-medium text-blue-600">Direkte</th>
+                        <th className="text-right py-2 pl-2 font-medium">Totalt</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {categoryRows.map((row, i) => (
+                        <tr key={i} className="border-b last:border-0">
+                          <td className="py-2 pr-4 max-w-[200px] truncate">{row.category}</td>
+                          <td className="text-right py-2 px-2">{row.patternCounts.autosvar_only || 0}</td>
+                          <td className="text-right py-2 px-2">{row.patternCounts.autosvar_quick_resolution || 0}</td>
+                          <td className="text-right py-2 px-2">{row.patternCounts.autosvar_extended_dialog || 0}</td>
+                          <td className="text-right py-2 px-2">{row.patternCounts.direct_human_response || 0}</td>
+                          <td className="text-right py-2 pl-2 font-semibold">{row.total}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {stats.problematic.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 text-red-500" />
+                  Problematiske saker (kun autosvar)
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <p className="text-sm text-muted-foreground">Disse sakene fikk kun autosvar uten menneskelig oppfølging</p>
+                {stats.problematic.map((p, i) => (
+                  <div key={i} className="flex items-center justify-between gap-2 py-1 border-b last:border-0">
+                    <span className="text-sm">{p.category}</span>
+                    <Badge variant="destructive">{p.count} tickets</Badge>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
+        </>
+      )}
+
+      {(!stats || stats.total === 0) && !workflow.isRunning && (
+        <Card>
+          <CardContent className="py-8 text-center">
+            <Layers className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
+            <p className="text-sm text-muted-foreground">Ingen dialog-mønstre analysert ennå. Kjør autosvar-gjenkjenning først, deretter dialog-analyse.</p>
+          </CardContent>
+        </Card>
+      )}
+    </div>
   );
 }
