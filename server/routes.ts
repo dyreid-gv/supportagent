@@ -602,6 +602,12 @@ export async function registerRoutes(
         resolvedUserId = detailResponse.data?.UserId;
       }
 
+      console.log("Verify OTP calling LoginWithPasscode with:", {
+        Userid: resolvedUserId,
+        Otp: otpCode,
+        emailorPhone: contactMethod,
+      });
+
       const verifyResponse = await axios.post(
         `${MINSIDE_URL}/Security/LoginWithPasscode`,
         {
@@ -616,8 +622,12 @@ export async function registerRoutes(
         {
           headers: { "Content-Type": "application/json" },
           timeout: 15000,
+          maxRedirects: 0,
+          validateStatus: (status: number) => status < 500,
         }
       );
+
+      console.log("LoginWithPasscode response status:", verifyResponse.status, "data:", JSON.stringify(verifyResponse.data).substring(0, 500));
 
       const verifyData = verifyResponse.data;
       if (verifyData.IsSuccess) {
