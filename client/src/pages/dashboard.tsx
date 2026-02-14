@@ -2073,6 +2073,48 @@ const PATTERN_LABELS: Record<string, { label: string; color: string; icon: typeo
   direct_human_response: { label: "Direkte menneskelig", color: "text-blue-600", icon: Users },
 };
 
+function runSSEEndpoint(
+  endpoint: string,
+  onLog: (msg: string) => void,
+  onProgress: (pct: number) => void
+): Promise<void> {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const response = await fetch(endpoint, { method: "POST" });
+      const reader = response.body?.getReader();
+      if (!reader) { reject(new Error("No reader")); return; }
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.message) onLog(data.message);
+              if (data.progress !== undefined) onProgress(data.progress);
+              if (data.error) { reject(new Error(data.error)); return; }
+            } catch {}
+          }
+        }
+      }
+      resolve();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+const SEQUENCE_STEPS = [
+  { endpoint: "/api/training/generate-keywords", label: "Steg 1/3: Genererer keywords for maler..." },
+  { endpoint: "/api/training/detect-autoreply", label: "Steg 2/3: Gjenkjenner autosvar i tickets..." },
+  { endpoint: "/api/training/analyze-dialog-patterns", label: "Steg 3/3: Klassifiserer dialog-mønstre..." },
+];
+
 function DialogPatternTab({ stats }: {
   stats: {
     total: number;
@@ -2082,7 +2124,47 @@ function DialogPatternTab({ stats }: {
     problematic: { category: string; count: number }[];
   } | undefined;
 }) {
-  const workflow = useSSEWorkflow("/api/training/analyze-dialog-patterns");
+  const [seqRunning, setSeqRunning] = useState(false);
+  const [seqStep, setSeqStep] = useState(0);
+  const [seqProgress, setSeqProgress] = useState(0);
+  const [seqLogs, setSeqLogs] = useState<string[]>([]);
+  const [seqError, setSeqError] = useState<string | null>(null);
+
+  const runFullSequence = useCallback(async () => {
+    setSeqRunning(true);
+    setSeqStep(0);
+    setSeqProgress(0);
+    setSeqLogs([]);
+    setSeqError(null);
+
+    try {
+      for (let i = 0; i < SEQUENCE_STEPS.length; i++) {
+        const step = SEQUENCE_STEPS[i];
+        setSeqStep(i + 1);
+        setSeqLogs(prev => [...prev, `--- ${step.label} ---`]);
+        const baseProgress = (i / SEQUENCE_STEPS.length) * 100;
+        const stepWeight = 100 / SEQUENCE_STEPS.length;
+
+        await runSSEEndpoint(
+          step.endpoint,
+          (msg) => setSeqLogs(prev => [...prev, msg]),
+          (pct) => setSeqProgress(Math.round(baseProgress + (pct / 100) * stepWeight))
+        );
+
+        queryClient.invalidateQueries({ queryKey: ["/api/training/autoreply-stats"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/training/dialog-pattern-stats"] });
+      }
+      setSeqProgress(100);
+      setSeqLogs(prev => [...prev, "Fullført! Alle 3 steg er kjørt."]);
+    } catch (err: any) {
+      setSeqError(err.message);
+    } finally {
+      setSeqRunning(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/training/autoreply-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/training/dialog-pattern-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/training/stats"] });
+    }
+  }, []);
 
   const getPatternCount = (p: string) => stats?.patterns.find(x => x.pattern === p)?.count || 0;
   const getPatternAvg = (p: string) => stats?.patterns.find(x => x.pattern === p)?.avgMessages || 0;
@@ -2103,33 +2185,40 @@ function DialogPatternTab({ stats }: {
     <div className="space-y-4">
       <div className="flex items-center gap-3 flex-wrap">
         <Button
-          data-testid="button-analyze-dialog-patterns"
-          onClick={() => workflow.run()}
-          disabled={workflow.isRunning}
+          data-testid="button-run-full-sequence"
+          onClick={runFullSequence}
+          disabled={seqRunning}
           size="sm"
         >
-          {workflow.isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Layers className="h-4 w-4" />}
-          {workflow.isRunning ? "Analyserer..." : "Kjør dialog-analyse"}
+          {seqRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+          {seqRunning ? `Kjører steg ${seqStep}/3...` : "Kjør full analyse (3 steg)"}
         </Button>
         {stats?.unanalyzed !== undefined && stats.unanalyzed > 0 && (
           <Badge variant="secondary">{stats.unanalyzed} uanalyserte</Badge>
         )}
-        {workflow.isRunning && (
-          <Progress value={workflow.progress} className="flex-1 min-w-[200px]" />
+        {seqRunning && (
+          <Progress value={seqProgress} className="flex-1 min-w-[200px]" />
         )}
       </div>
 
-      {workflow.error && (
-        <div className="flex items-center gap-1 text-xs text-destructive">
-          <AlertCircle className="h-3 w-3 shrink-0" />
-          <span>{workflow.error}</span>
+      {seqRunning && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <ArrowRight className="h-3 w-3" />
+          <span>{SEQUENCE_STEPS[seqStep - 1]?.label}</span>
         </div>
       )}
 
-      {workflow.logs.length > 0 && (
-        <ScrollArea className="h-[120px] border rounded-md p-2">
-          {workflow.logs.map((l, i) => (
-            <p key={i} className="text-xs text-muted-foreground">{l}</p>
+      {seqError && (
+        <div className="flex items-center gap-1 text-xs text-destructive">
+          <AlertCircle className="h-3 w-3 shrink-0" />
+          <span>{seqError}</span>
+        </div>
+      )}
+
+      {seqLogs.length > 0 && (
+        <ScrollArea className="h-[160px] border rounded-md p-2">
+          {seqLogs.map((l: string, i: number) => (
+            <p key={i} className={`text-xs ${l.startsWith("---") ? "font-semibold text-foreground mt-1" : "text-muted-foreground"}`}>{l}</p>
           ))}
         </ScrollArea>
       )}
@@ -2261,11 +2350,11 @@ function DialogPatternTab({ stats }: {
         </>
       )}
 
-      {(!stats || stats.total === 0) && !workflow.isRunning && (
+      {(!stats || stats.total === 0) && !seqRunning && (
         <Card>
           <CardContent className="py-8 text-center">
             <Layers className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
-            <p className="text-sm text-muted-foreground">Ingen dialog-mønstre analysert ennå. Kjør autosvar-gjenkjenning først, deretter dialog-analyse.</p>
+            <p className="text-sm text-muted-foreground">Ingen dialog-mønstre analysert ennå. Klikk "Kjør full analyse" for å kjøre alle 3 steg automatisk.</p>
           </CardContent>
         </Card>
       )}
