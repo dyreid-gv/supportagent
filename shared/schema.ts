@@ -225,6 +225,25 @@ export const helpCenterArticles = pgTable("help_center_articles", {
   scrapedAt: timestamp("scraped_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
+export const chatbotInteractions = pgTable("chatbot_interactions", {
+  id: serial("id").primaryKey(),
+  conversationId: integer("conversation_id"),
+  messageId: integer("message_id"),
+  userQuestion: text("user_question").notNull(),
+  botResponse: text("bot_response").notNull(),
+  responseMethod: text("response_method").default("ai"),
+  matchedIntent: text("matched_intent"),
+  matchedCategory: text("matched_category"),
+  actionsExecuted: jsonb("actions_executed"),
+  feedbackResult: text("feedback_result"),
+  feedbackComment: text("feedback_comment"),
+  flaggedForReview: boolean("flagged_for_review").default(false),
+  authenticated: boolean("authenticated").default(false),
+  responseTimeMs: integer("response_time_ms"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
+  feedbackAt: timestamp("feedback_at"),
+});
+
 export const trainingRuns = pgTable("training_runs", {
   id: serial("id").primaryKey(),
   workflow: text("workflow").notNull(),
@@ -237,6 +256,7 @@ export const trainingRuns = pgTable("training_runs", {
   errorLog: text("error_log"),
 });
 
+export const insertChatbotInteractionSchema = createInsertSchema(chatbotInteractions).omit({ id: true });
 export const insertHelpCenterArticleSchema = createInsertSchema(helpCenterArticles).omit({ id: true });
 export const insertResponseTemplateSchema = createInsertSchema(responseTemplates).omit({ id: true });
 export const insertServicePriceSchema = createInsertSchema(servicePrices).omit({ id: true });
@@ -273,6 +293,8 @@ export type Conversation = typeof conversations.$inferSelect;
 export type InsertConversation = z.infer<typeof insertConversationSchema>;
 export type Message = typeof messages.$inferSelect;
 export type InsertMessage = z.infer<typeof insertMessageSchema>;
+export type ChatbotInteraction = typeof chatbotInteractions.$inferSelect;
+export type InsertChatbotInteraction = z.infer<typeof insertChatbotInteractionSchema>;
 export type HelpCenterArticle = typeof helpCenterArticles.$inferSelect;
 export type InsertHelpCenterArticle = z.infer<typeof insertHelpCenterArticleSchema>;
 export type ResponseTemplate = typeof responseTemplates.$inferSelect;

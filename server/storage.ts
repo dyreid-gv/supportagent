@@ -17,6 +17,7 @@ import {
   servicePrices,
   responseTemplates,
   helpCenterArticles,
+  chatbotInteractions,
   type InsertRawTicket,
   type InsertHelpCenterArticle,
   type InsertScrubbedTicket,
@@ -28,6 +29,7 @@ import {
   type InsertMessage,
   type InsertServicePrice,
   type InsertResponseTemplate,
+  type InsertChatbotInteraction,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -126,6 +128,13 @@ export interface IStorage {
   getHelpCenterArticlesByCategory(category: string): Promise<typeof helpCenterArticles.$inferSelect[]>;
   getHelpCenterArticleCount(): Promise<number>;
   deleteAllHelpCenterArticles(): Promise<void>;
+
+  logChatbotInteraction(interaction: InsertChatbotInteraction): Promise<typeof chatbotInteractions.$inferSelect>;
+  updateInteractionFeedback(id: number, feedbackResult: string, feedbackComment?: string): Promise<void>;
+  getChatbotInteractions(limit?: number): Promise<typeof chatbotInteractions.$inferSelect[]>;
+  getFlaggedInteractions(): Promise<typeof chatbotInteractions.$inferSelect[]>;
+  getFeedbackStats(): Promise<{ total: number; resolved: number; partial: number; notResolved: number; nofeedback: number; byIntent: Record<string, { total: number; resolved: number; notResolved: number; partial: number }> }>;
+  getInteractionsByIntent(intent: string): Promise<typeof chatbotInteractions.$inferSelect[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -638,6 +647,69 @@ export class DatabaseStorage implements IStorage {
 
   async deleteAllHelpCenterArticles() {
     await db.delete(helpCenterArticles);
+  }
+
+  async logChatbotInteraction(interaction: InsertChatbotInteraction) {
+    const [result] = await db.insert(chatbotInteractions).values(interaction).returning();
+    return result;
+  }
+
+  async updateInteractionFeedback(id: number, feedbackResult: string, feedbackComment?: string) {
+    const flagged = feedbackResult === "not_resolved";
+    await db
+      .update(chatbotInteractions)
+      .set({
+        feedbackResult,
+        feedbackComment: feedbackComment || null,
+        flaggedForReview: flagged,
+        feedbackAt: new Date(),
+      })
+      .where(eq(chatbotInteractions.id, id));
+  }
+
+  async getChatbotInteractions(limit = 100) {
+    return db
+      .select()
+      .from(chatbotInteractions)
+      .orderBy(desc(chatbotInteractions.createdAt))
+      .limit(limit);
+  }
+
+  async getFlaggedInteractions() {
+    return db
+      .select()
+      .from(chatbotInteractions)
+      .where(eq(chatbotInteractions.flaggedForReview, true))
+      .orderBy(desc(chatbotInteractions.createdAt));
+  }
+
+  async getFeedbackStats() {
+    const all = await db.select().from(chatbotInteractions);
+    let resolved = 0, partial = 0, notResolved = 0, nofeedback = 0;
+    const byIntent: Record<string, { total: number; resolved: number; notResolved: number; partial: number }> = {};
+
+    for (const row of all) {
+      const intent = row.matchedIntent || "unknown";
+      if (!byIntent[intent]) byIntent[intent] = { total: 0, resolved: 0, notResolved: 0, partial: 0 };
+      byIntent[intent].total++;
+
+      switch (row.feedbackResult) {
+        case "resolved": resolved++; byIntent[intent].resolved++; break;
+        case "partial": partial++; byIntent[intent].partial++; break;
+        case "not_resolved": notResolved++; byIntent[intent].notResolved++; break;
+        default: nofeedback++; break;
+      }
+    }
+
+    return { total: all.length, resolved, partial, notResolved, nofeedback, byIntent };
+  }
+
+  async getInteractionsByIntent(intent: string) {
+    return db
+      .select()
+      .from(chatbotInteractions)
+      .where(eq(chatbotInteractions.matchedIntent, intent))
+      .orderBy(desc(chatbotInteractions.createdAt));
   }
 }
 
