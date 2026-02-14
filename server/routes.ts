@@ -609,7 +609,7 @@ export async function registerRoutes(
           Otp: otpCode,
           emailorPhone: contactMethod,
           LostFoundPageRequest: false,
-          loginViaLink: false,
+          loginViaLink: 0,
           applicationValue: "",
           returnUrl: "",
         },
@@ -620,7 +620,7 @@ export async function registerRoutes(
       );
 
       const verifyData = verifyResponse.data;
-      if (verifyData.Success) {
+      if (verifyData.IsSuccess) {
         const ownerResponse = await axios.get(
           `${MINSIDE_URL}/Security/GetOwnerDetailforOTPScreen?emailOrContactNumber=${encodeURIComponent(contactMethod)}`,
           { timeout: 15000 }
@@ -640,7 +640,7 @@ export async function registerRoutes(
         });
       }
 
-      res.status(401).json({ success: false, error: verifyData.Message || "Feil engangskode. Prøv igjen." });
+      res.status(401).json({ success: false, error: verifyData.viewMessage || "Feil engangskode. Prøv igjen." });
     } catch (error: any) {
       const errData = error.response?.data;
       const errMsg = typeof errData === "string" && errData.includes("<html")
