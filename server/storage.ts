@@ -161,6 +161,16 @@ export interface IStorage {
     onlyAutoreply: number;
   }>;
 
+  getScrubbedTicketsForDialogPattern(limit: number): Promise<typeof scrubbedTickets.$inferSelect[]>;
+  updateScrubbedTicketDialogPattern(ticketId: number, data: { dialogPattern: string; messagesAfterAutoreply: number; totalMessageCount: number }): Promise<void>;
+  getDialogPatternStats(): Promise<{
+    total: number;
+    unanalyzed: number;
+    patterns: { pattern: string; count: number; avgMessages: number; avgTotal: number }[];
+    byCategory: { category: string; pattern: string; count: number }[];
+    problematic: { category: string; count: number }[];
+  }>;
+
   logChatbotInteraction(interaction: InsertChatbotInteraction): Promise<typeof chatbotInteractions.$inferSelect>;
   updateInteractionFeedback(id: number, feedbackResult: string, feedbackComment?: string): Promise<void>;
   getChatbotInteractions(limit?: number): Promise<typeof chatbotInteractions.$inferSelect[]>;
@@ -741,6 +751,85 @@ export class DatabaseStorage implements IStorage {
     const onlyAutoreply = onlyAutoResult[0].count;
 
     return { totalAnalyzed, withAutoreply, withoutAutoreply, unanalyzed, avgConfidence, templateDistribution, onlyAutoreply };
+  }
+
+  async getScrubbedTicketsForDialogPattern(limit: number) {
+    return db.select().from(scrubbedTickets)
+      .where(isNull(scrubbedTickets.dialogPattern))
+      .orderBy(scrubbedTickets.id)
+      .limit(limit);
+  }
+
+  async updateScrubbedTicketDialogPattern(ticketId: number, data: { dialogPattern: string; messagesAfterAutoreply: number; totalMessageCount: number }) {
+    await db.update(scrubbedTickets)
+      .set({
+        dialogPattern: data.dialogPattern,
+        messagesAfterAutoreply: data.messagesAfterAutoreply,
+        totalMessageCount: data.totalMessageCount,
+      })
+      .where(eq(scrubbedTickets.ticketId, ticketId));
+  }
+
+  async getDialogPatternStats() {
+    const totalResult = await db.select({ count: count() }).from(scrubbedTickets).where(sql`dialog_pattern IS NOT NULL`);
+    const total = totalResult[0].count;
+
+    const unanalyzedResult = await db.select({ count: count() }).from(scrubbedTickets).where(isNull(scrubbedTickets.dialogPattern));
+    const unanalyzed = unanalyzedResult[0].count;
+
+    const patternResult = await db.execute(sql`
+      SELECT 
+        dialog_pattern as pattern,
+        COUNT(*)::int as count,
+        COALESCE(AVG(messages_after_autoreply), 0)::real as avg_messages,
+        COALESCE(AVG(total_message_count), 0)::real as avg_total
+      FROM scrubbed_tickets
+      WHERE dialog_pattern IS NOT NULL
+      GROUP BY dialog_pattern
+      ORDER BY count DESC
+    `);
+    const patternRows = (patternResult as any).rows || patternResult;
+    const patterns = (Array.isArray(patternRows) ? patternRows : []).map((r: any) => ({
+      pattern: r.pattern,
+      count: Number(r.count),
+      avgMessages: Number(Number(r.avg_messages).toFixed(1)),
+      avgTotal: Number(Number(r.avg_total).toFixed(1)),
+    }));
+
+    const byCategoryResult = await db.execute(sql`
+      SELECT 
+        COALESCE(hjelpesenter_category, 'Ukjent') as category,
+        dialog_pattern as pattern,
+        COUNT(*)::int as count
+      FROM scrubbed_tickets
+      WHERE dialog_pattern IS NOT NULL
+      GROUP BY hjelpesenter_category, dialog_pattern
+      ORDER BY category, count DESC
+    `);
+    const byCatRows = (byCategoryResult as any).rows || byCategoryResult;
+    const byCategory = (Array.isArray(byCatRows) ? byCatRows : []).map((r: any) => ({
+      category: r.category,
+      pattern: r.pattern,
+      count: Number(r.count),
+    }));
+
+    const problematicResult = await db.execute(sql`
+      SELECT 
+        COALESCE(hjelpesenter_category, 'Ukjent') as category,
+        COUNT(*)::int as count
+      FROM scrubbed_tickets
+      WHERE dialog_pattern = 'autosvar_only'
+      GROUP BY hjelpesenter_category
+      ORDER BY count DESC
+      LIMIT 10
+    `);
+    const probRows = (problematicResult as any).rows || problematicResult;
+    const problematic = (Array.isArray(probRows) ? probRows : []).map((r: any) => ({
+      category: r.category,
+      count: Number(r.count),
+    }));
+
+    return { total, unanalyzed, patterns, byCategory, problematic };
   }
 
   async logChatbotInteraction(interaction: InsertChatbotInteraction) {

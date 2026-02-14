@@ -1,0 +1,306 @@
+OPPGAVE B: Dialog-mønster analyse
+
+KONTEKST:
+Vi har nå identifisert hvilke tickets som startet med autosvar (Oppgave A).
+Nå skal vi klassifisere hvordan dialogene utviklet seg.
+
+FORMÅL:
+- Identifisere mønstre: kun autosvar, quick resolution, extended dialog, eller direkte menneskelig
+- Forstå hvor mange meldinger som trengs etter autosvar
+- Identifisere saker som lukkes med kun autosvar (problematisk!)
+
+4 MØNSTRE:
+1. autosvar_only - Kun autosvar, ingen menneskelig oppfølging (❌ problematisk)
+2. autosvar_quick_resolution - Autosvar → 1-2 meldinger → løsning (✅ effektivt)
+3. autosvar_extended_dialog - Autosvar → 3+ meldinger → løsning (⚠️ komplekst)
+4. direct_human_response - Ingen autosvar, direkte menneskelig (✅ god service)
+
+IMPLEMENTERING:
+
+══════════════════════════════════════════════════════════════
+DEL 1: UTVID DATABASE
+══════════════════════════════════════════════════════════════
+```sql
+ALTER TABLE scrubbed_tickets ADD COLUMN IF NOT EXISTS
+  dialog_pattern TEXT,  -- 'autosvar_only', 'autosvar_quick_resolution', etc.
+  messages_after_autoreply INTEGER DEFAULT 0,
+  total_message_count INTEGER DEFAULT 0;
+
+CREATE INDEX idx_dialog_pattern ON scrubbed_tickets(dialog_pattern);
+```
+
+══════════════════════════════════════════════════════════════
+DEL 2: KLASSIFISERINGSFUNKSJON
+══════════════════════════════════════════════════════════════
+```typescript
+type DialogPattern = 
+  | 'autosvar_only'
+  | 'autosvar_quick_resolution'
+  | 'autosvar_extended_dialog'
+  | 'direct_human_response';
+
+interface DialogAnalysis {
+  pattern: DialogPattern;
+  totalMessages: number;
+  messagesAfterAutoreply: number;
+  explanation: string;  // Kort forklaring
+}
+
+function analyzeDialogPattern(ticket: any): DialogAnalysis {
+  const messages = ticket.messages || [];
+  const totalMessages = messages.length;
+  const hasAutoReply = ticket.has_autoreply;
+  const humanResponseStartsAt = ticket.human_response_starts_at;
+  
+  // PATTERN 1: Direct human response (ingen autosvar)
+  if (!hasAutoReply) {
+    return {
+      pattern: 'direct_human_response',
+      totalMessages,
+      messagesAfterAutoreply: 0,
+      explanation: 'Agent svarte direkte uten autosvar - god personlig service'
+    };
+  }
+  
+  // PATTERN 2: Autosvar only (problematisk!)
+  if (humanResponseStartsAt === null || humanResponseStartsAt === -1) {
+    return {
+      pattern: 'autosvar_only',
+      totalMessages,
+      messagesAfterAutoreply: 0,
+      explanation: 'Kun autosvar sendt, ingen menneskelig oppfølging - kunde fikk ikke reell hjelp'
+    };
+  }
+  
+  // Beregn meldinger etter autosvar
+  const messagesAfterAutoreply = totalMessages - humanResponseStartsAt;
+  
+  // PATTERN 3: Quick resolution (1-2 meldinger etter autosvar)
+  if (messagesAfterAutoreply <= 2) {
+    return {
+      pattern: 'autosvar_quick_resolution',
+      totalMessages,
+      messagesAfterAutoreply,
+      explanation: 'Autosvar + rask menneskelig oppfølging - effektiv håndtering'
+    };
+  }
+  
+  // PATTERN 4: Extended dialog (3+ meldinger)
+  return {
+    pattern: 'autosvar_extended_dialog',
+    totalMessages,
+    messagesAfterAutoreply,
+    explanation: 'Autosvar + lengre dialog med flere meldinger - kompleks sak'
+  };
+}
+```
+
+══════════════════════════════════════════════════════════════
+DEL 3: WORKFLOW
+══════════════════════════════════════════════════════════════
+```typescript
+async function runDialogPatternAnalysis() {
+  console.log('🔄 Starting dialog pattern analysis...');
+  
+  // Hent tickets som har autosvar-data
+  const tickets = await db.query(`
+    SELECT 
+      id,
+      messages,
+      has_autoreply,
+      human_response_starts_at,
+      hjelpesenter_category
+    FROM scrubbed_tickets
+    WHERE dialog_pattern IS NULL
+    ORDER BY id
+    LIMIT 5000
+  `);
+  
+  console.log(`Analyzing ${tickets.rows.length} tickets`);
+  
+  const stats = {
+    total: 0,
+    patterns: {
+      autosvar_only: 0,
+      autosvar_quick_resolution: 0,
+      autosvar_extended_dialog: 0,
+      direct_human_response: 0
+    },
+    byCategory: {} as Record<string, Record<DialogPattern, number>>
+  };
+  
+  for (const ticket of tickets.rows) {
+    // Analyser mønster
+    const analysis = analyzeDialogPattern(ticket);
+    
+    // Lagre i database
+    await db.query(`
+      UPDATE scrubbed_tickets SET
+        dialog_pattern = $1,
+        messages_after_autoreply = $2,
+        total_message_count = $3
+      WHERE id = $4
+    `, [
+      analysis.pattern,
+      analysis.messagesAfterAutoreply,
+      analysis.totalMessages,
+      ticket.id
+    ]);
+    
+    // Oppdater stats
+    stats.total++;
+    stats.patterns[analysis.pattern]++;
+    
+    // Per kategori
+    const category = ticket.hjelpesenter_category || 'Ukjent';
+    if (!stats.byCategory[category]) {
+      stats.byCategory[category] = {
+        autosvar_only: 0,
+        autosvar_quick_resolution: 0,
+        autosvar_extended_dialog: 0,
+        direct_human_response: 0
+      };
+    }
+    stats.byCategory[category][analysis.pattern]++;
+    
+    if (stats.total % 100 === 0) {
+      console.log(`Analyzed ${stats.total}/${tickets.rows.length}...`);
+    }
+  }
+  
+  console.log('✅ Dialog pattern analysis complete!');
+  
+  // Print stats
+  console.log(`
+OVERALL DISTRIBUTION:
+- Total tickets: ${stats.total}
+- Autosvar only: ${stats.patterns.autosvar_only} (${(stats.patterns.autosvar_only/stats.total*100).toFixed(1)}%) ❌
+- Quick resolution: ${stats.patterns.autosvar_quick_resolution} (${(stats.patterns.autosvar_quick_resolution/stats.total*100).toFixed(1)}%) ✅
+- Extended dialog: ${stats.patterns.autosvar_extended_dialog} (${(stats.patterns.autosvar_extended_dialog/stats.total*100).toFixed(1)}%) ⚠️
+- Direct human: ${stats.patterns.direct_human_response} (${(stats.patterns.direct_human_response/stats.total*100).toFixed(1)}%) ✅
+
+PROBLEMATIC CASES (autosvar_only):
+${Object.entries(stats.byCategory)
+  .map(([cat, patterns]) => `  ${cat}: ${patterns.autosvar_only} tickets`)
+  .filter(line => !line.includes(': 0 '))
+  .join('\n')}
+  `);
+  
+  return stats;
+}
+```
+
+══════════════════════════════════════════════════════════════
+DEL 4: STATISTIKK & API
+══════════════════════════════════════════════════════════════
+```typescript
+// API endpoint for stats
+app.get('/api/training/dialog-patterns/stats', async (req, res) => {
+  try {
+    // Overall stats
+    const overall = await db.query(`
+      SELECT 
+        dialog_pattern,
+        COUNT(*) as count,
+        AVG(messages_after_autoreply) as avg_messages,
+        AVG(total_message_count) as avg_total_messages
+      FROM scrubbed_tickets
+      WHERE dialog_pattern IS NOT NULL
+      GROUP BY dialog_pattern
+      ORDER BY count DESC
+    `);
+    
+    // Per category
+    const byCategory = await db.query(`
+      SELECT 
+        hjelpesenter_category,
+        dialog_pattern,
+        COUNT(*) as count
+      FROM scrubbed_tickets
+      WHERE dialog_pattern IS NOT NULL
+      GROUP BY hjelpesenter_category, dialog_pattern
+      ORDER BY hjelpesenter_category, count DESC
+    `);
+    
+    // Problematic (autosvar_only) breakdown
+    const problematic = await db.query(`
+      SELECT 
+        hjelpesenter_category,
+        COUNT(*) as count,
+        ARRAY_AGG(subject ORDER BY id LIMIT 5) as example_subjects
+      FROM scrubbed_tickets
+      WHERE dialog_pattern = 'autosvar_only'
+      GROUP BY hjelpesenter_category
+      ORDER BY count DESC
+      LIMIT 10
+    `);
+    
+    res.json({
+      overall: overall.rows,
+      byCategory: byCategory.rows,
+      problematic: problematic.rows
+    });
+    
+  } catch (error) {
+    console.error('Dialog pattern stats error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+```
+
+══════════════════════════════════════════════════════════════
+DEL 5: DASHBOARD TAB
+══════════════════════════════════════════════════════════════
+
+NY TAB: "Dialog-mønstre"
+
+Vis:
+
+1. STAT CARDS (4 kort):
+   - Total analysert
+   - Autosvar only (rød - problematisk)
+   - Quick resolution (grønn - effektivt)
+   - Extended dialog (gul - komplekst)
+   - Direct human (grønn - god service)
+
+2. FORDELING (pie chart eller bar):
+   - Visualiser fordeling av de 4 mønstrene
+
+3. PER KATEGORI (tabell):
+   Kategori | Autosvar only | Quick | Extended | Direct | Total
+   ---------|---------------|-------|----------|--------|------
+   Min Side | 45            | 120   | 35       | 50     | 250
+   ...
+
+4. PROBLEMATISKE SAKER (autosvar_only):
+   - Liste over kategorier med flest "autosvar_only"
+   - Eksempel-subjects fra hver kategori
+   - "Disse sakene fikk kun autosvar - ingen menneskelig hjelp!"
+
+5. KNAPP: "Kjør dialog-analyse"
+   - Kjører runDialogPatternAnalysis()
+   - Viser SSE progress
+   - Oppdaterer stats når ferdig
+
+══════════════════════════════════════════════════════════════
+KJØRING
+══════════════════════════════════════════════════════════════
+
+TRINN 1: Test på 100 tickets
+→ Kjør runDialogPatternAnalysis() med LIMIT 100
+→ Rapporter fordeling
+
+TRINN 2: Hvis OK - kjør på alle
+→ Fjern LIMIT eller sett til 5000
+→ Kjør full analyse
+
+FORVENTET RESULTAT:
+- 10-20% autosvar_only (problematisk - bør reduseres)
+- 40-50% quick_resolution (effektivt - bra!)
+- 20-30% extended_dialog (komplekse saker)
+- 10-20% direct_human (god personlig service)
+
+KRITISKE INNSIKTER:
+- Hvilke kategorier har flest "autosvar_only"?
+- Kan disse autosvarene forbedres?
+- Skal noen autosvar trigge automatisk eskalering til menneske?

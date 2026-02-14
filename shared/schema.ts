@@ -51,6 +51,9 @@ export const scrubbedTickets = pgTable("scrubbed_tickets", {
   autoreplyTemplateId: integer("autoreply_template_id"),
   autoreplyConfidence: real("autoreply_confidence"),
   humanResponseStartsAt: integer("human_response_starts_at"),
+  dialogPattern: text("dialog_pattern"),
+  messagesAfterAutoreply: integer("messages_after_autoreply").default(0),
+  totalMessageCount: integer("total_message_count").default(0),
   scrubbedAt: timestamp("scrubbed_at").default(sql`CURRENT_TIMESTAMP`),
 });
 

@@ -22,6 +22,7 @@ import {
   runHelpCenterMatching,
   generateTemplateKeywords,
   runAutoReplyDetection,
+  runDialogPatternAnalysis,
   type BatchMetrics,
 } from "./training-agent";
 import {
@@ -1446,6 +1447,32 @@ export async function registerRoutes(
   app.get("/api/training/autoreply-stats", async (_req, res) => {
     try {
       const stats = await storage.getAutoreplyStats();
+      res.json(stats);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/training/analyze-dialog-patterns", async (_req, res) => {
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    });
+    try {
+      const result = await runDialogPatternAnalysis((msg, pct) => {
+        res.write(`data: ${JSON.stringify({ message: msg, progress: pct })}\n\n`);
+      });
+      res.write(`data: ${JSON.stringify({ message: `Ferdig! ${result.total} tickets analysert`, progress: 100, done: true })}\n\n`);
+    } catch (error: any) {
+      res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+    }
+    res.end();
+  });
+
+  app.get("/api/training/dialog-pattern-stats", async (_req, res) => {
+    try {
+      const stats = await storage.getDialogPatternStats();
       res.json(stats);
     } catch (error: any) {
       res.status(500).json({ error: error.message });

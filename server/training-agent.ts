@@ -1342,6 +1342,115 @@ export async function runAutoReplyDetection(
   return stats;
 }
 
+// ─── DIALOG PATTERN ANALYSIS (Oppgave B) ─────────────────────────────────────
+
+type DialogPattern = 
+  | 'autosvar_only'
+  | 'autosvar_quick_resolution'
+  | 'autosvar_extended_dialog'
+  | 'direct_human_response';
+
+interface DialogAnalysis {
+  pattern: DialogPattern;
+  totalMessages: number;
+  messagesAfterAutoreply: number;
+}
+
+function analyzeDialogPattern(ticket: any): DialogAnalysis {
+  const messages = Array.isArray(ticket.messages) ? ticket.messages : [];
+  const totalMessages = messages.length;
+  const hasAutoReply = ticket.hasAutoreply || ticket.has_autoreply;
+  const humanResponseStartsAt = ticket.humanResponseStartsAt ?? ticket.human_response_starts_at;
+
+  if (!hasAutoReply) {
+    return {
+      pattern: 'direct_human_response',
+      totalMessages,
+      messagesAfterAutoreply: 0,
+    };
+  }
+
+  if (humanResponseStartsAt === null || humanResponseStartsAt === undefined || humanResponseStartsAt === -1) {
+    return {
+      pattern: 'autosvar_only',
+      totalMessages,
+      messagesAfterAutoreply: 0,
+    };
+  }
+
+  const messagesAfterAutoreply = Math.max(0, totalMessages - humanResponseStartsAt);
+
+  if (messagesAfterAutoreply <= 2) {
+    return {
+      pattern: 'autosvar_quick_resolution',
+      totalMessages,
+      messagesAfterAutoreply,
+    };
+  }
+
+  return {
+    pattern: 'autosvar_extended_dialog',
+    totalMessages,
+    messagesAfterAutoreply,
+  };
+}
+
+export async function runDialogPatternAnalysis(
+  onProgress?: (msg: string, pct: number) => void,
+  ticketLimit: number = 5000
+): Promise<{ total: number; patterns: Record<DialogPattern, number> }> {
+  onProgress?.("Starter dialog-mønster analyse...", 0);
+
+  const tickets = await storage.getScrubbedTicketsForDialogPattern(ticketLimit);
+  onProgress?.(`Fant ${tickets.length} uanalyserte tickets`, 5);
+
+  if (tickets.length === 0) {
+    onProgress?.("Ingen uanalyserte tickets funnet", 100);
+    return { total: 0, patterns: { autosvar_only: 0, autosvar_quick_resolution: 0, autosvar_extended_dialog: 0, direct_human_response: 0 } };
+  }
+
+  const stats = {
+    total: 0,
+    patterns: {
+      autosvar_only: 0,
+      autosvar_quick_resolution: 0,
+      autosvar_extended_dialog: 0,
+      direct_human_response: 0,
+    } as Record<DialogPattern, number>,
+  };
+
+  for (let i = 0; i < tickets.length; i++) {
+    const ticket = tickets[i];
+    try {
+      const analysis = analyzeDialogPattern(ticket);
+
+      await storage.updateScrubbedTicketDialogPattern(ticket.ticketId, {
+        dialogPattern: analysis.pattern,
+        messagesAfterAutoreply: analysis.messagesAfterAutoreply,
+        totalMessageCount: analysis.totalMessages,
+      });
+
+      stats.total++;
+      stats.patterns[analysis.pattern]++;
+
+      if ((i + 1) % 100 === 0 || i === tickets.length - 1) {
+        const pct = 5 + ((i + 1) / tickets.length) * 90;
+        onProgress?.(`Analysert ${i + 1}/${tickets.length} - ${stats.patterns.autosvar_only} kun autosvar, ${stats.patterns.autosvar_quick_resolution} rask, ${stats.patterns.autosvar_extended_dialog} utvidet, ${stats.patterns.direct_human_response} direkte`, pct);
+      }
+    } catch (err: any) {
+      log(`Error analyzing dialog pattern for ticket ${ticket.ticketId}: ${err.message}`, "training");
+    }
+  }
+
+  const pctOnly = stats.total > 0 ? ((stats.patterns.autosvar_only / stats.total) * 100).toFixed(1) : '0';
+  const pctQuick = stats.total > 0 ? ((stats.patterns.autosvar_quick_resolution / stats.total) * 100).toFixed(1) : '0';
+  const pctExtended = stats.total > 0 ? ((stats.patterns.autosvar_extended_dialog / stats.total) * 100).toFixed(1) : '0';
+  const pctDirect = stats.total > 0 ? ((stats.patterns.direct_human_response / stats.total) * 100).toFixed(1) : '0';
+
+  onProgress?.(`Ferdig! ${stats.total} analysert: Kun autosvar ${pctOnly}%, Rask ${pctQuick}%, Utvidet ${pctExtended}%, Direkte ${pctDirect}%`, 100);
+  return stats;
+}
+
 // ─── COMBINED BATCH ANALYSIS (Category + Intent + Resolution in ONE call) ─────
 export async function runCombinedBatchAnalysis(
   onProgress?: (msg: string, pct: number) => void,
