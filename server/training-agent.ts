@@ -1,12 +1,12 @@
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import { storage } from "./storage";
 import { scrubTicket } from "./gdpr-scrubber";
 import { fetchTicketsFromPureservice, mapPureserviceToRawTicket } from "./pureservice";
 import { log } from "./index";
 
-const anthropic = new Anthropic({
-  apiKey: process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL,
+const openai = new OpenAI({
+  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
 });
 
 const KNOWN_INTENTS = [
@@ -46,13 +46,13 @@ const KNOWN_INTENTS = [
   "GeneralInquiry",
 ];
 
-async function callClaude(prompt: string, model: string = "claude-haiku-4-5", maxTokens: number = 4096): Promise<string> {
-  const response = await anthropic.messages.create({
+async function callOpenAI(prompt: string, model: string = "gpt-5-nano", maxTokens: number = 4096): Promise<string> {
+  const response = await openai.chat.completions.create({
     model,
-    max_tokens: maxTokens,
+    max_completion_tokens: maxTokens,
     messages: [{ role: "user", content: prompt }],
   });
-  return response.content[0].type === "text" ? response.content[0].text : "";
+  return response.choices[0]?.message?.content || "";
 }
 
 function extractJson(text: string): any {
@@ -223,7 +223,7 @@ SVAR I JSON:
   "reasoning": "Why this mapping?"
 }`;
 
-        const text = await callClaude(prompt);
+        const text = await callOpenAI(prompt);
         const result = extractJson(text);
 
         await storage.insertCategoryMapping({
@@ -306,7 +306,7 @@ SVAR I JSON:
   ]
 }`;
 
-    const text = await callClaude(prompt, "claude-sonnet-4-5", 8192);
+    const text = await callOpenAI(prompt, "gpt-5-mini", 8192);
     const result = extractJson(text);
 
     const themes = result.identified_themes || result;
@@ -408,7 +408,7 @@ SVAR I JSON:
   "reasoning": "Why this classification?"
 }`;
 
-          const text = await callClaude(prompt);
+          const text = await callOpenAI(prompt);
           const result = extractJson(text);
 
           await storage.insertIntentClassification({
@@ -484,7 +484,7 @@ SVAR SOM JSON ARRAY med ett objekt per ticket, i SAMME rekkefølge:
   }
 ]`;
 
-          const text = await callClaude(batchPrompt, "claude-haiku-4-5", 8192);
+          const text = await callOpenAI(batchPrompt, "gpt-5-nano", 8192);
           const results = extractJson(text);
           const resultsArray = Array.isArray(results) ? results : [results];
 
@@ -558,7 +558,7 @@ SVAR I JSON:
   "reasoning": "Why?"
 }`;
 
-              const text = await callClaude(prompt);
+              const text = await callOpenAI(prompt);
               const result = extractJson(text);
 
               await storage.insertIntentClassification({
@@ -647,7 +647,7 @@ SVAR I JSON:
   "follow_up_needed": false
 }`;
 
-        const text = await callClaude(prompt);
+        const text = await callOpenAI(prompt);
         const result = extractJson(text);
 
         await storage.insertResolutionPattern({
@@ -726,7 +726,7 @@ SVAR I JSON:
   "review_priority": "low | medium | high"
 }`;
 
-      const text = await callClaude(prompt);
+      const text = await callOpenAI(prompt);
       const result = extractJson(text);
 
       await storage.insertUncertaintyCase({
@@ -795,7 +795,7 @@ Svar som JSON-array av entries.`;
 
   onProgress?.("Sender forespørsel til AI...", 20);
 
-  const text = await callClaude(prompt, "claude-sonnet-4-5", 8192);
+  const text = await callOpenAI(prompt, "gpt-5-mini", 8192);
 
   let entries: any[];
   try {

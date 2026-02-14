@@ -8,7 +8,7 @@ AI-powered support automation system for DyreID (Norway's national pet ID regist
 
 ## Architecture
 - **Stack**: Express + Vite + React + PostgreSQL + Drizzle ORM
-- **AI**: Claude via Anthropic API (Haiku for training workflows, Sonnet for complex analysis/chatbot)
+- **AI**: OpenAI via Replit AI Integrations (gpt-5-nano for training workflows, gpt-5-mini for complex analysis) + Claude via Anthropic API (for chatbot)
 - **Auth**: OTP-based via Min Side sandbox (demo phones: 91000001-91000005)
 
 ## Project Structure
@@ -94,9 +94,12 @@ client/src/
 - `PURESERVICE_API_KEY` - API key for Pureservice ticket system
 - `SESSION_SECRET` - Session encryption key
 - `DATABASE_URL` - PostgreSQL connection string (auto-provided)
-- `AI_INTEGRATIONS_ANTHROPIC_API_KEY` - Claude API key (auto-provided via integration)
+- `AI_INTEGRATIONS_OPENAI_API_KEY` - OpenAI API key (auto-provided via Replit AI integration, used by training agent)
+- `AI_INTEGRATIONS_OPENAI_BASE_URL` - OpenAI base URL (auto-provided via Replit AI integration)
+- `AI_INTEGRATIONS_ANTHROPIC_API_KEY` - Claude API key (auto-provided via integration, used by chatbot)
 
 ## Recent Changes
+- 2026-02-14: Switched training agent AI from Claude (Anthropic) to OpenAI via Replit AI Integrations. claude-haiku-4-5 → gpt-5-nano, claude-sonnet-4-5 → gpt-5-mini. Chatbot remains on Claude.
 - 2026-02-14: Fixed chatbot auth context - user context from OTP login now stored in DB (conversations.userContext jsonb) and passed to AI system prompt. Quick intent patterns are auth-aware. Chatbot correctly identifies logged-in users and their pets.
 - 2026-02-14: OTP integration with Min Side (minside.dyreid.no) via backend proxy, quick intent matching (11 patterns), batch intent classification (5x faster), admin panel with data export
 - 2026-02-13: Complete 9-workflow Training Agent with dashboard, review queue UI, CSV-loaded categories, 34 known intents, uncertainty detection, uncategorized theme analysis
