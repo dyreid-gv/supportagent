@@ -1,11 +1,10 @@
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import { storage } from "./storage";
 import { getMinSideContext, performAction, lookupOwnerByPhone } from "./minside-sandbox";
 import type { PlaybookEntry } from "@shared/schema";
 
-const anthropic = new Anthropic({
-  apiKey: process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL,
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
 });
 
 function buildSystemPrompt(playbook: PlaybookEntry[], ownerContext: any | null, storedUserContext: any | null): string {
@@ -275,22 +274,23 @@ export async function* streamChatResponse(
     content: m.content,
   }));
 
-  const stream = anthropic.messages.stream({
-    model: "claude-sonnet-4-5",
-    max_tokens: 8192,
-    system: systemPrompt,
-    messages: chatMessages,
+  const stream = await openai.chat.completions.create({
+    model: "gpt-4o",
+    max_completion_tokens: 8192,
+    messages: [
+      { role: "system", content: systemPrompt },
+      ...chatMessages,
+    ],
+    stream: true,
   });
 
   let fullResponse = "";
 
-  for await (const event of stream) {
-    if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-      const content = event.delta.text;
-      if (content) {
-        fullResponse += content;
-        yield content;
-      }
+  for await (const chunk of stream) {
+    const content = chunk.choices[0]?.delta?.content || "";
+    if (content) {
+      fullResponse += content;
+      yield content;
     }
   }
 

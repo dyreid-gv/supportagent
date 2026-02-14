@@ -8,7 +8,7 @@ AI-powered support automation system for DyreID (Norway's national pet ID regist
 
 ## Architecture
 - **Stack**: Express + Vite + React + PostgreSQL + Drizzle ORM
-- **AI**: OpenAI via Replit AI Integrations (gpt-5-nano for training workflows, gpt-5-mini for complex analysis) + Claude via Anthropic API (for chatbot)
+- **AI**: OpenAI via egen API-nøkkel (gpt-5-nano for training workflows, gpt-5-mini for complex analysis, gpt-4o for chatbot)
 - **Auth**: OTP-based via Min Side sandbox (demo phones: 91000001-91000005)
 
 ## Project Structure
@@ -94,8 +94,7 @@ client/src/
 - `PURESERVICE_API_KEY` - API key for Pureservice ticket system
 - `SESSION_SECRET` - Session encryption key
 - `DATABASE_URL` - PostgreSQL connection string (auto-provided)
-- `OPENAI_API_KEY` - OpenAI API key (user-provided, used by training agent)
-- `AI_INTEGRATIONS_ANTHROPIC_API_KEY` - Claude API key (auto-provided via integration, used by chatbot)
+- `OPENAI_API_KEY` - OpenAI API key (user-provided, used by both training agent and chatbot)
 
 ## Recent Changes
 - 2026-02-14: Switched training agent AI from Claude (Anthropic) to OpenAI via Replit AI Integrations. claude-haiku-4-5 → gpt-5-nano, claude-sonnet-4-5 → gpt-5-mini. Chatbot remains on Claude.
