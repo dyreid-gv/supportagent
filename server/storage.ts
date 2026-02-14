@@ -48,9 +48,11 @@ export interface IStorage {
 
   insertCategoryMapping(mapping: InsertCategoryMapping): Promise<void>;
   getCategoryMappingCount(): Promise<number>;
+  getCategoryMappingByTicketId(ticketId: number): Promise<typeof categoryMappings.$inferSelect | null>;
 
   insertIntentClassification(classification: InsertIntentClassification): Promise<void>;
   getIntentClassificationCount(): Promise<number>;
+  getIntentClassificationByTicketId(ticketId: number): Promise<typeof intentClassifications.$inferSelect | null>;
   getClassifiedTicketsWithoutResolution(limit: number): Promise<typeof intentClassifications.$inferSelect[]>;
   getLowConfidenceClassifications(limit: number): Promise<typeof intentClassifications.$inferSelect[]>;
   updateIntentClassificationReview(ticketId: number, data: { intent?: string; manuallyReviewed: boolean; reviewerEmail: string; reviewNotes: string; uncertaintyReviewed: boolean }): Promise<void>;
@@ -58,6 +60,7 @@ export interface IStorage {
 
   insertResolutionPattern(pattern: InsertResolutionPattern): Promise<void>;
   getResolutionPatternCount(): Promise<number>;
+  getResolutionPatternByTicketId(ticketId: number): Promise<typeof resolutionPatterns.$inferSelect | null>;
 
   getPlaybookEntries(): Promise<typeof playbookEntries.$inferSelect[]>;
   getActivePlaybookEntries(): Promise<typeof playbookEntries.$inferSelect[]>;
@@ -230,8 +233,18 @@ export class DatabaseStorage implements IStorage {
     return result[0].count;
   }
 
+  async getCategoryMappingByTicketId(ticketId: number): Promise<typeof categoryMappings.$inferSelect | null> {
+    const result = await db.select().from(categoryMappings).where(eq(categoryMappings.ticketId, ticketId)).limit(1);
+    return result[0] || null;
+  }
+
   async insertIntentClassification(classification: InsertIntentClassification): Promise<void> {
     await db.insert(intentClassifications).values(classification);
+  }
+
+  async getIntentClassificationByTicketId(ticketId: number): Promise<typeof intentClassifications.$inferSelect | null> {
+    const result = await db.select().from(intentClassifications).where(eq(intentClassifications.ticketId, ticketId)).limit(1);
+    return result[0] || null;
   }
 
   async getIntentClassificationCount(): Promise<number> {
@@ -299,6 +312,11 @@ export class DatabaseStorage implements IStorage {
   async getResolutionPatternCount(): Promise<number> {
     const result = await db.select({ count: count() }).from(resolutionPatterns);
     return result[0].count;
+  }
+
+  async getResolutionPatternByTicketId(ticketId: number): Promise<typeof resolutionPatterns.$inferSelect | null> {
+    const result = await db.select().from(resolutionPatterns).where(eq(resolutionPatterns.ticketId, ticketId)).limit(1);
+    return result[0] || null;
   }
 
   async getPlaybookEntries() {

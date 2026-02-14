@@ -922,6 +922,16 @@ export async function submitManualReview(
 }
 
 async function saveCombinedResult(ticket: any, result: any, metrics: BatchMetrics): Promise<void> {
+  const existingCat = await storage.getCategoryMappingByTicketId(ticket.ticketId);
+  const existingIntent = await storage.getIntentClassificationByTicketId(ticket.ticketId);
+  const existingRes = await storage.getResolutionPatternByTicketId(ticket.ticketId);
+
+  if (existingCat || existingIntent || existingRes) {
+    log(`Skipping ticket ${ticket.ticketId}: already has results (cat=${!!existingCat}, intent=${!!existingIntent}, res=${!!existingRes})`, "training");
+    metrics.processedTickets++;
+    return;
+  }
+
   if (result.hjelpesenter_category) {
     await storage.insertCategoryMapping({
       ticketId: ticket.ticketId,
