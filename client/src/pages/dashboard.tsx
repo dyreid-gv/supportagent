@@ -359,6 +359,101 @@ function WorkflowCard({
   );
 }
 
+function DialogPatternPipelineCard() {
+  const [isRunning, setIsRunning] = useState(false);
+  const [currentStep, setCurrentStep] = useState(0);
+  const [progress, setProgress] = useState(0);
+  const [logs, setLogs] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  const steps = [
+    { endpoint: "/api/training/generate-keywords", label: "Keywords" },
+    { endpoint: "/api/training/detect-autoreply", label: "Autosvar" },
+    { endpoint: "/api/training/analyze-dialog-patterns", label: "Mønstre" },
+  ];
+
+  const run = useCallback(async () => {
+    setIsRunning(true);
+    setCurrentStep(0);
+    setProgress(0);
+    setLogs([]);
+    setError(null);
+
+    try {
+      for (let i = 0; i < steps.length; i++) {
+        const step = steps[i];
+        setCurrentStep(i + 1);
+        setLogs(prev => [...prev, `--- Steg ${i + 1}/3: ${step.label} ---`]);
+        const base = (i / steps.length) * 100;
+        const weight = 100 / steps.length;
+
+        await runSSEEndpoint(
+          step.endpoint,
+          (msg) => setLogs(prev => [...prev, msg]),
+          (pct) => setProgress(Math.round(base + (pct / 100) * weight))
+        );
+      }
+      setProgress(100);
+      setLogs(prev => [...prev, "Alle 3 steg fullført!"]);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setIsRunning(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/training/autoreply-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/training/dialog-pattern-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/training/stats"] });
+    }
+  }, []);
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className="no-default-hover-elevate no-default-active-elevate font-mono text-xs">
+            10
+          </Badge>
+          <Layers className="h-4 w-4 text-muted-foreground" />
+          <CardTitle className="text-sm font-medium">Dialog-analyse</CardTitle>
+        </div>
+        <Button
+          data-testid="button-workflow-10"
+          onClick={run}
+          disabled={isRunning}
+          size="sm"
+        >
+          {isRunning ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Play className="h-4 w-4" />
+          )}
+          {isRunning ? `${currentStep}/3...` : "Start"}
+        </Button>
+      </CardHeader>
+      <CardContent>
+        <p className="text-xs text-muted-foreground mb-3">Keywords + autosvar-gjenkjenning + dialog-mønstre (3 steg)</p>
+        {isRunning && <Progress value={progress} className="mb-2" />}
+        {error && (
+          <div className="flex items-center gap-1 text-xs text-destructive mb-2">
+            <AlertCircle className="h-3 w-3 shrink-0" />
+            <span className="truncate">{error}</span>
+          </div>
+        )}
+        {logs.length > 0 && (
+          <ScrollArea className="h-20 rounded-md border p-2">
+            <div className="space-y-1">
+              {logs.map((log, i) => (
+                <p key={i} className={`text-xs font-mono ${log.startsWith("---") ? "font-semibold text-foreground" : "text-muted-foreground"}`}>
+                  {log}
+                </p>
+              ))}
+            </div>
+          </ScrollArea>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function ReviewPanel({ item, onClose }: { item: ReviewQueueItem; onClose: () => void }) {
   const [email, setEmail] = useState("");
   const [notes, setNotes] = useState("");
@@ -610,7 +705,7 @@ export default function Dashboard() {
             DyreID Training Agent
           </h1>
           <p className="text-sm text-muted-foreground">
-            9-stegs treningspipeline for support-automatisering
+            10-stegs treningspipeline for support-automatisering
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -790,6 +885,7 @@ export default function Dashboard() {
                 </Button>
               </CardContent>
             </Card>
+            <DialogPatternPipelineCard />
           </div>
           <Card className="mt-4 border-primary/30">
             <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
