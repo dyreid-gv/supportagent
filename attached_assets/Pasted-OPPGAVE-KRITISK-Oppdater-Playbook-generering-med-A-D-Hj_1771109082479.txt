@@ -1,0 +1,645 @@
+OPPGAVE KRITISK: Oppdater Playbook-generering med A-D + Hjelpesenter
+
+KONTEKST:
+Vi har nå bygget alle forbedringer A-D + hjelpesenter-integrasjon + feedback loop.
+Nå skal Playbook-generering (Workflow 8) oppdateres til å INKLUDERE alt dette!
+
+FORMÅL:
+Lage en kraftig, datadrevet Playbook som gir chatboten:
+- Hva kunder faktisk spør om (fra tickets)
+- Offisiell prosedyre (fra hjelpesenter)
+- Hva som fungerer i praksis (fra feedback)
+- Action-data (API endpoints, required data)
+- Kvalitetsinnsikter (hva som mangler i nåværende løsninger)
+
+IMPLEMENTERING:
+
+══════════════════════════════════════════════════════════════
+DEL 1: UTVID PLAYBOOK_ENTRIES TABELL
+══════════════════════════════════════════════════════════════
+```sql
+-- Legg til alle nye kolonner fra A-D + Hjelpesenter
+ALTER TABLE playbook_entries ADD COLUMN IF NOT EXISTS
+
+  -- FRA A (AUTOSVAR):
+  has_autoreply_available BOOLEAN DEFAULT false,
+  autoreply_template_id INTEGER,
+  autoreply_template_name TEXT,
+  autoreply_content TEXT,  -- For chatbot å bruke
+  
+  -- FRA B (DIALOG-MØNSTER):
+  typical_dialog_pattern TEXT,  -- 'autosvar_quick_resolution', etc.
+  avg_messages_after_autoreply FLOAT,
+  dialog_pattern_distribution JSONB,  -- { "autosvar_only": 0.1, "quick": 0.6, ... }
+  
+  -- FRA C (REKLASSIFISERING):
+  was_reclassified BOOLEAN DEFAULT false,
+  original_categories TEXT[],  -- Hvis reklassifisert fra "Generell"
+  reclassified_from JSONB,  -- { "Generell e-post": 45, "Annet": 12 }
+  
+  -- FRA D (RESOLUSJONS-KVALITET):
+  avg_resolution_quality TEXT,  -- 'high', 'medium', 'low', 'none'
+  quality_distribution JSONB,  -- { "high": 0.6, "medium": 0.3, ... }
+  common_missing_elements TEXT[],
+  common_positive_elements TEXT[],
+  needs_improvement BOOLEAN DEFAULT false,  -- true hvis >30% LOW/NONE
+  
+  -- FRA HJELPESENTER:
+  help_center_article_id INTEGER,
+  help_center_article_url TEXT,
+  help_center_article_title TEXT,
+  official_procedure TEXT[],  -- Steg fra hjelpesenter
+  help_center_content_summary TEXT,
+  
+  -- ACTION-DATA (fra hjelpesenter):
+  requires_login BOOLEAN DEFAULT false,
+  requires_action BOOLEAN DEFAULT false,
+  action_type TEXT,  -- 'API_CALL', 'FORM_FILL', 'NAVIGATION', 'INFO_ONLY'
+  api_endpoint TEXT,
+  http_method TEXT,  -- 'GET', 'POST', 'PUT'
+  required_runtime_data TEXT[],  -- ['petId', 'newOwnerPhone']
+  payment_required BOOLEAN DEFAULT false,
+  payment_amount TEXT,
+  
+  -- CHATBOT GUIDANCE:
+  chatbot_steps TEXT[],  -- Step-by-step chatbot skal følge
+  combined_response TEXT,  -- Autosvar + hjelpesenter + best practice
+  
+  -- FRA FEEDBACK (kontinuerlig oppdatering):
+  successful_resolutions INTEGER DEFAULT 0,
+  failed_resolutions INTEGER DEFAULT 0,
+  total_uses INTEGER DEFAULT 0,
+  success_rate FLOAT DEFAULT 0.0,
+  last_used_at TIMESTAMP;
+
+-- Indekser
+CREATE INDEX IF NOT EXISTS idx_playbook_quality ON playbook_entries(avg_resolution_quality);
+CREATE INDEX IF NOT EXISTS idx_playbook_action ON playbook_entries(action_type);
+CREATE INDEX IF NOT EXISTS idx_playbook_improvement ON playbook_entries(needs_improvement);
+```
+
+══════════════════════════════════════════════════════════════
+DEL 2: OPPDATER PLAYBOOK-GENERERING (WORKFLOW 8)
+══════════════════════════════════════════════════════════════
+```typescript
+async function generateEnhancedPlaybook() {
+  console.log('🎯 Generating enhanced playbook with A-D + Hjelpesenter data...');
+  
+  // Hent alle unike intents
+  const intents = await db.query(`
+    SELECT DISTINCT intent
+    FROM intent_classifications
+    WHERE intent IS NOT NULL
+    ORDER BY intent
+  `);
+  
+  console.log(`Generating playbook for ${intents.rows.length} intents`);
+  
+  for (const { intent } of intents.rows) {
+    console.log(`\nProcessing intent: ${intent}`);
+    
+    // 1. HENT ALLE TICKETS FOR DENNE INTENTEN
+    const tickets = await db.query(`
+      SELECT 
+        st.*,
+        ic.confidence as intent_confidence,
+        cm.hjelpesenter_category,
+        cm.hjelpesenter_subcategory,
+        cm.reclassified_category,
+        cm.original_category
+      FROM scrubbed_tickets st
+      JOIN intent_classifications ic ON ic.ticket_id = st.id
+      LEFT JOIN category_mappings cm ON cm.ticket_id = st.id
+      WHERE ic.intent = $1
+    `, [intent]);
+    
+    if (tickets.rows.length === 0) continue;
+    
+    console.log(`  Found ${tickets.rows.length} tickets`);
+    
+    // 2. AUTOSVAR-DATA (A)
+    const autoreplyData = await analyzeAutoreplyForIntent(tickets.rows);
+    
+    // 3. DIALOG-MØNSTER (B)
+    const dialogData = await analyzeDialogPatternsForIntent(tickets.rows);
+    
+    // 4. REKLASSIFISERING (C)
+    const reclassData = await analyzeReclassificationForIntent(tickets.rows);
+    
+    // 5. RESOLUSJONS-KVALITET (D)
+    const qualityData = await analyzeQualityForIntent(tickets.rows);
+    
+    // 6. HJELPESENTER-MATCHING
+    const helpCenterData = await findBestHelpCenterArticle(tickets.rows);
+    
+    // 7. EKSISTERENDE PLAYBOOK DATA (resolution patterns, etc.)
+    const existingData = await getExistingPlaybookData(intent);
+    
+    // 8. KOMBINER ALT
+    const playbookEntry = await buildEnhancedPlaybookEntry({
+      intent,
+      tickets: tickets.rows,
+      autoreply: autoreplyData,
+      dialog: dialogData,
+      reclassification: reclassData,
+      quality: qualityData,
+      helpCenter: helpCenterData,
+      existing: existingData
+    });
+    
+    // 9. LAGRE I DATABASE
+    await savePlaybookEntry(playbookEntry);
+    
+    console.log(`  ✓ Playbook entry created`);
+  }
+  
+  console.log('\n✅ Enhanced playbook generation complete!');
+}
+
+// HELPER: Analyser autosvar for intent
+async function analyzeAutoreplyForIntent(tickets: any[]) {
+  const withAutoreply = tickets.filter(t => t.has_autoreply);
+  
+  if (withAutoreply.length === 0) {
+    return {
+      hasAutoreplyAvailable: false,
+      templateId: null,
+      templateName: null,
+      autoreplyContent: null
+    };
+  }
+  
+  // Finn mest brukte template
+  const templateCounts = {};
+  withAutoreply.forEach(t => {
+    if (t.autoreply_template_id) {
+      templateCounts[t.autoreply_template_id] = 
+        (templateCounts[t.autoreply_template_id] || 0) + 1;
+    }
+  });
+  
+  const mostCommonTemplateId = Object.entries(templateCounts)
+    .sort((a, b) => b[1] - a[1])[0]?.[0];
+  
+  if (!mostCommonTemplateId) {
+    return { hasAutoreplyAvailable: false };
+  }
+  
+  // Hent template
+  const template = await db.query(
+    'SELECT * FROM response_templates WHERE template_id = $1',
+    [mostCommonTemplateId]
+  );
+  
+  return {
+    hasAutoreplyAvailable: true,
+    templateId: mostCommonTemplateId,
+    templateName: template.rows[0]?.name,
+    autoreplyContent: template.rows[0]?.body_text
+  };
+}
+
+// HELPER: Analyser dialog-mønstre
+async function analyzeDialogPatternsForIntent(tickets: any[]) {
+  const patterns = {};
+  let totalMessagesAfterAutoreply = 0;
+  let countWithAutoreply = 0;
+  
+  tickets.forEach(t => {
+    if (t.dialog_pattern) {
+      patterns[t.dialog_pattern] = (patterns[t.dialog_pattern] || 0) + 1;
+    }
+    if (t.messages_after_autoreply) {
+      totalMessagesAfterAutoreply += t.messages_after_autoreply;
+      countWithAutoreply++;
+    }
+  });
+  
+  // Finn typisk mønster
+  const typicalPattern = Object.entries(patterns)
+    .sort((a, b) => b[1] - a[1])[0]?.[0] || 'unknown';
+  
+  // Gjennomsnittlig meldinger etter autosvar
+  const avgMessages = countWithAutoreply > 0 
+    ? totalMessagesAfterAutoreply / countWithAutoreply 
+    : 0;
+  
+  // Distribusjon
+  const total = tickets.length;
+  const distribution = {};
+  Object.entries(patterns).forEach(([pattern, count]) => {
+    distribution[pattern] = count / total;
+  });
+  
+  return {
+    typicalDialogPattern: typicalPattern,
+    avgMessagesAfterAutoreply: avgMessages,
+    dialogPatternDistribution: distribution
+  };
+}
+
+// HELPER: Analyser reklassifisering
+async function analyzeReclassificationForIntent(tickets: any[]) {
+  const reclassified = tickets.filter(t => t.reclassified_category);
+  
+  if (reclassified.length === 0) {
+    return {
+      wasReclassified: false,
+      originalCategories: [],
+      reclassifiedFrom: {}
+    };
+  }
+  
+  const originalCats = [...new Set(reclassified.map(t => t.original_category))];
+  const reclassFrom = {};
+  
+  reclassified.forEach(t => {
+    if (t.original_category) {
+      reclassFrom[t.original_category] = 
+        (reclassFrom[t.original_category] || 0) + 1;
+    }
+  });
+  
+  return {
+    wasReclassified: true,
+    originalCategories: originalCats,
+    reclassifiedFrom: reclassFrom
+  };
+}
+
+// HELPER: Analyser kvalitet
+async function analyzeQualityForIntent(tickets: any[]) {
+  const ticketIds = tickets.map(t => t.id);
+  
+  const qualityData = await db.query(`
+    SELECT 
+      quality_level,
+      COUNT(*) as count,
+      ARRAY_AGG(DISTINCT elem) as all_missing,
+      ARRAY_AGG(DISTINCT pos) as all_positive
+    FROM resolution_quality,
+    LATERAL unnest(missing_elements) as elem,
+    LATERAL unnest(positive_elements) as pos
+    WHERE ticket_id = ANY($1)
+    GROUP BY quality_level
+  `, [ticketIds]);
+  
+  const total = tickets.length;
+  const distribution = {};
+  const allMissing = [];
+  const allPositive = [];
+  
+  qualityData.rows.forEach(row => {
+    distribution[row.quality_level] = row.count / total;
+    if (row.all_missing) allMissing.push(...row.all_missing);
+    if (row.all_positive) allPositive.push(...row.all_positive);
+  });
+  
+  // Finn mest brukte kvalitetsnivå
+  const avgQuality = Object.entries(distribution)
+    .sort((a, b) => b[1] - a[1])[0]?.[0] || 'medium';
+  
+  // Topp missing elements
+  const missingCounts = {};
+  allMissing.forEach(elem => {
+    missingCounts[elem] = (missingCounts[elem] || 0) + 1;
+  });
+  const topMissing = Object.entries(missingCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([elem]) => elem);
+  
+  // Topp positive elements
+  const positiveCounts = {};
+  allPositive.forEach(elem => {
+    positiveCounts[elem] = (positiveCounts[elem] || 0) + 1;
+  });
+  const topPositive = Object.entries(positiveCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([elem]) => elem);
+  
+  // Needs improvement hvis >30% LOW/NONE
+  const lowNone = (distribution['low'] || 0) + (distribution['none'] || 0);
+  const needsImprovement = lowNone > 0.3;
+  
+  return {
+    avgResolutionQuality: avgQuality,
+    qualityDistribution: distribution,
+    commonMissingElements: topMissing,
+    commonPositiveElements: topPositive,
+    needsImprovement
+  };
+}
+
+// HELPER: Finn beste hjelpesenter-artikkel
+async function findBestHelpCenterArticle(tickets: any[]) {
+  const ticketIds = tickets.map(t => t.id);
+  
+  const matches = await db.query(`
+    SELECT 
+      hca.id,
+      hca.title,
+      hca.full_url,
+      hca.content_text,
+      hca.summary,
+      hca.requires_login,
+      hca.requires_action,
+      hca.action_type,
+      hca.api_endpoint,
+      hca.http_method,
+      hca.required_data,
+      hca.payment_required,
+      hca.payment_amount,
+      hca.procedure_steps,
+      hca.chatbot_can_do,
+      hca.user_must_do,
+      COUNT(*) as match_count,
+      AVG(thcm.match_confidence) as avg_confidence
+    FROM help_center_articles hca
+    JOIN ticket_help_center_matches thcm ON thcm.article_id = hca.id
+    WHERE thcm.ticket_id = ANY($1)
+    GROUP BY hca.id
+    ORDER BY match_count DESC, avg_confidence DESC
+    LIMIT 1
+  `, [ticketIds]);
+  
+  if (matches.rows.length === 0) {
+    return {
+      helpCenterArticleId: null,
+      helpCenterArticleUrl: null,
+      helpCenterArticleTitle: null,
+      officialProcedure: [],
+      requiresLogin: false,
+      requiresAction: false,
+      actionType: 'INFO_ONLY'
+    };
+  }
+  
+  const article = matches.rows[0];
+  
+  return {
+    helpCenterArticleId: article.id,
+    helpCenterArticleUrl: article.full_url,
+    helpCenterArticleTitle: article.title,
+    helpCenterContentSummary: article.summary,
+    officialProcedure: article.procedure_steps || [],
+    
+    // ACTION-DATA:
+    requiresLogin: article.requires_login || false,
+    requiresAction: article.requires_action || false,
+    actionType: article.action_type || 'INFO_ONLY',
+    apiEndpoint: article.api_endpoint,
+    httpMethod: article.http_method,
+    requiredRuntimeData: article.required_data || [],
+    paymentRequired: article.payment_required || false,
+    paymentAmount: article.payment_amount,
+    
+    // CHATBOT STEPS:
+    chatbotSteps: article.chatbot_can_do || [],
+    userMustDoSteps: article.user_must_do || []
+  };
+}
+
+// HELPER: Bygg komplett playbook entry
+async function buildEnhancedPlaybookEntry(data: any) {
+  const {
+    intent,
+    tickets,
+    autoreply,
+    dialog,
+    reclassification,
+    quality,
+    helpCenter,
+    existing
+  } = data;
+  
+  // Generer combined response (autosvar + hjelpesenter + best practice)
+  const combinedResponse = await generateCombinedResponse({
+    autoreplyContent: autoreply.autoreplyContent,
+    helpCenterSummary: helpCenter.helpCenterContentSummary,
+    officialProcedure: helpCenter.officialProcedure,
+    positiveElements: quality.commonPositiveElements,
+    missingElements: quality.commonMissingElements
+  });
+  
+  return {
+    intent,
+    hjelpesenterCategory: existing.hjelpesenterCategory,
+    hjelpesenterSubcategory: existing.hjelpesenterSubcategory,
+    keywords: existing.keywords,
+    
+    // A (AUTOSVAR):
+    hasAutoreplyAvailable: autoreply.hasAutoreplyAvailable,
+    autoreplyTemplateId: autoreply.templateId,
+    autoreplyTemplateName: autoreply.templateName,
+    autoreplyContent: autoreply.autoreplyContent,
+    
+    // B (DIALOG):
+    typicalDialogPattern: dialog.typicalDialogPattern,
+    avgMessagesAfterAutoreply: dialog.avgMessagesAfterAutoreply,
+    dialogPatternDistribution: dialog.dialogPatternDistribution,
+    
+    // C (REKLASSIFISERING):
+    wasReclassified: reclassification.wasReclassified,
+    originalCategories: reclassification.originalCategories,
+    reclassifiedFrom: reclassification.reclassifiedFrom,
+    
+    // D (KVALITET):
+    avgResolutionQuality: quality.avgResolutionQuality,
+    qualityDistribution: quality.qualityDistribution,
+    commonMissingElements: quality.commonMissingElements,
+    commonPositiveElements: quality.commonPositiveElements,
+    needsImprovement: quality.needsImprovement,
+    
+    // HJELPESENTER + ACTION:
+    helpCenterArticleId: helpCenter.helpCenterArticleId,
+    helpCenterArticleUrl: helpCenter.helpCenterArticleUrl,
+    helpCenterArticleTitle: helpCenter.helpCenterArticleTitle,
+    helpCenterContentSummary: helpCenter.helpCenterContentSummary,
+    officialProcedure: helpCenter.officialProcedure,
+    
+    requiresLogin: helpCenter.requiresLogin,
+    requiresAction: helpCenter.requiresAction,
+    actionType: helpCenter.actionType,
+    apiEndpoint: helpCenter.apiEndpoint,
+    httpMethod: helpCenter.httpMethod,
+    requiredRuntimeData: helpCenter.requiredRuntimeData,
+    paymentRequired: helpCenter.paymentRequired,
+    paymentAmount: helpCenter.paymentAmount,
+    
+    chatbotSteps: helpCenter.chatbotSteps,
+    combinedResponse,
+    
+    // FEEDBACK (initial values):
+    successfulResolutions: 0,
+    failedResolutions: 0,
+    totalUses: 0,
+    successRate: 0.0,
+    
+    // EKSISTERENDE:
+    resolutionSteps: existing.resolutionSteps,
+    primaryAction: existing.primaryAction,
+    primaryEndpoint: existing.primaryEndpoint,
+    avgConfidence: existing.avgConfidence,
+    ticketCount: tickets.length,
+    paymentRequiredProbability: existing.paymentRequiredProbability,
+    autoCloseProbability: existing.autoCloseProbability,
+    isActive: true
+  };
+}
+
+// HELPER: Generer combined response
+async function generateCombinedResponse(data: any): Promise<string> {
+  const prompt = `
+Generer en kombinert chatbot-respons basert på:
+
+AUTOSVAR-INNHOLD (hvis tilgjengelig):
+${data.autoreplyContent || 'Ikke tilgjengelig'}
+
+OFFISIELL PROSEDYRE (fra hjelpesenter):
+${data.officialProcedure?.join('\n') || 'Ikke tilgjengelig'}
+
+HVA SOM FUNGERER (fra analyse):
+Positive elementer: ${data.positiveElements?.join(', ') || 'Ingen'}
+
+HVA SOM OFTE MANGLER (må inkluderes):
+Missing elementer: ${data.missingElements?.join(', ') || 'Ingen'}
+
+LAG EN KORT, DIALOGBASERT RESPONS for chatbot:
+- Maks 200 ord
+- Naturlig samtaletone (ikke e-post-format)
+- Inkluder konkrete steg
+- Inkluder det som ofte mangler
+- Fjern unødvendig formalitet
+- IKKE inkluder lenker (de legges til separat)
+
+Eksempel output:
+"Jeg hjelper deg med eierskifte!
+
+Slik gjør du:
+1. Logg inn på Min Side
+2. Velg dyret som skal overføres
+3. Klikk 'Overfør eierskap'
+4. Oppgi ny eiers mobilnummer
+
+Både du og ny eier må bekrefte. Dere får betalingslenke når begge har godkjent.
+
+Kostnad: 676 kr
+Tidslinje: 1-2 dager
+
+Skal jeg logge deg inn så starter vi?"
+
+Return kun teksten, ingen JSON.
+  `;
+  
+  try {
+    const response = await callOpenAI(prompt, {
+      model: 'gpt-4o',
+      temperature: 0.7
+    });
+    
+    return response.trim();
+  } catch (error) {
+    console.error('Combined response error:', error);
+    return data.autoreplyContent || 'Jeg kan hjelpe deg med dette.';
+  }
+}
+```
+
+══════════════════════════════════════════════════════════════
+DEL 3: LAGRE PLAYBOOK ENTRY
+══════════════════════════════════════════════════════════════
+```typescript
+async function savePlaybookEntry(entry: any) {
+  await db.query(`
+    INSERT INTO playbook_entries (
+      intent,
+      hjelpesenter_category,
+      hjelpesenter_subcategory,
+      keywords,
+      
+      has_autoreply_available,
+      autoreply_template_id,
+      autoreply_template_name,
+      autoreply_content,
+      
+      typical_dialog_pattern,
+      avg_messages_after_autoreply,
+      dialog_pattern_distribution,
+      
+      was_reclassified,
+      original_categories,
+      reclassified_from,
+      
+      avg_resolution_quality,
+      quality_distribution,
+      common_missing_elements,
+      common_positive_elements,
+      needs_improvement,
+      
+      help_center_article_id,
+      help_center_article_url,
+      help_center_article_title,
+      help_center_content_summary,
+      official_procedure,
+      
+      requires_login,
+      requires_action,
+      action_type,
+      api_endpoint,
+      http_method,
+      required_runtime_data,
+      payment_required,
+      payment_amount,
+      
+      chatbot_steps,
+      combined_response,
+      
+      resolution_steps,
+      primary_action,
+      primary_endpoint,
+      avg_confidence,
+      ticket_count,
+      payment_required_probability,
+      auto_close_probability,
+      is_active
+    )
+    VALUES (
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+      $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+      $21, $22, $23, $24, $25, $26, $27, $28, $29, $30,
+      $31, $32, $33, $34, $35, $36, $37, $38, $39, $40,
+      $41
+    )
+    ON CONFLICT (intent) DO UPDATE SET
+      -- Update alle felt...
+      updated_at = NOW()
+  `, [
+    entry.intent,
+    entry.hjelpesenterCategory,
+    entry.hjelpesenterSubcategory,
+    entry.keywords,
+    // ... alle andre felter ...
+  ]);
+}
+```
+
+══════════════════════════════════════════════════════════════
+KJØRING
+══════════════════════════════════════════════════════════════
+
+TRINN 1: Kjør enhanced playbook-generering
+→ Workflow 8 med alle nye felt
+→ Generer for alle intents
+
+TRINN 2: Verifiser
+→ Query playbook_entries
+→ Sjekk at alle nye kolonner er fylt
+→ Vis 3 eksempel-entries
+
+FORVENTET:
+- Playbook med ALT: A, B, C, D, hjelpesenter, action-data
+- Combined response for hver intent
+- Action-type identifisert (API_CALL, etc.)
+- Kvalitetsinnsikter tilgjengelig

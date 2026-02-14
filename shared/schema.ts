@@ -118,7 +118,7 @@ export const resolutionPatterns = pgTable("resolution_patterns", {
 
 export const playbookEntries = pgTable("playbook_entries", {
   id: serial("id").primaryKey(),
-  intent: text("intent").notNull(),
+  intent: text("intent").notNull().unique(),
   hjelpesenterCategory: text("hjelpesenter_category"),
   hjelpesenterSubcategory: text("hjelpesenter_subcategory"),
   keywords: text("keywords"),
@@ -133,6 +133,49 @@ export const playbookEntries = pgTable("playbook_entries", {
   autoCloseProbability: real("auto_close_probability"),
   lastUpdated: timestamp("last_updated").default(sql`CURRENT_TIMESTAMP`),
   isActive: boolean("is_active").default(true),
+
+  hasAutoreplyAvailable: boolean("has_autoreply_available").default(false),
+  autoreplyTemplateId: integer("autoreply_template_id"),
+  autoreplyTemplateName: text("autoreply_template_name"),
+  autoreplyContent: text("autoreply_content"),
+
+  typicalDialogPattern: text("typical_dialog_pattern"),
+  avgMessagesAfterAutoreply: real("avg_messages_after_autoreply"),
+  dialogPatternDistribution: jsonb("dialog_pattern_distribution"),
+
+  wasReclassified: boolean("was_reclassified").default(false),
+  originalCategories: text("original_categories").array(),
+  reclassifiedFrom: jsonb("reclassified_from"),
+
+  avgResolutionQuality: text("avg_resolution_quality"),
+  qualityDistribution: jsonb("quality_distribution"),
+  commonMissingElements: text("common_missing_elements").array(),
+  commonPositiveElements: text("common_positive_elements").array(),
+  needsImprovement: boolean("needs_improvement").default(false),
+
+  helpCenterArticleId: integer("help_center_article_id"),
+  helpCenterArticleUrl: text("help_center_article_url"),
+  helpCenterArticleTitle: text("help_center_article_title"),
+  officialProcedure: text("official_procedure").array(),
+  helpCenterContentSummary: text("help_center_content_summary"),
+
+  requiresLogin: boolean("requires_login").default(false),
+  requiresAction: boolean("requires_action").default(false),
+  actionType: text("action_type"),
+  apiEndpoint: text("api_endpoint"),
+  httpMethod: text("http_method"),
+  requiredRuntimeDataArray: text("required_runtime_data_array").array(),
+  paymentRequired: boolean("payment_required").default(false),
+  paymentAmount: text("payment_amount"),
+
+  chatbotSteps: text("chatbot_steps").array(),
+  combinedResponse: text("combined_response"),
+
+  successfulResolutions: integer("successful_resolutions").default(0),
+  failedResolutions: integer("failed_resolutions").default(0),
+  totalUses: integer("total_uses").default(0),
+  successRate: real("success_rate").default(0.0),
+  lastUsedAt: timestamp("last_used_at"),
 });
 
 export const uncategorizedThemes = pgTable("uncategorized_themes", {

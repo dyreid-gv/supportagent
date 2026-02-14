@@ -45,6 +45,7 @@ import {
   Lightbulb,
   BarChart3,
   TrendingDown,
+  ExternalLink,
 } from "lucide-react";
 import { useState, useCallback } from "react";
 import {
@@ -91,17 +92,53 @@ interface TrainingStats {
 interface PlaybookEntry {
   id: number;
   intent: string;
-  hjelpesenterCategory: string;
-  hjelpesenterSubcategory: string;
-  keywords: string;
-  primaryAction: string;
-  primaryEndpoint: string;
-  resolutionSteps: string;
-  successIndicators: string;
-  paymentRequiredProbability: number;
-  autoCloseProbability: number;
+  hjelpesenterCategory: string | null;
+  hjelpesenterSubcategory: string | null;
+  keywords: string | null;
+  primaryAction: string | null;
+  primaryEndpoint: string | null;
+  resolutionSteps: string | null;
+  successIndicators: string | null;
+  paymentRequiredProbability: number | null;
+  autoCloseProbability: number | null;
   ticketCount: number;
   isActive: boolean;
+  avgConfidence: number | null;
+  hasAutoreplyAvailable: boolean | null;
+  autoreplyTemplateName: string | null;
+  autoreplyContent: string | null;
+  typicalDialogPattern: string | null;
+  avgMessagesAfterAutoreply: number | null;
+  dialogPatternDistribution: Record<string, number> | null;
+  wasReclassified: boolean | null;
+  originalCategories: string[] | null;
+  reclassifiedFrom: Record<string, number> | null;
+  avgResolutionQuality: string | null;
+  qualityDistribution: Record<string, number> | null;
+  commonMissingElements: string[] | null;
+  commonPositiveElements: string[] | null;
+  needsImprovement: boolean | null;
+  helpCenterArticleId: number | null;
+  helpCenterArticleUrl: string | null;
+  helpCenterArticleTitle: string | null;
+  officialProcedure: string[] | null;
+  helpCenterContentSummary: string | null;
+  requiresLogin: boolean | null;
+  requiresAction: boolean | null;
+  actionType: string | null;
+  apiEndpoint: string | null;
+  httpMethod: string | null;
+  requiredRuntimeDataArray: string[] | null;
+  requiredRuntimeData: string | null;
+  paymentRequired: boolean | null;
+  paymentAmount: string | null;
+  autoreplyTemplateId: number | null;
+  chatbotSteps: string[] | null;
+  combinedResponse: string | null;
+  successfulResolutions: number | null;
+  failedResolutions: number | null;
+  totalUses: number | null;
+  successRate: number | null;
 }
 
 interface ReviewQueueItem {
@@ -954,74 +991,7 @@ export default function Dashboard() {
         </TabsContent>
 
         <TabsContent value="playbook" className="mt-4">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
-              <CardTitle className="text-base">Support Playbook</CardTitle>
-              <Badge variant="outline">{playbook?.length || 0} entries</Badge>
-            </CardHeader>
-            <CardContent>
-              {!playbook || playbook.length === 0 ? (
-                <p className="text-muted-foreground text-sm">
-                  Ingen playbook-entries ennå. Kjør treningspipelinen eller generer playbook direkte (Steg 8).
-                </p>
-              ) : (
-                <ScrollArea className="h-[500px]">
-                  <div className="space-y-3 pr-4">
-                    {playbook.map((entry) => (
-                      <div
-                        key={entry.id}
-                        className="rounded-md border p-3 space-y-2"
-                        data-testid={`playbook-entry-${entry.id}`}
-                      >
-                        <div className="flex items-start justify-between gap-2 flex-wrap">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-semibold text-sm">{entry.intent}</span>
-                            <Badge variant="secondary">{entry.hjelpesenterCategory}</Badge>
-                            {entry.hjelpesenterSubcategory && (
-                              <Badge variant="outline">{entry.hjelpesenterSubcategory}</Badge>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-1 flex-wrap">
-                            {entry.paymentRequiredProbability > 0.5 && (
-                              <Badge variant="destructive">Betaling</Badge>
-                            )}
-                            {entry.autoCloseProbability > 0.5 && (
-                              <Badge>Auto-lukk</Badge>
-                            )}
-                            <Badge variant={entry.isActive ? "default" : "secondary"}>
-                              {entry.isActive ? "Aktiv" : "Inaktiv"}
-                            </Badge>
-                          </div>
-                        </div>
-                        <div className="space-y-1">
-                          {entry.primaryAction && (
-                            <p className="text-xs text-muted-foreground">
-                              Handling: {entry.primaryAction}
-                            </p>
-                          )}
-                          {entry.primaryEndpoint && (
-                            <p className="text-xs font-mono text-muted-foreground">
-                              {entry.primaryEndpoint}
-                            </p>
-                          )}
-                          {entry.keywords && (
-                            <p className="text-xs text-muted-foreground">
-                              Nøkkelord: {entry.keywords}
-                            </p>
-                          )}
-                          {entry.resolutionSteps && (
-                            <p className="text-xs text-muted-foreground">
-                              Steg: {entry.resolutionSteps}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </ScrollArea>
-              )}
-            </CardContent>
-          </Card>
+          <PlaybookTab playbook={playbook} />
         </TabsContent>
 
         <TabsContent value="review" className="mt-4">
@@ -3113,6 +3083,341 @@ function QualityTab({ stats }: {
             </p>
           </CardContent>
         </Card>
+      )}
+    </div>
+  );
+}
+
+function PlaybookTab({ playbook }: { playbook: PlaybookEntry[] | undefined }) {
+  const [expandedEntry, setExpandedEntry] = useState<number | null>(null);
+  const [filter, setFilter] = useState<string>("");
+
+  const qualityColor: Record<string, string> = {
+    high: "text-green-600 dark:text-green-400",
+    medium: "text-yellow-600 dark:text-yellow-400",
+    low: "text-orange-600 dark:text-orange-400",
+    none: "text-red-600 dark:text-red-400",
+  };
+  const qualityLabel: Record<string, string> = {
+    high: "HIGH",
+    medium: "MED",
+    low: "LOW",
+    none: "NONE",
+  };
+  const patternLabel: Record<string, string> = {
+    autosvar_only: "Kun autosvar",
+    autosvar_quick_resolution: "Rask losning",
+    autosvar_extended_dialog: "Utvidet dialog",
+    direct_human_response: "Direkte svar",
+  };
+
+  const filtered = playbook?.filter(e => {
+    if (!filter) return true;
+    const q = filter.toLowerCase();
+    return e.intent.toLowerCase().includes(q)
+      || e.hjelpesenterCategory?.toLowerCase().includes(q)
+      || e.keywords?.toLowerCase().includes(q);
+  }) || [];
+
+  const withQuality = filtered.filter(e => e.avgResolutionQuality);
+  const needsImprovementCount = filtered.filter(e => e.needsImprovement).length;
+  const withAutoreply = filtered.filter(e => e.hasAutoreplyAvailable).length;
+  const withHelpCenter = filtered.filter(e => e.helpCenterArticleTitle).length;
+  const withFeedback = filtered.filter(e => (e.totalUses || 0) > 0).length;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3 flex-wrap">
+        <Input
+          placeholder="Sok etter intent, kategori, nokkelord..."
+          value={filter}
+          onChange={e => setFilter(e.target.value)}
+          className="max-w-sm"
+          data-testid="input-playbook-filter"
+        />
+        <Badge variant="outline">{filtered.length} entries</Badge>
+        {withQuality.length > 0 && <Badge variant="secondary">{withQuality.length} kvalitetsvurdert</Badge>}
+        {needsImprovementCount > 0 && <Badge variant="destructive">{needsImprovementCount} trenger forbedring</Badge>}
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Totalt</CardTitle>
+            <BookOpen className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold" data-testid="text-playbook-total">{filtered.length}</div>
+            <p className="text-xs text-muted-foreground">playbook entries</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Autosvar</CardTitle>
+            <Send className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{withAutoreply}</div>
+            <p className="text-xs text-muted-foreground">har autosvar-mal</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Hjelpesenter</CardTitle>
+            <Link2 className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{withHelpCenter}</div>
+            <p className="text-xs text-muted-foreground">koblet til artikkel</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Tilbakemelding</CardTitle>
+            <ThumbsUp className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{withFeedback}</div>
+            <p className="text-xs text-muted-foreground">har feedback-data</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {filtered.length === 0 ? (
+        <Card>
+          <CardContent className="py-8 text-center">
+            <BookOpen className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
+            <p className="text-sm text-muted-foreground">
+              Ingen playbook-entries. Kjor treningspipelinen (steg 1-8) for a generere.
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
+        <ScrollArea className="h-[600px]">
+          <div className="space-y-3 pr-4">
+            {filtered.map((entry) => {
+              const isExpanded = expandedEntry === entry.id;
+              return (
+                <div
+                  key={entry.id}
+                  className="rounded-md border"
+                  data-testid={`playbook-entry-${entry.id}`}
+                >
+                  <button
+                    className="w-full p-3 text-left space-y-2"
+                    onClick={() => setExpandedEntry(isExpanded ? null : entry.id)}
+                    data-testid={`button-toggle-playbook-${entry.id}`}
+                  >
+                    <div className="flex items-start justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-sm">{entry.intent}</span>
+                        {entry.hjelpesenterCategory && <Badge variant="secondary">{entry.hjelpesenterCategory}</Badge>}
+                        {entry.hjelpesenterSubcategory && <Badge variant="outline">{entry.hjelpesenterSubcategory}</Badge>}
+                      </div>
+                      <div className="flex items-center gap-1 flex-wrap">
+                        {entry.avgResolutionQuality && (
+                          <Badge variant={entry.avgResolutionQuality === "high" ? "default" : entry.avgResolutionQuality === "medium" ? "secondary" : "destructive"}>
+                            {qualityLabel[entry.avgResolutionQuality] || entry.avgResolutionQuality}
+                          </Badge>
+                        )}
+                        {entry.needsImprovement && <Badge variant="destructive">Trenger forbedring</Badge>}
+                        {entry.hasAutoreplyAvailable && <Badge variant="outline">Autosvar</Badge>}
+                        {entry.helpCenterArticleTitle && <Badge variant="outline">Artikkel</Badge>}
+                        {(entry.paymentRequired || (entry.paymentRequiredProbability && entry.paymentRequiredProbability > 0.5)) && (
+                          <Badge variant="destructive">Betaling</Badge>
+                        )}
+                        <Badge variant="outline">{entry.ticketCount} tickets</Badge>
+                        <ArrowRight className={`h-4 w-4 text-muted-foreground transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                      </div>
+                    </div>
+                    {entry.primaryAction && (
+                      <p className="text-xs text-muted-foreground">Handling: {entry.primaryAction}</p>
+                    )}
+                  </button>
+
+                  {isExpanded && (
+                    <div className="px-3 pb-3 border-t space-y-3">
+                      <div className="grid gap-3 md:grid-cols-2 mt-3">
+                        <div className="space-y-2">
+                          <h4 className="text-xs font-semibold text-muted-foreground uppercase">Losning</h4>
+                          {entry.resolutionSteps && <p className="text-sm">{entry.resolutionSteps}</p>}
+                          {entry.keywords && <p className="text-xs text-muted-foreground">Nokkelord: {entry.keywords}</p>}
+                          {entry.officialProcedure && entry.officialProcedure.length > 0 && (
+                            <div>
+                              <p className="text-xs text-muted-foreground mb-1">Offisiell prosedyre:</p>
+                              <ol className="text-xs text-muted-foreground list-decimal list-inside space-y-0.5">
+                                {entry.officialProcedure.map((step, j) => <li key={j}>{step}</li>)}
+                              </ol>
+                            </div>
+                          )}
+                          {(entry.primaryEndpoint || entry.apiEndpoint) && (
+                            <p className="text-xs font-mono text-muted-foreground" data-testid={`text-endpoint-${entry.id}`}>{entry.httpMethod || "POST"} {entry.primaryEndpoint || entry.apiEndpoint}</p>
+                          )}
+                          {entry.actionType && entry.actionType !== "INFO_ONLY" && (
+                            <Badge variant="outline">{entry.actionType}</Badge>
+                          )}
+                          {entry.requiredRuntimeDataArray && entry.requiredRuntimeDataArray.length > 0 && (
+                            <div className="flex items-center gap-1 flex-wrap">
+                              <span className="text-xs text-muted-foreground">Krever:</span>
+                              {entry.requiredRuntimeDataArray.map((d, j) => (
+                                <Badge key={j} variant="outline" className="text-xs no-default-hover-elevate no-default-active-elevate">{d}</Badge>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="space-y-2">
+                          <h4 className="text-xs font-semibold text-muted-foreground uppercase">Kvalitet (D)</h4>
+                          {entry.avgResolutionQuality ? (
+                            <>
+                              <p className={`text-sm font-medium ${qualityColor[entry.avgResolutionQuality] || ""}`}>
+                                Gjennomsnittlig: {qualityLabel[entry.avgResolutionQuality] || entry.avgResolutionQuality}
+                              </p>
+                              {entry.qualityDistribution && (
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  {Object.entries(entry.qualityDistribution).map(([level, pct]) => (
+                                    <span key={level} className={`text-xs ${qualityColor[level] || ""}`}>
+                                      {qualityLabel[level] || level}: {typeof pct === "number" ? Math.round(pct * 100) : pct}%
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              {entry.commonMissingElements && entry.commonMissingElements.length > 0 && (
+                                <div>
+                                  <p className="text-xs text-muted-foreground mb-1">Mangler ofte:</p>
+                                  <div className="flex items-center gap-1 flex-wrap">
+                                    {entry.commonMissingElements.map((elem, j) => (
+                                      <Badge key={j} variant="outline" className="text-xs no-default-hover-elevate no-default-active-elevate text-red-600 dark:text-red-400">{elem}</Badge>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              {entry.commonPositiveElements && entry.commonPositiveElements.length > 0 && (
+                                <div>
+                                  <p className="text-xs text-muted-foreground mb-1">Fungerer bra:</p>
+                                  <div className="flex items-center gap-1 flex-wrap">
+                                    {entry.commonPositiveElements.map((elem, j) => (
+                                      <Badge key={j} variant="outline" className="text-xs no-default-hover-elevate no-default-active-elevate text-green-600 dark:text-green-400">{elem}</Badge>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <p className="text-xs text-muted-foreground">Ikke vurdert enna</p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <h4 className="text-xs font-semibold text-muted-foreground uppercase">Autosvar (A)</h4>
+                          {entry.hasAutoreplyAvailable ? (
+                            <>
+                              <p className="text-sm">{entry.autoreplyTemplateName}</p>
+                              {entry.autoreplyContent && (
+                                <p className="text-xs text-muted-foreground line-clamp-3">{entry.autoreplyContent}</p>
+                              )}
+                            </>
+                          ) : (
+                            <p className="text-xs text-muted-foreground">Ingen autosvar</p>
+                          )}
+                        </div>
+
+                        <div className="space-y-2">
+                          <h4 className="text-xs font-semibold text-muted-foreground uppercase">Dialog-monster (B)</h4>
+                          {entry.typicalDialogPattern ? (
+                            <>
+                              <Badge variant="secondary">{patternLabel[entry.typicalDialogPattern] || entry.typicalDialogPattern}</Badge>
+                              {entry.avgMessagesAfterAutoreply != null && (
+                                <p className="text-xs text-muted-foreground">Snitt meldinger etter autosvar: {entry.avgMessagesAfterAutoreply.toFixed(1)}</p>
+                              )}
+                              {entry.dialogPatternDistribution && (
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  {Object.entries(entry.dialogPatternDistribution).map(([p, pct]) => (
+                                    <span key={p} className="text-xs text-muted-foreground">
+                                      {patternLabel[p] || p}: {typeof pct === "number" ? Math.round(pct * 100) : pct}%
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <p className="text-xs text-muted-foreground">Ikke analysert</p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <h4 className="text-xs font-semibold text-muted-foreground uppercase">Hjelpesenter</h4>
+                          {entry.helpCenterArticleTitle ? (
+                            <>
+                              <div className="flex items-center gap-1">
+                                <Link2 className="h-3 w-3 text-muted-foreground shrink-0" />
+                                {entry.helpCenterArticleUrl ? (
+                                  <a href={entry.helpCenterArticleUrl} target="_blank" rel="noopener noreferrer" className="text-sm underline hover:no-underline flex items-center gap-1" data-testid={`link-helpcenter-${entry.id}`}>
+                                    {entry.helpCenterArticleTitle}
+                                    <ExternalLink className="h-3 w-3" />
+                                  </a>
+                                ) : (
+                                  <span className="text-sm">{entry.helpCenterArticleTitle}</span>
+                                )}
+                              </div>
+                              {entry.helpCenterContentSummary && (
+                                <p className="text-xs text-muted-foreground line-clamp-2">{entry.helpCenterContentSummary}</p>
+                              )}
+                            </>
+                          ) : (
+                            <p className="text-xs text-muted-foreground">Ingen artikkel koblet</p>
+                          )}
+                        </div>
+
+                        <div className="space-y-2">
+                          <h4 className="text-xs font-semibold text-muted-foreground uppercase">Feedback</h4>
+                          {(entry.totalUses || 0) > 0 ? (
+                            <>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-sm font-medium" data-testid={`text-successrate-${entry.id}`}>{Math.round((entry.successRate || 0) * 100)}% suksessrate</span>
+                                <span className="text-xs text-muted-foreground">({entry.totalUses} bruk)</span>
+                              </div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-xs text-green-600 dark:text-green-400" data-testid={`text-success-${entry.id}`}>{entry.successfulResolutions || 0} lost</span>
+                                <span className="text-xs text-red-600 dark:text-red-400" data-testid={`text-failed-${entry.id}`}>{entry.failedResolutions || 0} ikke lost</span>
+                              </div>
+                            </>
+                          ) : (
+                            <p className="text-xs text-muted-foreground">Ingen bruksdata enna</p>
+                          )}
+                        </div>
+                      </div>
+
+                      {entry.wasReclassified && (
+                        <div className="space-y-1">
+                          <h4 className="text-xs font-semibold text-muted-foreground uppercase">Reklassifisering (C)</h4>
+                          {entry.originalCategories && entry.originalCategories.length > 0 && (
+                            <p className="text-xs text-muted-foreground">
+                              Opprinnelig kategori: {entry.originalCategories.join(", ")}
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      {entry.combinedResponse && (
+                        <div className="space-y-1">
+                          <h4 className="text-xs font-semibold text-muted-foreground uppercase">Kombinert chatbot-respons</h4>
+                          <div className="bg-muted/50 rounded-md p-2">
+                            <p className="text-sm whitespace-pre-line">{entry.combinedResponse}</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </ScrollArea>
       )}
     </div>
   );

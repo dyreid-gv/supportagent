@@ -816,75 +816,293 @@ SVAR I JSON:
 export async function runPlaybookGeneration(
   onProgress?: (msg: string, pct: number) => void
 ): Promise<{ entries: number }> {
-  onProgress?.("Genererer playbook fra klassifiserte intents og løsninger...", 0);
+  onProgress?.("Genererer datadrevet playbook fra alle analysedata (A-D + Hjelpesenter)...", 0);
 
-  const categories = await storage.getHjelpesenterCategories();
-  const categoryNames = Array.from(new Set(categories.map((c) => c.categoryName))).join(", ");
+  const intentRows = await db.execute(sql`
+    SELECT DISTINCT intent FROM intent_classifications WHERE intent IS NOT NULL ORDER BY intent
+  `);
+  const intents = intentRows.rows.map((r: any) => r.intent as string);
 
-  const prompt = `Du er en AI-ekspert for DyreID. Basert på dine kunnskaper om kjæledyrregistrering i Norge, generer en komplett Support Playbook med entries for alle kjente support-intents.
-
-For hvert intent, generer en playbook entry med:
-- intent: IntentName
-- hjelpesenter_category: Kategori
-- hjelpesenter_subcategory: Underkategori
-- keywords: nøkkelord (kommaseparert)
-- required_runtime_data: data som trengs fra MinSide
-- primary_action: hovedhandling
-- primary_endpoint: API-endepunkt
-- resolution_steps: steg-for-steg løsning
-- success_indicators: suksessindikatorer
-- payment_required_probability: 0.0-1.0
-- auto_close_probability: 0.0-1.0
-
-INTENTS:
-${KNOWN_INTENTS.join(", ")}
-
-KATEGORIER:
-${categoryNames}
-
-Svar som JSON-array av entries.`;
-
-  onProgress?.("Sender forespørsel til AI...", 20);
-
-  const text = await callOpenAI(prompt, "gpt-5-mini", 8192);
-
-  let entries: any[];
-  try {
-    entries = extractJson(text);
-    if (!Array.isArray(entries)) entries = [entries];
-  } catch {
-    onProgress?.("Feil: Kunne ikke parse playbook fra AI-respons", 100);
+  if (intents.length === 0) {
+    onProgress?.("Ingen intents funnet. Kjor intent-klassifisering forst.", 100);
     return { entries: 0 };
   }
 
-  onProgress?.(`Mottatt ${entries.length} entries. Lagrer...`, 60);
+  onProgress?.(`Fant ${intents.length} unike intents. Starter datadrevet analyse...`, 5);
 
   let count = 0;
-  for (const entry of entries) {
+  for (let i = 0; i < intents.length; i++) {
+    const intent = intents[i];
+    const pct = Math.round(5 + ((i / intents.length) * 85));
+    onProgress?.(`Behandler intent ${i + 1}/${intents.length}: ${intent}`, pct);
+
     try {
-      await storage.upsertPlaybookEntry({
-        intent: entry.intent,
-        hjelpesenterCategory: entry.hjelpesenter_category,
-        hjelpesenterSubcategory: entry.hjelpesenter_subcategory,
-        keywords: entry.keywords,
-        requiredRuntimeData: entry.required_runtime_data,
-        primaryAction: entry.primary_action,
-        primaryEndpoint: entry.primary_endpoint,
-        resolutionSteps: entry.resolution_steps,
-        successIndicators: entry.success_indicators,
-        avgConfidence: entry.avg_confidence || 0.8,
-        ticketCount: entry.ticket_count || 0,
-        paymentRequiredProbability: entry.payment_required_probability,
-        autoCloseProbability: entry.auto_close_probability,
+      const ticketDataRows = await db.execute(sql`
+        SELECT 
+          st.id, st.subject, st.customer_question, st.agent_answer, st.auto_closed,
+          st.has_autoreply, st.autoreply_template_id, st.autoreply_confidence,
+          st.dialog_pattern, st.messages_after_autoreply, st.total_message_count,
+          ic.intent_confidence, ic.keywords, ic.required_runtime_data, ic.required_action,
+          ic.action_endpoint, ic.payment_required, ic.auto_close_possible,
+          cm.hjelpesenter_category, cm.hjelpesenter_subcategory,
+          cm.needs_reclassification, cm.original_category, cm.reclassified_category, cm.reclassified_subcategory
+        FROM scrubbed_tickets st
+        JOIN intent_classifications ic ON ic.ticket_id = st.id
+        LEFT JOIN category_mappings cm ON cm.ticket_id = st.id
+        WHERE ic.intent = ${intent}
+      `);
+      const tickets = ticketDataRows.rows as any[];
+
+      if (tickets.length === 0) continue;
+
+      const mostCommonCategory = getMostCommon(tickets.map(t => t.reclassified_category || t.hjelpesenter_category).filter(Boolean));
+      const mostCommonSubcategory = getMostCommon(tickets.map(t => t.reclassified_subcategory || t.hjelpesenter_subcategory).filter(Boolean));
+      const allKeywords = tickets.map(t => t.keywords).filter(Boolean).join(", ");
+      const avgConfidence = tickets.reduce((sum: number, t: any) => sum + (t.intent_confidence || 0), 0) / tickets.length;
+      const paymentProbability = tickets.filter((t: any) => t.payment_required).length / tickets.length;
+      const autoCloseProbability = tickets.filter((t: any) => t.auto_close_possible || t.auto_closed).length / tickets.length;
+
+      const mostCommonAction = getMostCommon(tickets.map(t => t.required_action).filter(Boolean));
+      const mostCommonEndpoint = getMostCommon(tickets.map(t => t.action_endpoint).filter(Boolean));
+      const mostCommonRuntimeData = getMostCommon(tickets.map(t => t.required_runtime_data).filter(Boolean));
+
+      const resolutionRows = await db.execute(sql`
+        SELECT resolution_steps, customer_need, success_indicators
+        FROM resolution_patterns WHERE intent = ${intent}
+      `);
+      const resolutions = resolutionRows.rows as any[];
+      const bestResolution = resolutions[0];
+
+      const withAutoreply = tickets.filter((t: any) => t.has_autoreply);
+      let autoreplyData: any = { hasAutoreplyAvailable: false };
+      if (withAutoreply.length > 0) {
+        const templateCounts: Record<string, number> = {};
+        withAutoreply.forEach((t: any) => {
+          if (t.autoreply_template_id) {
+            templateCounts[t.autoreply_template_id] = (templateCounts[t.autoreply_template_id] || 0) + 1;
+          }
+        });
+        const topTemplateId = Object.entries(templateCounts).sort((a, b) => b[1] - a[1])[0]?.[0];
+        if (topTemplateId) {
+          const tmplRows = await db.execute(sql`
+            SELECT name, body_text FROM response_templates WHERE template_id = ${parseInt(topTemplateId)}
+          `);
+          const tmpl = tmplRows.rows[0] as any;
+          autoreplyData = {
+            hasAutoreplyAvailable: true,
+            templateId: parseInt(topTemplateId),
+            templateName: tmpl?.name || null,
+            autoreplyContent: tmpl?.body_text || null,
+          };
+        }
+      }
+
+      const dialogPatterns: Record<string, number> = {};
+      let totalMsgAfterAutoreply = 0;
+      let countMsgAfterAutoreply = 0;
+      tickets.forEach((t: any) => {
+        if (t.dialog_pattern) dialogPatterns[t.dialog_pattern] = (dialogPatterns[t.dialog_pattern] || 0) + 1;
+        if (t.messages_after_autoreply != null) {
+          totalMsgAfterAutoreply += t.messages_after_autoreply;
+          countMsgAfterAutoreply++;
+        }
       });
+      const typicalDialogPattern = Object.entries(dialogPatterns).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+      const avgMsgAfterAutoreply = countMsgAfterAutoreply > 0 ? totalMsgAfterAutoreply / countMsgAfterAutoreply : null;
+      const dialogDistribution: Record<string, number> = {};
+      Object.entries(dialogPatterns).forEach(([p, c]) => { dialogDistribution[p] = c / tickets.length; });
+
+      const reclassified = tickets.filter((t: any) => t.reclassified_category);
+      const wasReclassified = reclassified.length > 0;
+      const originalCategories = Array.from(new Set(reclassified.map((t: any) => t.original_category).filter(Boolean)));
+      const reclassFrom: Record<string, number> = {};
+      reclassified.forEach((t: any) => {
+        if (t.original_category) reclassFrom[t.original_category] = (reclassFrom[t.original_category] || 0) + 1;
+      });
+
+      const ticketIds = tickets.map((t: any) => t.id);
+      const qualityRows = await db.execute(sql`
+        SELECT quality_level, COUNT(*)::int as cnt,
+          ARRAY_AGG(DISTINCT elem) FILTER (WHERE elem IS NOT NULL) as all_missing,
+          ARRAY_AGG(DISTINCT pos) FILTER (WHERE pos IS NOT NULL) as all_positive
+        FROM resolution_quality
+        LEFT JOIN LATERAL unnest(missing_elements) AS elem ON true
+        LEFT JOIN LATERAL unnest(positive_elements) AS pos ON true
+        WHERE ticket_id = ANY(${ticketIds})
+        GROUP BY quality_level
+      `);
+      const qualityData = qualityRows.rows as any[];
+      const qualityDist: Record<string, number> = {};
+      const allMissing: string[] = [];
+      const allPositive: string[] = [];
+      let qualityTotal = 0;
+      qualityData.forEach((r: any) => {
+        qualityDist[r.quality_level] = r.cnt;
+        qualityTotal += r.cnt;
+        if (r.all_missing) allMissing.push(...r.all_missing);
+        if (r.all_positive) allPositive.push(...r.all_positive);
+      });
+      const avgQuality = qualityTotal > 0
+        ? Object.entries(qualityDist).sort((a, b) => b[1] - a[1])[0]?.[0] || "medium"
+        : null;
+      const qualityDistPct: Record<string, number> = {};
+      if (qualityTotal > 0) Object.entries(qualityDist).forEach(([k, v]) => { qualityDistPct[k] = v / qualityTotal; });
+      const topMissing = getTopItems(allMissing, 5);
+      const topPositive = getTopItems(allPositive, 5);
+      const lowNone = (qualityDist["low"] || 0) + (qualityDist["none"] || 0);
+      const needsImprovement = qualityTotal > 0 && (lowNone / qualityTotal) > 0.3;
+
+      const helpCenterRows = await db.execute(sql`
+        SELECT 
+          hca.id, hca.title, hca.url, hca.body_text, hca.hjelpesenter_category,
+          COUNT(*)::int as match_count,
+          AVG(thcm.match_confidence)::real as avg_conf
+        FROM help_center_articles hca
+        JOIN ticket_help_center_matches thcm ON thcm.article_id = hca.id
+        WHERE thcm.ticket_id = ANY(${ticketIds})
+        GROUP BY hca.id
+        ORDER BY match_count DESC, avg_conf DESC
+        LIMIT 1
+      `);
+      const bestArticle = helpCenterRows.rows[0] as any;
+
+      const feedbackRows = await db.execute(sql`
+        SELECT 
+          COUNT(*) FILTER (WHERE feedback_result = 'resolved')::int as resolved,
+          COUNT(*) FILTER (WHERE feedback_result = 'not_resolved')::int as not_resolved,
+          COUNT(*) FILTER (WHERE feedback_result IS NOT NULL)::int as total
+        FROM chatbot_interactions
+        WHERE matched_intent = ${intent}
+      `);
+      const feedback = feedbackRows.rows[0] as any;
+      const successfulResolutions = feedback?.resolved || 0;
+      const failedResolutions = feedback?.not_resolved || 0;
+      const totalUses = feedback?.total || 0;
+      const successRate = totalUses > 0 ? successfulResolutions / totalUses : 0;
+
+      let combinedResponse: string | null = null;
+      const hasMeaningfulData = autoreplyData.autoreplyContent || bestArticle?.body_text || topPositive.length > 0 || topMissing.length > 0;
+      if (hasMeaningfulData) {
+        try {
+          const articleSummary = bestArticle?.body_text ? bestArticle.body_text.substring(0, 500) : null;
+          const prompt = `Generer en kombinert chatbot-respons for DyreID support.
+
+INTENT: ${intent}
+KATEGORI: ${mostCommonCategory || "Ukjent"}
+
+AUTOSVAR-INNHOLD (hvis tilgjengelig):
+${autoreplyData.autoreplyContent?.substring(0, 400) || "Ikke tilgjengelig"}
+
+HJELPESENTER-ARTIKKEL:
+${articleSummary || "Ikke tilgjengelig"}
+
+HVA SOM FUNGERER (fra analyse):
+${topPositive.join(", ") || "Ingen data"}
+
+HVA SOM OFTE MANGLER:
+${topMissing.join(", ") || "Ingen data"}
+
+LAG EN KORT, DIALOGBASERT RESPONS for chatbot:
+- Maks 200 ord
+- Naturlig samtaletone
+- Inkluder konkrete steg
+- Inkluder det som ofte mangler
+- Fjern unodvendig formalitet
+- IKKE inkluder lenker
+
+Return kun teksten, ingen JSON.`;
+
+          combinedResponse = await callOpenAI(prompt, "gpt-5-nano", 1024);
+          combinedResponse = combinedResponse.trim();
+        } catch (err: any) {
+          log(`Combined response error for ${intent}: ${err.message}`, "training");
+          combinedResponse = autoreplyData.autoreplyContent || null;
+        }
+      }
+
+      await storage.upsertPlaybookEntry({
+        intent,
+        hjelpesenterCategory: mostCommonCategory || null,
+        hjelpesenterSubcategory: mostCommonSubcategory || null,
+        keywords: allKeywords || null,
+        requiredRuntimeData: mostCommonRuntimeData || null,
+        primaryAction: mostCommonAction || null,
+        primaryEndpoint: mostCommonEndpoint || null,
+        resolutionSteps: bestResolution?.resolution_steps || null,
+        successIndicators: bestResolution?.success_indicators || null,
+        avgConfidence: avgConfidence || 0.8,
+        ticketCount: tickets.length,
+        paymentRequiredProbability: paymentProbability,
+        autoCloseProbability: autoCloseProbability,
+        isActive: true,
+
+        hasAutoreplyAvailable: autoreplyData.hasAutoreplyAvailable,
+        autoreplyTemplateId: autoreplyData.templateId || null,
+        autoreplyTemplateName: autoreplyData.templateName || null,
+        autoreplyContent: autoreplyData.autoreplyContent || null,
+
+        typicalDialogPattern: typicalDialogPattern,
+        avgMessagesAfterAutoreply: avgMsgAfterAutoreply,
+        dialogPatternDistribution: Object.keys(dialogDistribution).length > 0 ? dialogDistribution : null,
+
+        wasReclassified,
+        originalCategories: originalCategories.length > 0 ? originalCategories : null,
+        reclassifiedFrom: Object.keys(reclassFrom).length > 0 ? reclassFrom : null,
+
+        avgResolutionQuality: avgQuality,
+        qualityDistribution: Object.keys(qualityDistPct).length > 0 ? qualityDistPct : null,
+        commonMissingElements: topMissing.length > 0 ? topMissing : null,
+        commonPositiveElements: topPositive.length > 0 ? topPositive : null,
+        needsImprovement,
+
+        helpCenterArticleId: bestArticle?.id || null,
+        helpCenterArticleUrl: bestArticle?.url || null,
+        helpCenterArticleTitle: bestArticle?.title || null,
+        officialProcedure: null,
+        helpCenterContentSummary: bestArticle?.body_text?.substring(0, 500) || null,
+
+        requiresLogin: false,
+        requiresAction: !!mostCommonAction,
+        actionType: mostCommonAction ? "API_CALL" : "INFO_ONLY",
+        apiEndpoint: mostCommonEndpoint || null,
+        httpMethod: mostCommonEndpoint ? "POST" : null,
+        requiredRuntimeDataArray: mostCommonRuntimeData ? mostCommonRuntimeData.split(",").map((s: string) => s.trim()) : null,
+        paymentRequired: paymentProbability > 0.5,
+        paymentAmount: null,
+
+        chatbotSteps: null,
+        combinedResponse,
+
+        successfulResolutions,
+        failedResolutions,
+        totalUses,
+        successRate,
+      });
+
       count++;
     } catch (err: any) {
-      log(`Playbook entry error: ${err.message}`, "training");
+      log(`Playbook entry error for ${intent}: ${err.message}`, "training");
     }
   }
 
-  onProgress?.(`Playbook generert: ${count} entries`, 100);
+  onProgress?.(`Datadrevet playbook generert: ${count} entries med A-D + Hjelpesenter data`, 100);
   return { entries: count };
+}
+
+function getMostCommon(arr: string[]): string | null {
+  if (arr.length === 0) return null;
+  const counts: Record<string, number> = {};
+  arr.forEach(item => { counts[item] = (counts[item] || 0) + 1; });
+  return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+}
+
+function getTopItems(arr: string[], limit: number): string[] {
+  const counts: Record<string, number> = {};
+  arr.forEach(item => { counts[item] = (counts[item] || 0) + 1; });
+  return Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([item]) => item);
 }
 
 // ─── WORKFLOW 9: MANUAL REVIEW HANDLER ───────────────────────────────────
