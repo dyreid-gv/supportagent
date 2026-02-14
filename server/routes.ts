@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { z } from "zod";
-import { count } from "drizzle-orm";
+import { count, sql } from "drizzle-orm";
 import axios from "axios";
 import { db } from "./db";
 import { storage } from "./storage";
@@ -17,6 +17,8 @@ import {
   runUncertaintyDetection,
   runPlaybookGeneration,
   submitManualReview,
+  runCombinedBatchAnalysis,
+  type BatchMetrics,
 } from "./training-agent";
 import {
   rawTickets,
@@ -276,6 +278,25 @@ export async function registerRoutes(
       });
       await storage.completeTrainingRun(runId, 0);
       res.write(`data: ${JSON.stringify({ done: true, ...result })}\n\n`);
+    } catch (error: any) {
+      await storage.completeTrainingRun(runId, 1, error.message);
+      res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+    }
+    res.end();
+  });
+
+  // ─── COMBINED BATCH ANALYSIS (optimized: category+intent+resolution in 1 call) ──
+  app.post("/api/training/combined-analysis", async (req, res) => {
+    sseHeaders(res);
+    const ticketLimit = req.body?.ticketLimit || undefined;
+    const runId = await storage.createTrainingRun("combined_batch_analysis", 0);
+
+    try {
+      const result = await runCombinedBatchAnalysis((msg, pct) => {
+        res.write(`data: ${JSON.stringify({ message: msg, progress: pct })}\n\n`);
+      }, ticketLimit);
+      await storage.completeTrainingRun(runId, result.metrics.errors);
+      res.write(`data: ${JSON.stringify({ done: true, metrics: result.metrics })}\n\n`);
     } catch (error: any) {
       await storage.completeTrainingRun(runId, 1, error.message);
       res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
@@ -1179,6 +1200,74 @@ export async function registerRoutes(
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
+  });
+
+  app.post("/api/training/test-combined", async (req, res) => {
+    sseHeaders(res);
+    const ticketLimit = req.body?.ticketLimit || 100;
+
+    try {
+      res.write(`data: ${JSON.stringify({ message: `Tilbakestiller opptil ${ticketLimit} tickets for testing...`, progress: 0 })}\n\n`);
+
+      await db.execute(sql`
+        UPDATE scrubbed_tickets 
+        SET category_mapping_status = 'pending', analysis_status = 'pending',
+            hjelpesenter_category = NULL, hjelpesenter_subcategory = NULL
+        WHERE ticket_id IN (
+          SELECT ticket_id FROM scrubbed_tickets LIMIT ${ticketLimit}
+        )
+      `);
+
+      await db.execute(sql`
+        DELETE FROM category_mappings WHERE ticket_id IN (
+          SELECT ticket_id FROM scrubbed_tickets LIMIT ${ticketLimit}
+        )
+      `);
+      await db.execute(sql`
+        DELETE FROM intent_classifications WHERE ticket_id IN (
+          SELECT ticket_id FROM scrubbed_tickets LIMIT ${ticketLimit}
+        )
+      `);
+      await db.execute(sql`
+        DELETE FROM resolution_patterns WHERE ticket_id IN (
+          SELECT ticket_id FROM scrubbed_tickets LIMIT ${ticketLimit}
+        )
+      `);
+
+      res.write(`data: ${JSON.stringify({ message: "Tickets tilbakestilt. Starter kombinert batch-analyse...", progress: 5 })}\n\n`);
+
+      const runId = await storage.createTrainingRun("test_combined_batch", 0);
+
+      const result = await runCombinedBatchAnalysis((msg, pct) => {
+        res.write(`data: ${JSON.stringify({ message: msg, progress: pct })}\n\n`);
+      }, ticketLimit);
+
+      await storage.completeTrainingRun(runId, result.metrics.errors);
+
+      const m = result.metrics;
+      const summary = {
+        done: true,
+        metrics: m,
+        summary: {
+          tickets_processed: m.processedTickets,
+          api_calls: m.apiCalls,
+          elapsed_seconds: ((m.elapsedMs || 0) / 1000).toFixed(1),
+          estimated_cost_usd: m.estimatedCostUsd.toFixed(4),
+          tickets_per_api_call: m.apiCalls > 0 ? (m.processedTickets / m.apiCalls).toFixed(1) : "N/A",
+          estimated_40k_hours: m.processedTickets > 0
+            ? ((40000 / m.processedTickets) * ((m.elapsedMs || 0) / 1000) / 3600).toFixed(1)
+            : "N/A",
+          estimated_40k_cost_usd: m.processedTickets > 0
+            ? ((40000 / m.processedTickets) * m.estimatedCostUsd).toFixed(2)
+            : "N/A",
+        },
+      };
+
+      res.write(`data: ${JSON.stringify(summary)}\n\n`);
+    } catch (error: any) {
+      res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+    }
+    res.end();
   });
 
   return httpServer;

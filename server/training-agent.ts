@@ -8,6 +8,51 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+export interface BatchMetrics {
+  totalTickets: number;
+  processedTickets: number;
+  apiCalls: number;
+  errors: number;
+  startTime: number;
+  endTime?: number;
+  elapsedMs?: number;
+  estimatedInputTokens: number;
+  estimatedOutputTokens: number;
+  estimatedCostUsd: number;
+}
+
+function createMetrics(): BatchMetrics {
+  return {
+    totalTickets: 0,
+    processedTickets: 0,
+    apiCalls: 0,
+    errors: 0,
+    startTime: Date.now(),
+    estimatedInputTokens: 0,
+    estimatedOutputTokens: 0,
+    estimatedCostUsd: 0,
+  };
+}
+
+function finalizeMetrics(m: BatchMetrics): BatchMetrics {
+  m.endTime = Date.now();
+  m.elapsedMs = m.endTime - m.startTime;
+  m.estimatedCostUsd = (m.estimatedInputTokens * 0.0000003) + (m.estimatedOutputTokens * 0.0000012);
+  return m;
+}
+
+function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 3.5);
+}
+
+function chunk<T>(arr: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) {
+    chunks.push(arr.slice(i, i + size));
+  }
+  return chunks;
+}
+
 const KNOWN_INTENTS = [
   "LoginIssue",
   "ProfileUpdate",
@@ -45,12 +90,16 @@ const KNOWN_INTENTS = [
   "GeneralInquiry",
 ];
 
-async function callOpenAI(prompt: string, model: string = "gpt-5-nano", maxTokens: number = 4096): Promise<string> {
-  const response = await openai.chat.completions.create({
+async function callOpenAI(prompt: string, model: string = "gpt-5-nano", maxTokens: number = 4096, jsonMode: boolean = false): Promise<string> {
+  const params: any = {
     model,
     max_completion_tokens: maxTokens,
     messages: [{ role: "user", content: prompt }],
-  });
+  };
+  if (jsonMode) {
+    params.response_format = { type: "json_object" };
+  }
+  const response = await openai.chat.completions.create(params);
   return response.choices[0]?.message?.content || "";
 }
 
@@ -767,7 +816,7 @@ export async function runPlaybookGeneration(
   onProgress?.("Genererer playbook fra klassifiserte intents og løsninger...", 0);
 
   const categories = await storage.getHjelpesenterCategories();
-  const categoryNames = [...new Set(categories.map((c) => c.categoryName))].join(", ");
+  const categoryNames = Array.from(new Set(categories.map((c) => c.categoryName))).join(", ");
 
   const prompt = `Du er en AI-ekspert for DyreID. Basert på dine kunnskaper om kjæledyrregistrering i Norge, generer en komplett Support Playbook med entries for alle kjente support-intents.
 
@@ -870,4 +919,227 @@ export async function submitManualReview(
   } catch (err: any) {
     return { success: false, message: err.message };
   }
+}
+
+async function saveCombinedResult(ticket: any, result: any, metrics: BatchMetrics): Promise<void> {
+  if (result.hjelpesenter_category) {
+    await storage.insertCategoryMapping({
+      ticketId: ticket.ticketId,
+      pureserviceCategory: ticket.category,
+      hjelpesenterCategory: result.hjelpesenter_category || "Ukategorisert",
+      hjelpesenterSubcategory: result.hjelpesenter_subcategory || "",
+      confidence: result.category_confidence || 0.5,
+      reasoning: result.category_reasoning || "",
+    });
+    await storage.updateScrubbedTicketMapping(
+      ticket.ticketId,
+      result.hjelpesenter_category || "Ukategorisert",
+      result.hjelpesenter_subcategory || ""
+    );
+  }
+
+  await storage.insertIntentClassification({
+    ticketId: ticket.ticketId,
+    intent: result.intent || "GeneralInquiry",
+    intentConfidence: result.intent_confidence || 0.5,
+    isNewIntent: result.is_new_intent || false,
+    keywords: result.keywords || "",
+    requiredRuntimeData: result.required_runtime_data || "",
+    requiredAction: result.required_action || "",
+    actionEndpoint: result.action_endpoint || "",
+    paymentRequired: result.payment_required || false,
+    autoClosePossible: result.auto_close_possible || false,
+    reasoning: result.intent_reasoning || result.reasoning || "",
+  });
+
+  await storage.insertResolutionPattern({
+    ticketId: ticket.ticketId,
+    intent: result.intent || "GeneralInquiry",
+    customerNeed: result.customer_need || "",
+    dataGathered: typeof result.data_gathered === "object" ? JSON.stringify(result.data_gathered) : (result.data_gathered || ""),
+    resolutionSteps: typeof result.resolution_steps === "object" ? JSON.stringify(result.resolution_steps) : (result.resolution_steps || ""),
+    successIndicators: typeof result.success_indicators === "object" ? JSON.stringify(result.success_indicators) : (result.success_indicators || ""),
+    followUpNeeded: result.follow_up_needed || false,
+  });
+
+  await storage.updateScrubbedTicketAnalysis(ticket.ticketId, "classified");
+  await storage.markResolutionExtracted(ticket.ticketId);
+
+  if (result.is_new_intent) {
+    await storage.insertReviewQueueItem({
+      reviewType: "new_intent",
+      referenceId: ticket.ticketId,
+      priority: "high",
+      data: result,
+    });
+  }
+
+  metrics.processedTickets++;
+}
+
+// ─── COMBINED BATCH ANALYSIS (Category + Intent + Resolution in ONE call) ─────
+export async function runCombinedBatchAnalysis(
+  onProgress?: (msg: string, pct: number) => void,
+  ticketLimit?: number
+): Promise<{ metrics: BatchMetrics }> {
+  const metrics = createMetrics();
+  const BATCH_SIZE = 10;
+
+  onProgress?.("Starter kombinert batch-analyse...", 0);
+
+  const categories = await storage.getHjelpesenterCategories();
+  const categoryList = categories
+    .map((c) => `${c.categoryName} > ${c.subcategoryName}`)
+    .join("\n");
+
+  const intentsStr = KNOWN_INTENTS.join(", ");
+
+  const templates = await storage.getActiveResponseTemplates();
+  const templateSignatures = templates.map((t) => ({
+    id: t.templateId,
+    name: t.name,
+    subject: t.subject || "",
+    category: t.hjelpesenterCategory,
+    bodySnippet: (t.bodyText || "").substring(0, 100),
+  }));
+
+  const PARALLEL_CONCURRENCY = 5;
+  let totalToProcess = 0;
+
+  function buildCombinedPrompt(batch: any[], categoryList: string, intentsStr: string, templateSignatures: any[]): string {
+    const ticketsBlock = batch.map((t, idx) => `
+TICKET ${idx + 1} (ID: ${t.ticketId}):
+Pureservice-kategori: ${t.category || "Ingen"}
+Emne: ${t.subject || "Ingen"}
+Kundespørsmål: ${(t.customerQuestion || "Ingen").substring(0, 500)}
+Agentsvar: ${(t.agentAnswer || "Ingen").substring(0, 500)}
+Meldinger: ${t.messages ? JSON.stringify(t.messages).substring(0, 300) : "Ingen"}`).join("\n---");
+
+    return `Du er en ekspert-analysator for DyreID support-tickets. Analyser ALLE ${batch.length} tickets og gi en KOMBINERT analyse for hver.
+
+${ticketsBlock}
+
+KATEGORIER:
+${categoryList}
+
+INTENTS: ${intentsStr}
+
+AUTOSVAR-MALER: ${JSON.stringify(templateSignatures)}
+
+FOR HVER TICKET:
+1. KATEGORI: Map til hjelpesenter-kategori/underkategori. "Ukategorisert" hvis ingen passer.
+2. INTENT: Klassifiser kundens intent (bruk kjente intents eller foreslå ny).
+3. RESOLUSJON: Ekstraher løsningssteg.
+4. AUTOSVAR-MATCH: Matcher agentsvaret et autosvar? Oppgi template_id.
+5. DIALOG-MØNSTER: "autoresponse_only", "autoresponse_then_resolution", "autoresponse_then_no_resolution", "direct_human_response", eller "no_response"
+6. RESOLUSJONS-KVALITET: "high", "medium", "low", eller "none"
+7. GENERELL-REKLASSIFISERING: Hvis "Generell e-post", angi egentlig emne.
+
+Svar med JSON: {"tickets": [{"ticket_id":12345,"hjelpesenter_category":"Min Side","hjelpesenter_subcategory":"Innlogging","category_confidence":0.9,"category_reasoning":"...","intent":"LoginIssue","intent_confidence":0.85,"is_new_intent":false,"keywords":"...","required_runtime_data":"","required_action":"","action_endpoint":"","payment_required":false,"auto_close_possible":false,"intent_reasoning":"...","customer_need":"...","resolution_steps":"...","data_gathered":"...","success_indicators":"...","follow_up_needed":false,"matched_template_id":null,"dialog_pattern":"direct_human_response","resolution_quality":"high","original_category_if_general":null}]}`;
+  }
+
+  async function processSingleBatch(batch: any[], categoryList: string, intentsStr: string, templateSignatures: any[], metrics: BatchMetrics): Promise<void> {
+    const prompt = buildCombinedPrompt(batch, categoryList, intentsStr, templateSignatures);
+    
+    const inputTokens = estimateTokens(prompt);
+    metrics.estimatedInputTokens += inputTokens;
+
+    let text: string;
+    try {
+      text = await callOpenAI(prompt, "gpt-5-mini", 8192, true);
+    } catch (err: any) {
+      metrics.errors += batch.length;
+      metrics.apiCalls++;
+      log(`API call failed: ${err.message}`, "training");
+      return;
+    }
+    metrics.apiCalls++;
+
+    const outputTokens = estimateTokens(text);
+    metrics.estimatedOutputTokens += outputTokens;
+
+    let resultsArray: any[];
+    try {
+      const results = extractJson(text);
+      resultsArray = Array.isArray(results)
+        ? results
+        : results?.tickets
+          ? results.tickets
+          : [results];
+    } catch (err: any) {
+      metrics.errors += batch.length;
+      log(`JSON parse failed for batch: ${err.message}`, "training");
+      return;
+    }
+
+    for (let i = 0; i < batch.length; i++) {
+      const ticket = batch[i];
+      const result = resultsArray[i] || resultsArray.find((r: any) => r.ticket_id === ticket.ticketId);
+
+      if (!result) {
+        metrics.errors++;
+        log(`Combined analysis: missing result for ticket ${ticket.ticketId}`, "training");
+        continue;
+      }
+
+      try {
+        await saveCombinedResult(ticket, result, metrics);
+      } catch (err: any) {
+        metrics.errors++;
+        log(`Combined save error ticket ${ticket.ticketId}: ${err.message}`, "training");
+      }
+    }
+  }
+
+  async function processInParallel(batches: any[][], categoryList: string, intentsStr: string, templateSignatures: any[], metrics: BatchMetrics, onProgress?: (msg: string, pct: number) => void, pctBase: number = 0, pctRange: number = 95): Promise<void> {
+    let completedBatches = 0;
+    
+    for (let i = 0; i < batches.length; i += PARALLEL_CONCURRENCY) {
+      const parallelBatches = batches.slice(i, i + PARALLEL_CONCURRENCY);
+      
+      const promises = parallelBatches.map(async (batch) => {
+        try {
+          await processSingleBatch(batch, categoryList, intentsStr, templateSignatures, metrics);
+        } catch (err: any) {
+          metrics.errors += batch.length;
+          log(`Combined batch error: ${err.message}`, "training");
+        }
+      });
+
+      await Promise.all(promises);
+      completedBatches += parallelBatches.length;
+      
+      const pct = Math.min(pctBase + pctRange, pctBase + Math.round((completedBatches / batches.length) * pctRange));
+      onProgress?.(`Kombinert analyse: ${metrics.processedTickets}/${metrics.totalTickets} tickets (${metrics.apiCalls} API-kall, ${PARALLEL_CONCURRENCY}x parallell)`, pct);
+    }
+  }
+
+  const unmapped = await storage.getUnmappedScrubbedTickets(ticketLimit || 50000);
+  if (unmapped.length > 0) {
+    totalToProcess += unmapped.length;
+    metrics.totalTickets += unmapped.length;
+    onProgress?.(`Fant ${unmapped.length} umappede tickets. Kjører kombinert analyse (${PARALLEL_CONCURRENCY}x parallell)...`, 5);
+
+    const batches = chunk(unmapped, BATCH_SIZE);
+    await processInParallel(batches, categoryList, intentsStr, templateSignatures, metrics, onProgress, 5, 45);
+  }
+
+  const alreadyMapped = await storage.getUnclassifiedScrubbedTickets(ticketLimit || 50000);
+  if (alreadyMapped.length > 0) {
+    metrics.totalTickets += alreadyMapped.length;
+    onProgress?.(`Fant ${alreadyMapped.length} mappede men uklassifiserte tickets. Kjører intent + resolusjon (${PARALLEL_CONCURRENCY}x parallell)...`, 50);
+
+    const batches = chunk(alreadyMapped, BATCH_SIZE);
+    await processInParallel(batches, categoryList, intentsStr, templateSignatures, metrics, onProgress, 50, 45);
+  }
+
+  finalizeMetrics(metrics);
+  const elapsedSec = (metrics.elapsedMs || 0) / 1000;
+  const est40k = metrics.processedTickets > 0
+    ? ((40000 / metrics.processedTickets) * elapsedSec / 3600).toFixed(1)
+    : "N/A";
+
+  onProgress?.(`Ferdig! ${metrics.processedTickets} tickets, ${metrics.apiCalls} API-kall, ${elapsedSec.toFixed(1)}s, est. 40K: ${est40k}t, est. kostnad: $${metrics.estimatedCostUsd.toFixed(4)}`, 100);
+
+  return { metrics };
 }

@@ -96,7 +96,11 @@ client/src/
 - `DATABASE_URL` - PostgreSQL connection string (auto-provided)
 - `OPENAI_API_KEY` - OpenAI API key (user-provided, used by both training agent and chatbot)
 
+### Combined Batch Analysis
+- POST /api/training/test-combined (SSE) - Combined batch analysis: category + intent + resolution in one API call per 10 tickets, 5x parallel
+
 ## Recent Changes
+- 2026-02-14: Combined batch analysis with 5x parallel processing. Category + intent + resolution in ONE API call per 10 tickets using gpt-5-mini with JSON mode. Autosvar detection, dialog pattern classification, resolution quality scoring. Test endpoint resets and re-analyzes tickets. Dashboard button for triggering combined analysis. Estimated <20 hours for 40K tickets.
 - 2026-02-14: Downloaded all 22 Pureservice auto-response templates, mapped to hjelpesenter categories/intents, stored in response_templates table. Integrated into chatbot system prompt as official response guidelines. Autosvar tab on dashboard shows templates grouped by category with expandable body/key points.
 - 2026-02-14: Added service_prices table with admin UI (Priser tab) for configurable pricing. 10 identified prices from Pureservice templates. Prices injected into chatbot system prompt. CRUD API at /api/prices.
 - 2026-02-14: Switched training agent AI from Claude (Anthropic) to OpenAI via Replit AI Integrations. claude-haiku-4-5 → gpt-5-nano, claude-sonnet-4-5 → gpt-5-mini. Chatbot remains on Claude.

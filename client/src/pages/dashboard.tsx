@@ -32,6 +32,7 @@ import {
   Pencil,
   Trash2,
   Save,
+  Zap,
 } from "lucide-react";
 import { useState, useCallback } from "react";
 import {
@@ -215,6 +216,42 @@ function useSSEWorkflow(endpoint: string) {
   }, [endpoint]);
 
   return { isRunning, progress, logs, error, run };
+}
+
+function CombinedBatchCard() {
+  const { isRunning, progress, logs, error, run } = useSSEWorkflow("/api/training/test-combined");
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2 flex-wrap">
+        <Button
+          data-testid="button-combined-batch"
+          onClick={run}
+          disabled={isRunning}
+          size="sm"
+        >
+          {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+          {isRunning ? "Kjorer..." : "Kjor Kombinert Analyse"}
+        </Button>
+      </div>
+      {isRunning && <Progress value={progress} />}
+      {error && (
+        <div className="flex items-center gap-1 text-xs text-destructive">
+          <AlertCircle className="h-3 w-3 shrink-0" />
+          <span className="truncate">{error}</span>
+        </div>
+      )}
+      {logs.length > 0 && (
+        <ScrollArea className="h-24 rounded-md border p-2">
+          <div className="space-y-1">
+            {logs.map((log, i) => (
+              <p key={i} className="text-xs text-muted-foreground font-mono">{log}</p>
+            ))}
+          </div>
+        </ScrollArea>
+      )}
+    </div>
+  );
 }
 
 function StatCard({
@@ -640,6 +677,21 @@ export default function Dashboard() {
               </CardContent>
             </Card>
           </div>
+          <Card className="mt-4 border-primary/30">
+            <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Zap className="h-4 w-4 text-primary" />
+                <CardTitle className="text-sm font-medium">Kombinert Batch-Analyse (Steg 3+5+6)</CardTitle>
+                <Badge variant="secondary" className="no-default-hover-elevate no-default-active-elevate">5x parallell</Badge>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <p className="text-xs text-muted-foreground mb-3">
+                Kjor kategori + intent + resolusjon i EN API-kall per 10 tickets med 5x parallell prosessering. Estimert &lt;20 timer for 40K tickets.
+              </p>
+              <CombinedBatchCard />
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="playbook" className="mt-4">
