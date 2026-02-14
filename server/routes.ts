@@ -478,5 +478,115 @@ export async function registerRoutes(
     res.json(getAllSandboxPhones());
   });
 
+  app.post("/api/training/seed-test-data", async (req, res) => {
+    try {
+      const count = req.body?.count || 100;
+      const existing = await storage.getTrainingStats();
+      if (existing.rawTickets > 0) {
+        return res.status(400).json({ error: "Det finnes allerede tickets i databasen. Tøm først om du vil seede på nytt." });
+      }
+
+      const categories = [
+        "Min side", "Eierskifte", "Registrering", "QR Tag",
+        "Smart Tag", "Abonnement", "Savnet/Funnet", "Familiedeling", "App"
+      ];
+
+      const ticketTemplates = [
+        { cat: "Min side", subject: "Kan ikke logge inn", q: "Hei, jeg klarer ikke å logge inn på Min Side. Har prøvd flere ganger med BankID men får feilmelding.", a: "Hei! Prøv å tømme nettleserens cache og informasjonskapsler, og prøv igjen. Hvis det fortsatt ikke fungerer, prøv en annen nettleser." },
+        { cat: "Min side", subject: "Glemt passord", q: "Jeg har glemt passordet mitt til Min Side. Hvordan kan jeg tilbakestille det?", a: "Du kan tilbakestille passordet ved å trykke på 'Glemt passord' på innloggingssiden. Du vil da motta en e-post med lenke for å opprette nytt passord." },
+        { cat: "Min side", subject: "Oppdatere kontaktinfo", q: "Jeg har byttet telefonnummer og e-post. Hvordan oppdaterer jeg dette på Min Side?", a: "Logg inn på Min Side og gå til 'Min profil'. Der kan du oppdatere telefonnummer, e-post og adresse." },
+        { cat: "Min side", subject: "Finner ikke dyret mitt", q: "Jeg har registrert katten min men finner den ikke på Min Side. Chipnummer er 578xxx.", a: "Jeg ser at registreringen er under behandling. Det kan ta opptil 24 timer. Sjekk igjen i morgen." },
+        { cat: "Min side", subject: "Problemer med BankID", q: "BankID fungerer ikke når jeg prøver å logge inn. Får bare hvit skjerm.", a: "Dette kan skyldes at BankID-appen trenger oppdatering. Sjekk at du har siste versjon av BankID-appen installert." },
+        { cat: "Eierskifte", subject: "Overføre eierskap av hund", q: "Jeg har solgt hunden min og trenger å overføre eierskapet til ny eier. Hvordan gjør jeg det?", a: "Gå til Min Side, finn dyret og velg 'Overfør eierskap'. Du trenger ny eiers personnummer. Begge parter må godkjenne overføringen." },
+        { cat: "Eierskifte", subject: "Mottatt dyr - godkjenne overføring", q: "Jeg har kjøpt en katt og forrige eier har startet eierskifte. Hvordan godkjenner jeg?", a: "Du skal ha mottatt en e-post eller SMS med lenke for å godkjenne eierskiftet. Logg inn på Min Side for å fullføre." },
+        { cat: "Eierskifte", subject: "Eierskifte avvist", q: "Eierskiftet ble avvist. Hva kan være grunnen?", a: "Eierskifte kan avvises hvis chipnummeret ikke stemmer, eller hvis ny eier ikke har bekreftet innen fristen på 14 dager. Start prosessen på nytt." },
+        { cat: "Eierskifte", subject: "Arvet dyr etter dødsfall", q: "Min far har gått bort og etterlatt seg en hund. Hvordan overfører vi eierskapet?", a: "Ved dødsfall kan eierskifte gjøres ved å sende inn kopi av skifteattest og utfylt eierskifteskjema til oss per e-post." },
+        { cat: "Eierskifte", subject: "Oppdretter - registrere valpekull", q: "Jeg er oppdretter og har et nytt valpekull. Hvordan registrerer jeg alle valpene og overfører til nye eiere?", a: "Som oppdretter kan du bruke bulkregistrering på Min Side. Gå til 'Mine dyr' > 'Registrer kull'. Eierskifte til nye eiere gjøres når valpene hentes." },
+        { cat: "Registrering", subject: "Registrere ny katt", q: "Jeg har fått en kattunge og vil registrere den i DyreID. Katten er chippet hos veterinær.", a: "Logg inn på Min Side og velg 'Registrer nytt dyr'. Du trenger chipnummer (15 siffer), rase, farge og fødselsdato. Registreringsavgift er 250 kr." },
+        { cat: "Registrering", subject: "Betaling for registrering", q: "Jeg prøvde å registrere hunden min men betalingen gikk ikke gjennom. Hva gjør jeg?", a: "Prøv igjen med et annet betalingskort, eller velg Vipps som betalingsmetode. Hvis problemet vedvarer, ta kontakt med banken din." },
+        { cat: "Registrering", subject: "Feil chipnummer registrert", q: "Veterinæren registrerte feil chipnummer på katten min. Kan dette rettes?", a: "Ja, be veterinæren sende oss en bekreftelse på riktig chipnummer med dyrets signalement. Vi oppdaterer registreringen." },
+        { cat: "Registrering", subject: "Importert dyr fra utlandet", q: "Jeg har importert en hund fra Sverige. Hvordan registrerer jeg den i DyreID?", a: "Importerte dyr registreres på vanlig måte, men du må også laste opp EU-pass eller helsesertifikat. Chipnummeret må være ISO-standard." },
+        { cat: "Registrering", subject: "Dobbeltregistrering", q: "Det ser ut som hunden min er registrert to ganger med ulike chipnumre. Kan dere rydde opp?", a: "Jeg kan se overlappende registreringer. Send oss chipnumrene og vi slår sammen registreringene til én." },
+        { cat: "QR Tag", subject: "Aktivere QR-brikke", q: "Jeg har mottatt QR-brikken men vet ikke hvordan jeg aktiverer den. Kan dere hjelpe?", a: "Skann QR-koden på brikken med mobilkameraet. Du blir sendt til en aktiveringsside. Logg inn og koble brikken til dyret ditt." },
+        { cat: "QR Tag", subject: "QR-brikke fungerer ikke", q: "QR-brikken min skannes ikke. Koden er slitt og uleselig.", a: "Vi sender deg en ny QR-brikke kostnadsfritt. Oppgi adressen din og dyrets chipnummer så sender vi ny brikke i posten." },
+        { cat: "QR Tag", subject: "Bestille ekstra QR-brikke", q: "Kan jeg bestille en ekstra QR-brikke til halsbåndet? Har allerede én på selen.", a: "Ja! Gå til Min Side > 'Dine dyr' > velg dyret > 'Bestill QR-brikke'. Ekstra brikker koster 99 kr." },
+        { cat: "QR Tag", subject: "QR-brikke viser feil dyr", q: "Når noen skanner QR-brikken vises feil dyr. Brikken var koblet til forrige hund.", a: "Gå til Min Side og koble brikken til riktig dyr under 'QR-brikker'. Du kan flytte brikken mellom dine registrerte dyr." },
+        { cat: "QR Tag", subject: "Mistet QR-brikke", q: "Hunden min har mistet QR-brikken fra halsbåndet. Kan dere sende ny?", a: "Bestill ny QR-brikke via Min Side under 'Dine dyr'. Velg dyret og klikk 'Ny QR-brikke'. Den gamle deaktiveres automatisk." },
+        { cat: "Smart Tag", subject: "Koble Smart Tag til app", q: "Jeg har kjøpt en Smart Tag men klarer ikke å koble den til DyreID-appen. Bluetooth finner den ikke.", a: "Sørg for at Bluetooth er aktivert og at du er innenfor 2 meters rekkevidde. Hold inne knappen på taggen i 5 sekunder til lyset blinker blått. Prøv deretter å koble på nytt i appen." },
+        { cat: "Smart Tag", subject: "Smart Tag batteri", q: "Hvor lenge varer batteriet på Smart Tag? Og kan det byttes?", a: "Batteriet varer ca. 1 år ved normal bruk. Batteriet kan ikke byttes – du bestiller ny Smart Tag til redusert pris som eksisterende kunde." },
+        { cat: "Smart Tag", subject: "GPS-posisjon unøyaktig", q: "Smart Tag viser feil posisjon for katten min. Den sier katten er 500 meter unna men den ligger her.", a: "Smart Tag bruker Bluetooth-nettverk, ikke GPS. Nøyaktigheten avhenger av andre brukere i nærheten. I tettbygde strøk er den mer presis." },
+        { cat: "Smart Tag", subject: "Smart Tag-varsling", q: "Jeg får ikke varsler når katten går utenfor sonen jeg har satt opp.", a: "Sjekk at varsler er aktivert i DyreID-appen under Innstillinger > Varsler. Sjekk også at appen har tillatelse til å sende varsler i telefonens innstillinger." },
+        { cat: "Smart Tag", subject: "Overføre Smart Tag til nytt dyr", q: "Kan jeg bruke Smart Tag fra gammel hund på ny valp?", a: "Ja, gå til Min Side > Smart Tags og velg 'Koble til annet dyr'. Taggen nullstilles og kobles til det nye dyret." },
+        { cat: "Abonnement", subject: "Si opp abonnement", q: "Jeg ønsker å si opp abonnementet mitt. Hunden min har dessverre gått bort.", a: "Kondolerer. Jeg har sagt opp abonnementet med umiddelbar virkning og refundert gjenstående periode. Takk for at du var kunde." },
+        { cat: "Abonnement", subject: "Endre abonnementstype", q: "Kan jeg oppgradere fra Basis til Premium-abonnement?", a: "Ja, gå til Min Side > Abonnement > 'Endre plan'. Differansen beregnes automatisk for gjenstående periode." },
+        { cat: "Abonnement", subject: "Faktura ikke mottatt", q: "Jeg har ikke mottatt faktura for abonnementet. Betaler jeg via AvtaleGiro?", a: "Ditt abonnement betales via AvtaleGiro. Neste trekk er 15. mars. Du finner alle fakturaer under Min Side > Betalingshistorikk." },
+        { cat: "Abonnement", subject: "Dobbeltbelastning", q: "Jeg er trukket dobbelt for abonnementet denne måneden. Kan dere sjekke?", a: "Jeg ser at det er trukket to ganger. Vi refunderer det ekstra beløpet innen 3-5 virkedager til kontoen din." },
+        { cat: "Abonnement", subject: "Legge til flere dyr i abonnement", q: "Jeg har tre katter nå. Kan alle dekkes av samme abonnement?", a: "Med Familie-abonnementet til 399 kr/mnd dekkes opptil 5 dyr. Gå til Min Side > Abonnement > 'Legg til dyr'." },
+        { cat: "Savnet/Funnet", subject: "Hund savnet", q: "Hunden min har rømt! Kan dere hjelpe meg å melde den savnet? Schæfer, hannhund, 4 år.", a: "Jeg har registrert hunden som savnet i systemet. Alle som skanner chipnummeret eller QR-brikken vil nå se at dyret er meldt savnet med ditt kontaktnummer." },
+        { cat: "Savnet/Funnet", subject: "Funnet katt", q: "Jeg har funnet en katt i hagen min. Den har chip. Chipnr: 578xxxxxxxxx. Kan dere finne eier?", a: "Takk for at du melder inn! Jeg har kontaktet eier via SMS og e-post. De er informert om at katten er funnet hos deg." },
+        { cat: "Savnet/Funnet", subject: "Oppdatere savnet-status", q: "Vi fant hunden vår igjen! Kan dere fjerne savnet-meldingen?", a: "Så bra! Jeg har oppdatert statusen. Dyret er ikke lenger registrert som savnet i systemet." },
+        { cat: "Savnet/Funnet", subject: "Savnet katt lenge", q: "Katten har vært savnet i 3 måneder nå. Er det noen som har funnet den?", a: "Savnet-meldingen er fortsatt aktiv. Ingen har skannet chipnummeret ennå. Anbefaler å dele på Dyrebar.no og sosiale medier i tillegg." },
+        { cat: "Savnet/Funnet", subject: "Funnet skadet dyr", q: "Jeg fant en skadet fugl med ring. Kan DyreID hjelpe?", a: "DyreID registrerer hunder og katter med chip. For fugler med ring, kontakt Stavanger Museum eller ringmerkingssentralen." },
+        { cat: "Familiedeling", subject: "Dele tilgang med partner", q: "Kan min samboer også se dyret på sin Min Side? Vi eier hunden sammen.", a: "Ja! Gå til Min Side > 'Familiedeling' > 'Inviter familiemedlem'. Din samboer får lesetilgang til dyrets profil." },
+        { cat: "Familiedeling", subject: "Fjerne familiemedlem", q: "Jeg og min eks har gått fra hverandre. Kan dere fjerne hans tilgang til katten?", a: "Gå til Min Side > Familiedeling og klikk 'Fjern' ved personens navn. Tilgangen fjernes umiddelbart." },
+        { cat: "Familiedeling", subject: "Familiedeling for barn", q: "Kan barnet mitt (14 år) få egen tilgang til å se hundeprofilen?", a: "Barn under 16 kan ikke ha egen konto, men du kan dele via familiedeling. Barnet trenger ikke BankID – de får en invitasjonslenke." },
+        { cat: "Familiedeling", subject: "Problemer med invitasjon", q: "Invitasjonen til familiedeling kommer ikke frem til min svigermor.", a: "Sjekk at e-postadressen er riktig stavet. Invitasjonen kan havne i søppelpost. Jeg sender en ny invitasjon nå." },
+        { cat: "App", subject: "App krasjer ved oppstart", q: "DyreID-appen krasjer hver gang jeg åpner den etter siste oppdatering. iPhone 13.", a: "Prøv å slette appen og installere den på nytt fra App Store. Hvis det ikke hjelper, sjekk at du har iOS 16 eller nyere." },
+        { cat: "App", subject: "Push-varsler fungerer ikke", q: "Jeg får ikke push-varsler fra appen selv om de er skrudd på.", a: "Gå til Innstillinger > DyreID > Varsler på telefonen og sjekk at alle varseltyper er aktivert. Logg ut og inn igjen i appen." },
+        { cat: "App", subject: "Kan ikke laste ned appen", q: "Finner ikke DyreID-appen i Google Play Store. Har Samsung Galaxy.", a: "Appen heter 'DyreID - Norsk Dyreregister'. Sjekk at telefonen har Android 10 eller nyere. Prøv å søke 'DyreID'." },
+        { cat: "App", subject: "Appen viser feil språk", q: "Appen viser alt på engelsk. Hvordan endrer jeg til norsk?", a: "Gå til Settings (Innstillinger) i appen og velg 'Language/Språk' > Norsk. Appen vil starte på nytt med norsk tekst." },
+        { cat: "Min side", subject: "Slette konto", q: "Jeg ønsker å slette kontoen min hos DyreID. Hvordan gjør jeg det?", a: "Du kan be om kontosletting via Min Side > Innstillinger > 'Slett konto'. Merk at dyreregistreringene beholdes i det nasjonale registeret." },
+        { cat: "Registrering", subject: "Registrere kanin", q: "Kan jeg registrere kaninen min i DyreID? Den er chippet.", a: "DyreID støtter registrering av hund, katt, hest og frettdyr. Kaniner kan dessverre ikke registreres i systemet per nå." },
+        { cat: "Eierskifte", subject: "Eierskifte koster penger?", q: "Koster det noe å overføre eierskapet av en hund?", a: "Eierskifte er gratis for dyr som allerede er registrert i DyreID. Ny eier må ha eller opprette en konto på Min Side." },
+        { cat: "Min side", subject: "To-faktor autentisering", q: "Kan jeg aktivere to-faktor autentisering på Min Side for ekstra sikkerhet?", a: "Min Side bruker BankID som innlogging, som allerede er to-faktor. Du trenger ikke aktivere noe ekstra." },
+        { cat: "Savnet/Funnet", subject: "Stjålet hund", q: "Vi tror hunden vår er stjålet fra hagen. Kan dere hjelpe?", a: "Jeg har registrert dyret som savnet/mulig stjålet. Anbefaler å anmelde forholdet til politiet. Alle som skanner chipen vil se savnet-melding." },
+        { cat: "Abonnement", subject: "Priser og pakker", q: "Hva koster de ulike abonnementene? Har to hunder.", a: "Basis: 99 kr/mnd (1 dyr), Standard: 199 kr/mnd (2 dyr), Familie: 399 kr/mnd (opptil 5 dyr). Med to hunder anbefaler vi Standard." },
+      ];
+
+      const tickets = [];
+      for (let i = 0; i < count; i++) {
+        const template = ticketTemplates[i % ticketTemplates.length];
+        const variation = Math.floor(i / ticketTemplates.length);
+        const daysAgo = Math.floor(Math.random() * 365) + 30;
+        const closedDaysAgo = daysAgo - Math.floor(Math.random() * 7) - 1;
+
+        tickets.push({
+          ticketId: 10000 + i,
+          category: template.cat,
+          categoryId: categories.indexOf(template.cat) + 1,
+          subject: variation > 0 ? `${template.subject} (${variation + 1})` : template.subject,
+          customerQuestion: template.q,
+          agentAnswer: template.a,
+          messages: [
+            { from: "customer", body: template.q, direction: "incoming", createdDate: new Date(Date.now() - daysAgo * 86400000).toISOString() },
+            { from: "agent", body: template.a, direction: "outgoing", createdDate: new Date(Date.now() - closedDaysAgo * 86400000).toISOString() },
+          ],
+          resolution: template.a,
+          tags: template.cat,
+          autoClosed: false,
+          createdAt: new Date(Date.now() - daysAgo * 86400000),
+          closedAt: new Date(Date.now() - closedDaysAgo * 86400000),
+          processingStatus: "pending" as const,
+        });
+      }
+
+      const batchSize = 25;
+      let inserted = 0;
+      for (let i = 0; i < tickets.length; i += batchSize) {
+        const batch = tickets.slice(i, i + batchSize);
+        try {
+          await storage.insertRawTickets(batch);
+          inserted += batch.length;
+        } catch (e: any) {
+          console.log(`Seed batch error: ${e.message}`);
+        }
+      }
+
+      res.json({ success: true, inserted, total: count });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   return httpServer;
 }

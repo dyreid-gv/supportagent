@@ -2,23 +2,29 @@ import { log } from "./index";
 
 const PURESERVICE_BASE_URL = "https://dyreid.pureservice.com/agent/api";
 
+interface PureserviceCommunication {
+  text?: string;
+  subject?: string;
+  direction?: number;
+  type?: number;
+  created?: string;
+  senderId?: number;
+}
+
 interface PureserviceTicket {
   id: number;
+  requestNumber?: number;
   subject?: string;
   description?: string;
-  status?: string;
-  categoryId?: number;
-  categoryName?: string;
-  resolution?: string;
-  tags?: string[];
-  createdDate?: string;
-  closedDate?: string;
-  communications?: {
-    from?: string;
-    body?: string;
-    direction?: string;
-    createdDate?: string;
-  }[];
+  statusId?: number;
+  category1Id?: number | null;
+  category2Id?: number | null;
+  category3Id?: number | null;
+  solution?: string | null;
+  emailAddress?: string;
+  created?: string;
+  closed?: string | null;
+  communications?: PureserviceCommunication[];
 }
 
 export async function fetchTicketsFromPureservice(
@@ -33,7 +39,7 @@ export async function fetchTicketsFromPureservice(
   const offset = (page - 1) * pageSize;
 
   const response = await fetch(
-    `${PURESERVICE_BASE_URL}/ticket?limit=${pageSize}&offset=${offset}&include=communications,category&sort=-createdDate`,
+    `${PURESERVICE_BASE_URL}/ticket?limit=${pageSize}&offset=${offset}&include=communications&sort=-created`,
     {
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -49,58 +55,53 @@ export async function fetchTicketsFromPureservice(
 
   const data = await response.json();
 
-  const tickets: PureserviceTicket[] = (data.tickets || data.results || []).map(
-    (t: any) => ({
-      id: t.id,
-      subject: t.subject || t.title || "",
-      description: t.description || t.body || "",
-      status: t.status?.name || t.statusName || "",
-      categoryId: t.categoryId || t.category?.id,
-      categoryName: t.category?.name || t.categoryName || "",
-      resolution: t.resolution || "",
-      tags: t.tags?.map((tag: any) => tag.name || tag) || [],
-      createdDate: t.createdDate || t.created,
-      closedDate: t.closedDate || t.closed,
-      communications: (t.communications || []).map((c: any) => ({
-        from: c.from || c.sender || "",
-        body: c.body || c.content || "",
-        direction: c.direction || c.type || "",
-        createdDate: c.createdDate || c.created || "",
-      })),
-    })
-  );
+  const tickets: PureserviceTicket[] = Array.isArray(data) ? data : (data.tickets || data.results || []);
 
-  const total = data.total || data.totalCount || tickets.length;
+  let total: number;
+  if (Array.isArray(data)) {
+    total = tickets.length < pageSize ? offset + tickets.length : offset + tickets.length + 1;
+  } else {
+    total = data.total || data.totalCount || tickets.length;
+  }
+
   return { tickets, total };
 }
 
 export function mapPureserviceToRawTicket(ticket: PureserviceTicket) {
-  const customerMessages = (ticket.communications || []).filter(
-    (c) => c.direction === "incoming" || c.direction === "in"
+  const communications = ticket.communications || [];
+  const customerMessages = communications.filter(
+    (c) => c.direction === 1 || c.direction === 0
   );
-  const agentMessages = (ticket.communications || []).filter(
-    (c) => c.direction === "outgoing" || c.direction === "out"
+  const agentMessages = communications.filter(
+    (c) => c.direction === 2
   );
+
+  const mappedComms = communications.map((c) => ({
+    from: c.direction === 1 || c.direction === 0 ? "customer" : "agent",
+    body: c.text || "",
+    direction: c.direction === 1 || c.direction === 0 ? "incoming" : "outgoing",
+    createdDate: c.created || "",
+  }));
 
   return {
     ticketId: ticket.id,
-    category: ticket.categoryName || null,
-    categoryId: ticket.categoryId || null,
+    category: null as string | null,
+    categoryId: ticket.category1Id || null,
     subject: ticket.subject || null,
     customerQuestion:
       customerMessages.length > 0
-        ? customerMessages[0].body || ticket.description || null
+        ? customerMessages[0].text || ticket.description || null
         : ticket.description || null,
     agentAnswer:
       agentMessages.length > 0
-        ? agentMessages[agentMessages.length - 1].body || null
+        ? agentMessages[agentMessages.length - 1].text || null
         : null,
-    messages: ticket.communications || null,
-    resolution: ticket.resolution || null,
-    tags: (ticket.tags || []).join(", "),
-    autoClosed: ticket.status?.toLowerCase().includes("auto") || false,
-    createdAt: ticket.createdDate ? new Date(ticket.createdDate) : null,
-    closedAt: ticket.closedDate ? new Date(ticket.closedDate) : null,
+    messages: mappedComms.length > 0 ? mappedComms : null,
+    resolution: ticket.solution || null,
+    tags: "",
+    autoClosed: false,
+    createdAt: ticket.created ? new Date(ticket.created) : null,
+    closedAt: ticket.closed ? new Date(ticket.closed) : null,
     processingStatus: "pending" as const,
   };
 }

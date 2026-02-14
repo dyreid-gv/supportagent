@@ -410,19 +410,39 @@ export default function Dashboard() {
             9-stegs treningspipeline for support-automatisering
           </p>
         </div>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => {
-            queryClient.invalidateQueries({ queryKey: ["/api/training/stats"] });
-            queryClient.invalidateQueries({ queryKey: ["/api/playbook"] });
-            queryClient.invalidateQueries({ queryKey: ["/api/training/review-queue"] });
-          }}
-          data-testid="button-refresh-all"
-        >
-          <RefreshCw className="h-4 w-4" />
-          Oppdater
-        </Button>
+        <div className="flex items-center gap-2 flex-wrap">
+          {stats?.rawTickets === 0 && (
+            <Button
+              size="sm"
+              variant="default"
+              onClick={async () => {
+                try {
+                  await apiRequest("POST", "/api/training/seed-test-data", { count: 100 });
+                  queryClient.invalidateQueries({ queryKey: ["/api/training/stats"] });
+                } catch (e: any) {
+                  alert(e.message || "Feil ved seeding");
+                }
+              }}
+              data-testid="button-seed-test-data"
+            >
+              <Database className="h-4 w-4" />
+              Legg inn 100 test-saker
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              queryClient.invalidateQueries({ queryKey: ["/api/training/stats"] });
+              queryClient.invalidateQueries({ queryKey: ["/api/playbook"] });
+              queryClient.invalidateQueries({ queryKey: ["/api/training/review-queue"] });
+            }}
+            data-testid="button-refresh-all"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Oppdater
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-3 md:grid-cols-5 lg:grid-cols-9 gap-2">
