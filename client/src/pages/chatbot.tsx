@@ -138,6 +138,7 @@ export default function Chatbot() {
   const [otpCode, setOtpCode] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState("");
+  const [minsideUserId, setMinsideUserId] = useState<string | null>(null);
   const [userContext, setUserContext] = useState<UserContext | null>(null);
   const [showSuggestions, setShowSuggestions] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -253,6 +254,9 @@ export default function Chatbot() {
 
       if (res.ok && data.success) {
         setAuthStep("otp");
+        if (data.userId) {
+          setMinsideUserId(data.userId);
+        }
         if (data.mode === "sandbox") {
           setAuthError("Sandbox-modus: skriv inn vilkarlig kode (f.eks. 123456)");
         }
@@ -279,6 +283,7 @@ export default function Chatbot() {
           contactMethod: authPhone.trim(),
           otpCode: otpCode.trim(),
           conversationId: activeConversationId?.toString(),
+          userId: minsideUserId,
         }),
       });
       const data = await res.json();
@@ -309,6 +314,7 @@ export default function Chatbot() {
     setOtpCode("");
     setAuthError("");
     setAuthLoading(false);
+    setMinsideUserId(null);
   };
 
   const isAuthenticated = activeConversation?.authenticated || !!userContext;

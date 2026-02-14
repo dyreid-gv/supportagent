@@ -509,25 +509,56 @@ export async function registerRoutes(
         return res.json({ success: true, mode: "sandbox", message: `OTP sendt til ${contactMethod} (sandbox-modus)` });
       }
 
-      const response = await axios.post(`${MINSIDE_URL}/Security/SendOtp`, {
-        contactMethod,
-      }, {
-        headers: { "Content-Type": "application/json" },
-        timeout: 15000,
-      });
+      const isEmail = contactMethod.includes("@");
 
-      res.json({ success: true, mode: "production", data: response.data });
+      const detailResponse = await axios.post(
+        `${MINSIDE_URL}/Security/GetDetailfromEmailorPhone?emailOrContactNumber=${encodeURIComponent(contactMethod)}`,
+        {},
+        {
+          headers: { "Content-Type": "application/json" },
+          timeout: 15000,
+        }
+      );
+
+      const detailData = detailResponse.data;
+      if (!detailData.Success || !detailData.UserId) {
+        return res.status(404).json({ error: "Fant ingen bruker med dette nummeret/e-posten. Sjekk at du har riktig nummer." });
+      }
+
+      const userId = detailData.UserId;
+
+      const sendResponse = await axios.post(
+        `${MINSIDE_URL}/Security/SendOTPForLoginViaPassCode`,
+        {
+          UserId: userId,
+          emailOrContactNumber: contactMethod,
+          isEmail: isEmail,
+        },
+        {
+          headers: { "Content-Type": "application/json" },
+          timeout: 15000,
+        }
+      );
+
+      const sendData = sendResponse.data;
+      if (sendData.Success) {
+        res.json({ success: true, mode: "production", userId, message: `Engangskode sendt til ${contactMethod}` });
+      } else {
+        res.status(400).json({ error: sendData.Message || "Kunne ikke sende engangskode" });
+      }
     } catch (error: any) {
-      console.error("Send OTP error:", error.response?.data || error.message);
-      res.status(error.response?.status || 500).json({
-        error: error.response?.data || "Kunne ikke sende OTP",
-      });
+      const errData = error.response?.data;
+      const errMsg = typeof errData === "string" && errData.includes("<html")
+        ? "Kunne ikke kontakte Min Side-serveren. Prøv igjen senere."
+        : errData?.Message || errData || error.message;
+      console.error("Send OTP error:", errMsg);
+      res.status(error.response?.status || 500).json({ error: errMsg });
     }
   });
 
   app.post("/api/auth/verify-otp", async (req, res) => {
     try {
-      const { contactMethod, otpCode, conversationId } = req.body;
+      const { contactMethod, otpCode, conversationId, userId } = req.body;
       if (!contactMethod || !otpCode) {
         return res.status(400).json({ error: "contactMethod og otpCode er påkrevd" });
       }
@@ -558,21 +589,44 @@ export async function registerRoutes(
         });
       }
 
-      const verifyResponse = await axios.post(`${MINSIDE_URL}/Security/ValidateOtp`, {
-        contactMethod,
-        otpCode,
-      }, {
-        headers: { "Content-Type": "application/json" },
-        timeout: 15000,
-      });
+      let resolvedUserId = userId;
+      if (!resolvedUserId) {
+        const detailResponse = await axios.post(
+          `${MINSIDE_URL}/Security/GetDetailfromEmailorPhone?emailOrContactNumber=${encodeURIComponent(contactMethod)}`,
+          {},
+          {
+            headers: { "Content-Type": "application/json" },
+            timeout: 15000,
+          }
+        );
+        resolvedUserId = detailResponse.data?.UserId;
+      }
 
-      if (verifyResponse.status === 200) {
-        const detailResponse = await axios.get(
+      const verifyResponse = await axios.post(
+        `${MINSIDE_URL}/Security/LoginWithPasscode`,
+        {
+          Userid: resolvedUserId,
+          Otp: otpCode,
+          emailorPhone: contactMethod,
+          LostFoundPageRequest: false,
+          loginViaLink: false,
+          applicationValue: "",
+          returnUrl: "",
+        },
+        {
+          headers: { "Content-Type": "application/json" },
+          timeout: 15000,
+        }
+      );
+
+      const verifyData = verifyResponse.data;
+      if (verifyData.Success) {
+        const ownerResponse = await axios.get(
           `${MINSIDE_URL}/Security/GetOwnerDetailforOTPScreen?emailOrContactNumber=${encodeURIComponent(contactMethod)}`,
           { timeout: 15000 }
         );
 
-        const userData = detailResponse.data;
+        const userData = ownerResponse.data;
 
         if (conversationId && userData) {
           const ownerId = userData.OwnerId || `MINSIDE-${contactMethod}`;
@@ -586,12 +640,16 @@ export async function registerRoutes(
         });
       }
 
-      res.status(401).json({ success: false, error: "Feil OTP-kode" });
+      res.status(401).json({ success: false, error: verifyData.Message || "Feil engangskode. Prøv igjen." });
     } catch (error: any) {
-      console.error("Verify OTP error:", error.response?.data || error.message);
+      const errData = error.response?.data;
+      const errMsg = typeof errData === "string" && errData.includes("<html")
+        ? "Kunne ikke verifisere koden. Prøv igjen."
+        : errData?.Message || errData || error.message;
+      console.error("Verify OTP error:", errMsg);
       res.status(error.response?.status || 500).json({
         success: false,
-        error: error.response?.data || "Kunne ikke verifisere OTP",
+        error: errMsg,
       });
     }
   });
