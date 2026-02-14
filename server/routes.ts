@@ -30,6 +30,7 @@ import {
   uncertaintyCases,
   reviewQueue as reviewQueueTable,
   trainingRuns,
+  servicePrices,
 } from "@shared/schema";
 import fs from "fs";
 import path from "path";
@@ -820,6 +821,7 @@ export async function registerRoutes(
     uncertainty_cases: uncertaintyCases,
     review_queue: reviewQueueTable,
     training_runs: trainingRuns,
+    service_prices: servicePrices,
   };
 
   app.get("/api/admin/tables", async (_req, res) => {
@@ -908,6 +910,107 @@ export async function registerRoutes(
         return { tableName: name, columns };
       });
       res.json(schemaInfo);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ─── SERVICE PRICES ──────────────────────────────────────────────
+  app.get("/api/prices", async (_req, res) => {
+    try {
+      const prices = await storage.getServicePrices();
+      res.json(prices);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/prices/active", async (_req, res) => {
+    try {
+      const prices = await storage.getActiveServicePrices();
+      res.json(prices);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/prices", async (req, res) => {
+    try {
+      const { serviceKey, serviceName, price, currency, description, category, sourceTemplate, effectiveDate, isActive } = req.body;
+      if (!serviceKey || !serviceName || price === undefined) {
+        return res.status(400).json({ error: "serviceKey, serviceName og price er påkrevd" });
+      }
+      const result = await storage.upsertServicePrice({
+        serviceKey,
+        serviceName,
+        price: parseFloat(price),
+        currency: currency || "NOK",
+        description: description || null,
+        category: category || null,
+        sourceTemplate: sourceTemplate || null,
+        effectiveDate: effectiveDate ? new Date(effectiveDate) : new Date(),
+        isActive: isActive !== false,
+      });
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.patch("/api/prices/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const updates: any = {};
+      if (req.body.serviceName !== undefined) updates.serviceName = req.body.serviceName;
+      if (req.body.price !== undefined) updates.price = parseFloat(req.body.price);
+      if (req.body.currency !== undefined) updates.currency = req.body.currency;
+      if (req.body.description !== undefined) updates.description = req.body.description;
+      if (req.body.category !== undefined) updates.category = req.body.category;
+      if (req.body.effectiveDate !== undefined) updates.effectiveDate = new Date(req.body.effectiveDate);
+      if (req.body.isActive !== undefined) updates.isActive = req.body.isActive;
+      await storage.updateServicePrice(id, updates);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/prices/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.deleteServicePrice(id);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/prices/seed", async (_req, res) => {
+    try {
+      const defaultPrices = [
+        { serviceKey: "eierskifte", serviceName: "Eierskifte av kjæledyr", price: 390, category: "Eierskifte", description: "Overføring av eierskap mellom personer. Selger betaler.", sourceTemplate: "Eierskifte Hva koster eierskifte kvittering" },
+        { serviceKey: "utenlandsregistrering", serviceName: "Registrering av dyr fra utlandet", price: 656, category: "Utenlandsregistrering", description: "Registrering av importert dyr med utenlandsk chip i norsk register", sourceTemplate: "Utendlandsregistrering Hva koster det å registrere et dyr i Norge?" },
+        { serviceKey: "registrering_ny", serviceName: "Registrering av nytt dyr", price: 250, category: "Registrering", description: "Førstegangsregistrering av chippet dyr i DyreID", sourceTemplate: "Seed test data" },
+        { serviceKey: "qr_brikke_ekstra", serviceName: "Ekstra QR-brikke", price: 99, category: "QR Brikke", description: "Tilleggsbestilling av QR-brikke (utover den første)", sourceTemplate: "Seed test data" },
+        { serviceKey: "qr_brikke_erstatning", serviceName: "Erstatning QR-brikke", price: 0, category: "QR Brikke", description: "Erstatning ved defekt/uleselig QR-brikke (kostnadsfri)", sourceTemplate: "QR-brikke fungerer ikke" },
+        { serviceKey: "abonnement_basis", serviceName: "Basis-abonnement (1 dyr)", price: 99, category: "Abonnement", description: "Månedlig abonnement for ett dyr", sourceTemplate: "Seed test data" },
+        { serviceKey: "abonnement_standard", serviceName: "Standard-abonnement (2 dyr)", price: 199, category: "Abonnement", description: "Månedlig abonnement for to dyr", sourceTemplate: "Seed test data" },
+        { serviceKey: "abonnement_familie", serviceName: "Familie-abonnement (opptil 5 dyr)", price: 399, category: "Abonnement", description: "Månedlig abonnement for opptil 5 dyr", sourceTemplate: "Seed test data" },
+        { serviceKey: "smart_tag_ny", serviceName: "Smart Tag (ny kunde)", price: 349, category: "Smart Tag", description: "Smart Tag med Bluetooth-sporing for nye kunder", sourceTemplate: "Identifisert fra autosvar" },
+        { serviceKey: "smart_tag_erstatning", serviceName: "Smart Tag (eksisterende kunde)", price: 249, category: "Smart Tag", description: "Erstatning Smart Tag til redusert pris. Batteriet kan ikke byttes.", sourceTemplate: "Smart Tag batteri" },
+      ];
+
+      const results = [];
+      for (const p of defaultPrices) {
+        const result = await storage.upsertServicePrice({
+          ...p,
+          currency: "NOK",
+          effectiveDate: new Date("2026-01-01"),
+          isActive: true,
+        });
+        results.push(result);
+      }
+      res.json({ success: true, count: results.length, prices: results });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

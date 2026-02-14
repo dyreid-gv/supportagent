@@ -1,13 +1,13 @@
 import OpenAI from "openai";
 import { storage } from "./storage";
 import { getMinSideContext, performAction, lookupOwnerByPhone } from "./minside-sandbox";
-import type { PlaybookEntry } from "@shared/schema";
+import type { PlaybookEntry, ServicePrice } from "@shared/schema";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-function buildSystemPrompt(playbook: PlaybookEntry[], ownerContext: any | null, storedUserContext: any | null): string {
+function buildSystemPrompt(playbook: PlaybookEntry[], ownerContext: any | null, storedUserContext: any | null, prices: ServicePrice[] = []): string {
   const isAuthenticated = !!(ownerContext || storedUserContext);
 
   let prompt = `Du er DyreID sin intelligente support-assistent. DyreID er Norges nasjonale kjæledyrregister.
@@ -64,6 +64,16 @@ Gyldige actions:
       prompt += `\nBetaling påkrevd: ${entry.paymentRequiredProbability ? `${Math.round((entry.paymentRequiredProbability || 0) * 100)}%` : "Nei"}`;
       prompt += `\nKan lukkes automatisk: ${entry.autoCloseProbability ? `${Math.round((entry.autoCloseProbability || 0) * 100)}%` : "Nei"}`;
     }
+  }
+
+  if (prices.length > 0) {
+    prompt += "\n\nGJELDENDE PRISER (oppdatert av admin, bruk ALLTID disse prisene i svar):\n";
+    for (const p of prices) {
+      prompt += `- ${p.serviceName}: ${p.price === 0 ? "Gratis" : `${p.price} ${p.currency}`}`;
+      if (p.description) prompt += ` (${p.description})`;
+      prompt += "\n";
+    }
+    prompt += "\nVIKTIG: Bruk KUN prisene listet over. Ikke oppgi priser du er usikker på.\n";
   }
 
   if (ownerContext) {
@@ -265,8 +275,9 @@ export async function* streamChatResponse(
   }
 
   const playbook = await storage.getActivePlaybookEntries();
+  const activePrices = await storage.getActiveServicePrices();
   const sandboxContext = ownerId ? getMinSideContext(ownerId) : null;
-  const systemPrompt = buildSystemPrompt(playbook, sandboxContext, sandboxContext ? null : storedUserContext);
+  const systemPrompt = buildSystemPrompt(playbook, sandboxContext, sandboxContext ? null : storedUserContext, activePrices);
 
   const history = await storage.getMessagesByConversation(conversationId);
   const chatMessages = history.map((m) => ({

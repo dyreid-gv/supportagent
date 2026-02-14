@@ -180,6 +180,20 @@ export const messages = pgTable("messages", {
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
+export const servicePrices = pgTable("service_prices", {
+  id: serial("id").primaryKey(),
+  serviceKey: text("service_key").notNull().unique(),
+  serviceName: text("service_name").notNull(),
+  price: real("price").notNull(),
+  currency: text("currency").default("NOK"),
+  description: text("description"),
+  category: text("category"),
+  sourceTemplate: text("source_template"),
+  effectiveDate: timestamp("effective_date").default(sql`CURRENT_TIMESTAMP`),
+  isActive: boolean("is_active").default(true),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
 export const trainingRuns = pgTable("training_runs", {
   id: serial("id").primaryKey(),
   workflow: text("workflow").notNull(),
@@ -192,6 +206,7 @@ export const trainingRuns = pgTable("training_runs", {
   errorLog: text("error_log"),
 });
 
+export const insertServicePriceSchema = createInsertSchema(servicePrices).omit({ id: true });
 export const insertRawTicketSchema = createInsertSchema(rawTickets).omit({ id: true });
 export const insertScrubbedTicketSchema = createInsertSchema(scrubbedTickets).omit({ id: true });
 export const insertCategoryMappingSchema = createInsertSchema(categoryMappings).omit({ id: true });
@@ -225,4 +240,6 @@ export type Conversation = typeof conversations.$inferSelect;
 export type InsertConversation = z.infer<typeof insertConversationSchema>;
 export type Message = typeof messages.$inferSelect;
 export type InsertMessage = z.infer<typeof insertMessageSchema>;
+export type ServicePrice = typeof servicePrices.$inferSelect;
+export type InsertServicePrice = z.infer<typeof insertServicePriceSchema>;
 export type TrainingRun = typeof trainingRuns.$inferSelect;

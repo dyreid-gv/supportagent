@@ -27,8 +27,28 @@ import {
   Eye,
   X,
   Send,
+  Banknote,
+  Plus,
+  Pencil,
+  Trash2,
+  Save,
 } from "lucide-react";
 import { useState, useCallback } from "react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 
 interface TrainingStats {
   stats: {
@@ -91,6 +111,20 @@ interface UncategorizedTheme {
   suggestedExistingCategory: string | null;
   reviewed: boolean;
   reviewerNotes: string | null;
+}
+
+interface ServicePrice {
+  id: number;
+  serviceKey: string;
+  serviceName: string;
+  price: number;
+  currency: string;
+  description: string | null;
+  category: string | null;
+  sourceTemplate: string | null;
+  effectiveDate: string | null;
+  isActive: boolean;
+  updatedAt: string | null;
 }
 
 interface UncertaintyCase {
@@ -396,6 +430,14 @@ export default function Dashboard() {
     queryKey: ["/api/training/uncertainty-cases"],
   });
 
+  const { data: prices } = useQuery<ServicePrice[]>({
+    queryKey: ["/api/prices"],
+  });
+
+  const [editingPrice, setEditingPrice] = useState<ServicePrice | null>(null);
+  const [addingPrice, setAddingPrice] = useState(false);
+  const [seedingPrices, setSeedingPrices] = useState(false);
+
   const stats = data?.stats;
   const runs = data?.runs || [];
 
@@ -476,6 +518,9 @@ export default function Dashboard() {
           </TabsTrigger>
           <TabsTrigger value="history" data-testid="tab-history">
             Historikk
+          </TabsTrigger>
+          <TabsTrigger value="prices" data-testid="tab-prices">
+            Priser ({prices?.length || 0})
           </TabsTrigger>
         </TabsList>
 
@@ -870,7 +915,266 @@ export default function Dashboard() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        <TabsContent value="prices" className="mt-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
+              <CardTitle className="text-base">Tjenestepriser</CardTitle>
+              <div className="flex items-center gap-2">
+                {(!prices || prices.length === 0) && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={seedingPrices}
+                    onClick={async () => {
+                      setSeedingPrices(true);
+                      try {
+                        await apiRequest("POST", "/api/prices/seed");
+                        queryClient.invalidateQueries({ queryKey: ["/api/prices"] });
+                      } catch (e) {}
+                      setSeedingPrices(false);
+                    }}
+                    data-testid="button-seed-prices"
+                  >
+                    {seedingPrices ? <Loader2 className="h-4 w-4 animate-spin" /> : <Database className="h-4 w-4" />}
+                    Importer standardpriser
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  onClick={() => setAddingPrice(true)}
+                  data-testid="button-add-price"
+                >
+                  <Plus className="h-4 w-4" />
+                  Legg til pris
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {!prices || prices.length === 0 ? (
+                <div className="text-center py-8">
+                  <Banknote className="h-12 w-12 mx-auto mb-3 text-muted-foreground" />
+                  <p className="text-muted-foreground text-sm">Ingen priser konfigurert ennå.</p>
+                  <p className="text-muted-foreground text-xs mt-1">Klikk "Importer standardpriser" for å laste inn priser fra Pureservice-maler.</p>
+                </div>
+              ) : (
+                <ScrollArea className="h-[500px]">
+                  <div className="space-y-1 pr-4">
+                    {Object.entries(
+                      prices.reduce((acc: Record<string, ServicePrice[]>, p) => {
+                        const cat = p.category || "Annet";
+                        if (!acc[cat]) acc[cat] = [];
+                        acc[cat].push(p);
+                        return acc;
+                      }, {})
+                    ).map(([category, catPrices]) => (
+                      <div key={category} className="mb-4">
+                        <h3 className="text-sm font-semibold text-muted-foreground mb-2">{category}</h3>
+                        {catPrices.map((p) => (
+                          <div
+                            key={p.id}
+                            className={`flex items-center justify-between gap-3 p-3 rounded-md border mb-1 flex-wrap ${!p.isActive ? "opacity-50" : ""}`}
+                            data-testid={`price-row-${p.serviceKey}`}
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-sm font-medium">{p.serviceName}</span>
+                                {!p.isActive && <Badge variant="secondary">Inaktiv</Badge>}
+                              </div>
+                              {p.description && (
+                                <p className="text-xs text-muted-foreground mt-0.5">{p.description}</p>
+                              )}
+                              {p.sourceTemplate && (
+                                <p className="text-xs text-muted-foreground italic">Kilde: {p.sourceTemplate}</p>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-lg font-bold whitespace-nowrap" data-testid={`price-value-${p.serviceKey}`}>
+                                {p.price === 0 ? "Gratis" : `${p.price.toLocaleString("nb-NO")} ${p.currency}`}
+                              </span>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                onClick={() => setEditingPrice(p)}
+                                data-testid={`button-edit-price-${p.serviceKey}`}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                onClick={async () => {
+                                  if (confirm(`Slett "${p.serviceName}"?`)) {
+                                    await apiRequest("DELETE", `/api/prices/${p.id}`);
+                                    queryClient.invalidateQueries({ queryKey: ["/api/prices"] });
+                                  }
+                                }}
+                                data-testid={`button-delete-price-${p.serviceKey}`}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              )}
+            </CardContent>
+          </Card>
+
+          <PriceDialog
+            key="add-price"
+            open={addingPrice}
+            onClose={() => setAddingPrice(false)}
+            price={null}
+          />
+          {editingPrice && (
+            <PriceDialog
+              key={`edit-price-${editingPrice.id}`}
+              open={true}
+              onClose={() => setEditingPrice(null)}
+              price={editingPrice}
+            />
+          )}
+        </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+function PriceDialog({ open, onClose, price }: { open: boolean; onClose: () => void; price: ServicePrice | null }) {
+  const [serviceKey, setServiceKey] = useState(price?.serviceKey || "");
+  const [serviceName, setServiceName] = useState(price?.serviceName || "");
+  const [priceValue, setPriceValue] = useState(price?.price?.toString() || "");
+  const [currency, setCurrency] = useState(price?.currency || "NOK");
+  const [description, setDescription] = useState(price?.description || "");
+  const [category, setCategory] = useState(price?.category || "");
+  const [isActive, setIsActive] = useState(price?.isActive !== false);
+  const [saving, setSaving] = useState(false);
+
+  const isEdit = !!price;
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      if (isEdit && price) {
+        await apiRequest("PATCH", `/api/prices/${price.id}`, {
+          serviceName,
+          price: parseFloat(priceValue),
+          currency,
+          description: description || null,
+          category: category || null,
+          isActive,
+        });
+      } else {
+        await apiRequest("POST", "/api/prices", {
+          serviceKey: serviceKey || serviceName.toLowerCase().replace(/[^a-z0-9]+/g, "_"),
+          serviceName,
+          price: parseFloat(priceValue),
+          currency,
+          description: description || null,
+          category: category || null,
+          isActive,
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/prices"] });
+      onClose();
+    } catch (e) {}
+    setSaving(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{isEdit ? "Rediger pris" : "Legg til ny pris"}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          {!isEdit && (
+            <div>
+              <Label>Nøkkel (unik ID)</Label>
+              <Input
+                value={serviceKey}
+                onChange={(e) => setServiceKey(e.target.value)}
+                placeholder="f.eks. eierskifte_hund"
+                data-testid="input-price-key"
+              />
+            </div>
+          )}
+          <div>
+            <Label>Tjenestenavn</Label>
+            <Input
+              value={serviceName}
+              onChange={(e) => setServiceName(e.target.value)}
+              placeholder="f.eks. Eierskifte av kjæledyr"
+              data-testid="input-price-name"
+            />
+          </div>
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <Label>Pris</Label>
+              <Input
+                type="number"
+                value={priceValue}
+                onChange={(e) => setPriceValue(e.target.value)}
+                placeholder="0"
+                data-testid="input-price-value"
+              />
+            </div>
+            <div className="w-24">
+              <Label>Valuta</Label>
+              <Select value={currency} onValueChange={setCurrency}>
+                <SelectTrigger data-testid="select-price-currency">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="NOK">NOK</SelectItem>
+                  <SelectItem value="EUR">EUR</SelectItem>
+                  <SelectItem value="USD">USD</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div>
+            <Label>Kategori</Label>
+            <Input
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              placeholder="f.eks. Eierskifte, QR Brikke, Abonnement"
+              data-testid="input-price-category"
+            />
+          </div>
+          <div>
+            <Label>Beskrivelse</Label>
+            <Textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Kort beskrivelse av tjenesten..."
+              className="resize-none"
+              data-testid="input-price-description"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Switch
+              checked={isActive}
+              onCheckedChange={setIsActive}
+              data-testid="switch-price-active"
+            />
+            <Label>Aktiv</Label>
+          </div>
+          <Button
+            onClick={handleSave}
+            disabled={saving || !serviceName || !priceValue}
+            className="w-full"
+            data-testid="button-save-price"
+          >
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            {isEdit ? "Lagre endringer" : "Opprett pris"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

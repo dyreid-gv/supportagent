@@ -14,6 +14,7 @@ import {
   conversations,
   messages,
   trainingRuns,
+  servicePrices,
   type InsertRawTicket,
   type InsertScrubbedTicket,
   type InsertCategoryMapping,
@@ -22,6 +23,7 @@ import {
   type InsertPlaybookEntry,
   type InsertConversation,
   type InsertMessage,
+  type InsertServicePrice,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -99,6 +101,12 @@ export interface IStorage {
 
   createMessage(data: InsertMessage): Promise<typeof messages.$inferSelect>;
   getMessagesByConversation(conversationId: number): Promise<typeof messages.$inferSelect[]>;
+
+  getServicePrices(): Promise<typeof servicePrices.$inferSelect[]>;
+  getActiveServicePrices(): Promise<typeof servicePrices.$inferSelect[]>;
+  upsertServicePrice(price: InsertServicePrice): Promise<typeof servicePrices.$inferSelect>;
+  updateServicePrice(id: number, data: Partial<InsertServicePrice>): Promise<void>;
+  deleteServicePrice(id: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -476,6 +484,47 @@ export class DatabaseStorage implements IStorage {
       .from(messages)
       .where(eq(messages.conversationId, conversationId))
       .orderBy(messages.createdAt);
+  }
+
+  async getServicePrices() {
+    return db.select().from(servicePrices).orderBy(servicePrices.category, servicePrices.serviceName);
+  }
+
+  async getActiveServicePrices() {
+    return db.select().from(servicePrices).where(eq(servicePrices.isActive, true)).orderBy(servicePrices.category, servicePrices.serviceName);
+  }
+
+  async upsertServicePrice(price: InsertServicePrice) {
+    const [result] = await db
+      .insert(servicePrices)
+      .values({ ...price, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: servicePrices.serviceKey,
+        set: {
+          serviceName: price.serviceName,
+          price: price.price,
+          currency: price.currency,
+          description: price.description,
+          category: price.category,
+          sourceTemplate: price.sourceTemplate,
+          effectiveDate: price.effectiveDate,
+          isActive: price.isActive,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+    return result;
+  }
+
+  async updateServicePrice(id: number, data: Partial<InsertServicePrice>) {
+    await db
+      .update(servicePrices)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(servicePrices.id, id));
+  }
+
+  async deleteServicePrice(id: number) {
+    await db.delete(servicePrices).where(eq(servicePrices.id, id));
   }
 }
 

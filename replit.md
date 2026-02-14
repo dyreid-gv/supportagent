@@ -14,10 +14,10 @@ AI-powered support automation system for DyreID (Norway's national pet ID regist
 ## Project Structure
 ```
 shared/
-  schema.ts          - Drizzle schema: 12 tables (raw_tickets, scrubbed_tickets, hjelpesenter_categories, category_mappings, intent_classifications, resolution_patterns, playbook_entries, uncategorized_themes, uncertainty_cases, review_queue, conversations/messages, training_runs)
+  schema.ts          - Drizzle schema: 13 tables (raw_tickets, scrubbed_tickets, hjelpesenter_categories, category_mappings, intent_classifications, resolution_patterns, playbook_entries, uncategorized_themes, uncertainty_cases, review_queue, conversations/messages, training_runs, service_prices)
 server/
   routes.ts          - API routes: 9 SSE training endpoints, review queue, chat, MinSide actions
-  storage.ts         - IStorage interface + DatabaseStorage with full CRUD for all 12 tables
+  storage.ts         - IStorage interface + DatabaseStorage with full CRUD for all 13 tables
   training-agent.ts  - 9-workflow pipeline with all workflow functions + manual review handler
   chatbot.ts         - Streaming AI chatbot with playbook context and action execution
   pureservice.ts     - Pureservice API client for ticket fetching
@@ -27,7 +27,7 @@ server/
 client/src/
   App.tsx            - Sidebar layout with Dashboard and Chatbot routes
   pages/
-    dashboard.tsx    - 9-workflow pipeline controls, 9 stat cards, 6 tabs (Pipeline, Playbook, Review Queue, Themes, Uncertainty, History)
+    dashboard.tsx    - 9-workflow pipeline controls, 9 stat cards, 7 tabs (Pipeline, Playbook, Review Queue, Themes, Uncertainty, History, Priser)
     chatbot.tsx      - Chat interface with streaming messages, OTP auth, suggestions
   components/
     theme-provider.tsx - Light/dark mode toggle
@@ -97,6 +97,7 @@ client/src/
 - `OPENAI_API_KEY` - OpenAI API key (user-provided, used by both training agent and chatbot)
 
 ## Recent Changes
+- 2026-02-14: Added service_prices table with admin UI (Priser tab) for configurable pricing. 10 identified prices from Pureservice templates. Prices injected into chatbot system prompt. CRUD API at /api/prices.
 - 2026-02-14: Switched training agent AI from Claude (Anthropic) to OpenAI via Replit AI Integrations. claude-haiku-4-5 → gpt-5-nano, claude-sonnet-4-5 → gpt-5-mini. Chatbot remains on Claude.
 - 2026-02-14: Fixed chatbot auth context - user context from OTP login now stored in DB (conversations.userContext jsonb) and passed to AI system prompt. Quick intent patterns are auth-aware. Chatbot correctly identifies logged-in users and their pets.
 - 2026-02-14: OTP integration with Min Side (minside.dyreid.no) via backend proxy, quick intent matching (11 patterns), batch intent classification (5x faster), admin panel with data export
