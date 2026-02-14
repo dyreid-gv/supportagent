@@ -72,6 +72,8 @@ export interface IStorage {
 
   getPlaybookEntries(): Promise<typeof playbookEntries.$inferSelect[]>;
   getActivePlaybookEntries(): Promise<typeof playbookEntries.$inferSelect[]>;
+  getPlaybookByIntent(intent: string): Promise<typeof playbookEntries.$inferSelect | null>;
+  searchPlaybookByKeywords(message: string): Promise<(typeof playbookEntries.$inferSelect & { keywordMatches: number }) | null>;
   upsertPlaybookEntry(entry: InsertPlaybookEntry): Promise<void>;
   getPlaybookEntryCount(): Promise<number>;
 
@@ -412,6 +414,37 @@ export class DatabaseStorage implements IStorage {
 
   async getActivePlaybookEntries() {
     return db.select().from(playbookEntries).where(eq(playbookEntries.isActive, true));
+  }
+
+  async getPlaybookByIntent(intent: string) {
+    const rows = await db.select().from(playbookEntries)
+      .where(sql`LOWER(${playbookEntries.intent}) = LOWER(${intent}) AND ${playbookEntries.isActive} = true`)
+      .limit(1);
+    return rows[0] || null;
+  }
+
+  async searchPlaybookByKeywords(message: string): Promise<(typeof playbookEntries.$inferSelect & { keywordMatches: number }) | null> {
+    const entries = await db.select().from(playbookEntries)
+      .where(eq(playbookEntries.isActive, true));
+
+    const lowerMsg = message.toLowerCase();
+    let bestMatch: (typeof playbookEntries.$inferSelect & { keywordMatches: number }) | null = null;
+    let bestCount = 0;
+
+    for (const entry of entries) {
+      if (!entry.keywords) continue;
+      const keywords = entry.keywords.split(",").map(k => k.trim().toLowerCase()).filter(k => k.length > 0);
+      let matchCount = 0;
+      for (const kw of keywords) {
+        if (lowerMsg.includes(kw)) matchCount++;
+      }
+      if (matchCount > bestCount) {
+        bestCount = matchCount;
+        bestMatch = { ...entry, keywordMatches: matchCount };
+      }
+    }
+
+    return bestCount >= 2 ? bestMatch : null;
   }
 
   async upsertPlaybookEntry(entry: InsertPlaybookEntry): Promise<void> {

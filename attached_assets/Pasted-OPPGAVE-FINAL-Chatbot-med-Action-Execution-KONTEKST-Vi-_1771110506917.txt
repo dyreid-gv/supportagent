@@ -1,0 +1,448 @@
+OPPGAVE FINAL: Chatbot med Action Execution
+
+KONTEKST:
+Vi har nå en kraftig, datadrevet Playbook med:
+- Action-data (API endpoints, required data)
+- Combined responses (autosvar + hjelpesenter)
+- Kvalitetsinnsikter
+- Dialog-mønstre
+- Alt fra A-D forbedringer
+
+Nå skal Customer Support Agent (chatbot) BRUKE dette!
+
+FILOSOFI (VIKTIG!):
+❌ IKKE: "Les denne artikkelen: [lenke]"
+✅ JA: "Jeg starter eierskifte for Bella! Hva er ny eiers nummer?"
+
+HIERARKI FOR CHATBOT-SVAR:
+1. UTFØR handling (beste!) - Kall API, gjør det for kunden
+2. GUIDE gjennom - Samle data, veilede step-by-step
+3. INSTRUER - Gi konkrete steg fra combined_response
+4. INFORMER - Kun info (siste utvei)
+
+IMPLEMENTERING:
+
+══════════════════════════════════════════════════════════════
+DEL 1: CHATBOT BRUKER ENHANCED PLAYBOOK
+══════════════════════════════════════════════════════════════
+
+I customer-agent (chatbot.ts eller tilsvarende):
+```typescript
+// Hent playbook med ALL data
+async function getPlaybookForIntent(intent: string) {
+  const playbook = await db.query(`
+    SELECT 
+      *,
+      -- Alle A-D felt er tilgjengelige
+      combined_response,
+      chatbot_steps,
+      action_type,
+      api_endpoint,
+      required_runtime_data,
+      help_center_article_url
+    FROM playbook_entries
+    WHERE intent = $1
+      AND is_active = true
+    LIMIT 1
+  `, [intent]);
+  
+  return playbook.rows[0] || null;
+}
+```
+
+══════════════════════════════════════════════════════════════
+DEL 2: INTENT MATCHING I CHATBOT
+══════════════════════════════════════════════════════════════
+```typescript
+async function matchUserIntent(message: string, userContext: any) {
+  // Quick match først (instant, gratis)
+  const quickMatch = quickIntentMatch(message);
+  if (quickMatch) {
+    const playbook = await getPlaybookForIntent(quickMatch.intent);
+    return { intent: quickMatch.intent, playbook, method: 'quick-match' };
+  }
+  
+  // Søk i playbook
+  const playbookMatch = await searchPlaybook(message);
+  if (playbookMatch && playbookMatch.confidence > 0.7) {
+    return { 
+      intent: playbookMatch.intent, 
+      playbook: playbookMatch, 
+      method: 'playbook' 
+    };
+  }
+  
+  // Fall back til OpenAI for klassifisering
+  const aiIntent = await classifyIntentWithAI(message, userContext);
+  const playbook = await getPlaybookForIntent(aiIntent);
+  
+  return { intent: aiIntent, playbook, method: 'openai' };
+}
+
+async function searchPlaybook(message: string) {
+  // Keyword matching
+  const results = await db.query(`
+    SELECT 
+      *,
+      (
+        SELECT COUNT(*)
+        FROM unnest(keywords) kw
+        WHERE LOWER($1) LIKE '%' || LOWER(kw) || '%'
+      ) as keyword_matches
+    FROM playbook_entries
+    WHERE keyword_matches > 0
+    ORDER BY keyword_matches DESC
+    LIMIT 1
+  `, [message]);
+  
+  if (results.rows.length > 0 && results.rows[0].keyword_matches >= 2) {
+    return {
+      ...results.rows[0],
+      confidence: Math.min(results.rows[0].keyword_matches / 5, 1.0)
+    };
+  }
+  
+  return null;
+}
+```
+
+══════════════════════════════════════════════════════════════
+DEL 3: ACTION EXECUTION (NIVÅ 1 - BESTE!)
+══════════════════════════════════════════════════════════════
+```typescript
+async function handleUserMessage(message: string, userContext: any, sessionData: any) {
+  // 1. Match intent
+  const { intent, playbook, method } = await matchUserIntent(message, userContext);
+  
+  if (!playbook) {
+    // Fall back til generell OpenAI
+    return await getOpenAIResponse(message, userContext);
+  }
+  
+  // 2. Ekstraher data fra melding
+  const extractedData = await extractDataFromMessage(
+    message, 
+    playbook.required_runtime_data
+  );
+  
+  // 3. HIERARKI: Utfør → Guide → Instruer → Informer
+  
+  // NIVÅ 1: UTFØR HANDLING
+  if (playbook.action_type === 'API_CALL' && 
+      userContext && 
+      hasAllRequiredData(extractedData, playbook.required_runtime_data)) {
+    
+    return await executeAction(playbook, userContext, extractedData);
+  }
+  
+  // NIVÅ 2: GUIDE (samle manglende data)
+  if (playbook.action_type === 'API_CALL' && userContext) {
+    return await guideDataCollection(playbook, userContext, extractedData, sessionData);
+  }
+  
+  // NIVÅ 3: INSTRUER (gi steg fra combined_response)
+  if (playbook.action_type === 'FORM_FILL' || playbook.action_type === 'NAVIGATION') {
+    return {
+      response: playbook.combined_response,
+      suggestions: generateSuggestions(playbook),
+      helpCenterLink: playbook.help_center_article_url,  // Sekundært
+      requiresLogin: playbook.requires_login && !userContext,
+      model: 'playbook-instruct'
+    };
+  }
+  
+  // NIVÅ 4: INFORMER
+  return {
+    response: playbook.combined_response,
+    helpCenterLink: playbook.help_center_article_url,
+    model: 'playbook-info'
+  };
+}
+
+// NIVÅ 1: EXECUTE ACTION
+async function executeAction(playbook: any, userContext: any, data: any) {
+  console.log(`Executing action: ${playbook.action_type} for ${playbook.intent}`);
+  
+  // Eksempel: Eierskifte
+  if (playbook.intent === 'OwnershipTransfer' && playbook.api_endpoint) {
+    try {
+      const result = await fetch(
+        'https://minside.dyreid.no' + playbook.api_endpoint,
+        {
+          method: playbook.http_method || 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Cookie': userContext.aspSession  // Fra OTP-login
+          },
+          body: JSON.stringify({
+            petId: data.petId,
+            newOwnerPhone: data.newOwnerPhone
+          })
+        }
+      );
+      
+      if (result.ok) {
+        return {
+          response: `✅ Eierskifte startet for ${data.petName}!
+          
+Ny eier (${data.newOwnerPhone}) får SMS med bekreftelseslenke.
+Når begge bekrefter får dere betalingslink${playbook.payment_required ? ` (${playbook.payment_amount})` : ''}.
+
+Tidslinje: 1-2 dager`,
+          
+          actionExecuted: true,
+          actionType: 'OWNERSHIP_TRANSFER',
+          success: true,
+          requestFeedback: true,  // VIKTIG!
+          model: 'action-execution'
+        };
+      } else {
+        return {
+          response: `❌ Kunne ikke starte eierskifte. Prøv igjen eller kontakt support.`,
+          actionExecuted: false,
+          success: false,
+          model: 'action-execution-failed'
+        };
+      }
+    } catch (error) {
+      console.error('Action execution error:', error);
+      return {
+        response: `❌ Teknisk feil. Vennligst prøv igjen.`,
+        actionExecuted: false,
+        success: false,
+        error: error.message,
+        model: 'action-execution-error'
+      };
+    }
+  }
+  
+  // Andre handlinger...
+  if (playbook.intent === 'ReportLostPet') {
+    // Implementer "meld savnet" API call
+  }
+  
+  if (playbook.intent === 'ActivateQRTag') {
+    // Implementer "aktiver QR" API call
+  }
+  
+  // Fall back til guide hvis action ikke implementert
+  return await guideDataCollection(playbook, userContext, data, {});
+}
+
+// NIVÅ 2: GUIDE DATA COLLECTION
+async function guideDataCollection(
+  playbook: any, 
+  userContext: any, 
+  extractedData: any,
+  sessionData: any
+) {
+  const missingData = playbook.required_runtime_data?.filter(
+    field => !extractedData[field]
+  ) || [];
+  
+  // Sjekk om bruker må logge inn først
+  if (playbook.requires_login && !userContext) {
+    return {
+      response: `For å ${playbook.intent.toLowerCase()}, må du logge inn først.
+      
+Skal jeg logge deg inn med OTP?`,
+      requiresLogin: true,
+      suggestions: [
+        { label: 'Ja, logg meg inn', action: 'REQUEST_LOGIN' }
+      ],
+      model: 'playbook-guide-login'
+    };
+  }
+  
+  // Hvis bruker har flere dyr, spør hvilket
+  if (missingData.includes('petId') && userContext?.Pets?.length > 1) {
+    return {
+      response: `Hvilket dyr gjelder dette?`,
+      suggestions: userContext.Pets.map(p => ({
+        label: `${p.Name} (${p.Species})`,
+        action: 'SELECT_PET',
+        data: { petId: p.PetId, petName: p.Name }
+      })),
+      model: 'playbook-guide-select-pet'
+    };
+  }
+  
+  // Spør om andre manglende data
+  if (missingData.includes('newOwnerPhone')) {
+    return {
+      response: `Hva er ny eiers mobilnummer?`,
+      expectedInput: 'phone',
+      model: 'playbook-guide-collect-phone'
+    };
+  }
+  
+  // Hvis all data samlet, utfør!
+  if (missingData.length === 0) {
+    return await executeAction(playbook, userContext, extractedData);
+  }
+  
+  // Generic fallback
+  return {
+    response: playbook.combined_response,
+    model: 'playbook-guide-fallback'
+  };
+}
+
+// Helper: Ekstraher data fra melding
+async function extractDataFromMessage(message: string, requiredFields: string[]) {
+  if (!requiredFields || requiredFields.length === 0) {
+    return {};
+  }
+  
+  // Enkel regex-basert ekstraksjon
+  const extracted = {};
+  
+  // Phone number
+  const phoneMatch = message.match(/\b(\d{8})\b/);
+  if (phoneMatch && requiredFields.includes('newOwnerPhone')) {
+    extracted['newOwnerPhone'] = phoneMatch[1];
+  }
+  
+  // Pet name
+  const petNameMatch = message.match(/(?:for|med|til)\s+(\w+)/i);
+  if (petNameMatch && requiredFields.includes('petName')) {
+    extracted['petName'] = petNameMatch[1];
+  }
+  
+  return extracted;
+}
+
+// Helper: Sjekk om all required data finnes
+function hasAllRequiredData(extractedData: any, requiredFields: string[]) {
+  if (!requiredFields || requiredFields.length === 0) return true;
+  
+  return requiredFields.every(field => extractedData[field]);
+}
+
+// Helper: Generer suggestions
+function generateSuggestions(playbook: any) {
+  const suggestions = [];
+  
+  if (playbook.requires_login) {
+    suggestions.push({
+      label: 'Logg inn',
+      action: 'REQUEST_LOGIN'
+    });
+  }
+  
+  if (playbook.help_center_article_url) {
+    suggestions.push({
+      label: 'Les mer',
+      action: 'OPEN_ARTICLE',
+      url: playbook.help_center_article_url
+    });
+  }
+  
+  return suggestions;
+}
+```
+
+══════════════════════════════════════════════════════════════
+DEL 4: FEEDBACK COLLECTION ETTER HANDLING
+══════════════════════════════════════════════════════════════
+```typescript
+// Når chatbot sender svar med requestFeedback: true
+
+async function sendMessageToUser(response: any, interactionId: number) {
+  // Vis bot-svar
+  addMessage(response.response, false, response.suggestions);
+  
+  // Hvis handling utført, be om feedback etter 2 sek
+  if (response.requestFeedback) {
+    setTimeout(() => {
+      showFeedbackWidget(interactionId);
+    }, 2000);
+  }
+}
+
+function showFeedbackWidget(interactionId: number) {
+  const feedbackDiv = document.createElement('div');
+  feedbackDiv.className = 'feedback-request';
+  feedbackDiv.innerHTML = `
+    <div class="feedback-card">
+      <p class="feedback-question">💬 Løste dette seg for deg?</p>
+      <div class="feedback-buttons">
+        <button onclick="submitFeedback(${interactionId}, 'resolved')">
+          ✅ Ja, takk!
+        </button>
+        <button onclick="submitFeedback(${interactionId}, 'partially_resolved')">
+          ⚠️ Delvis
+        </button>
+        <button onclick="submitFeedback(${interactionId}, 'not_resolved')">
+          ❌ Nei, trenger mer hjelp
+        </button>
+      </div>
+      <textarea id="feedback-comment-${interactionId}" 
+                placeholder="Valgfri kommentar..." 
+                class="feedback-comment"></textarea>
+    </div>
+  `;
+  
+  messagesDiv.appendChild(feedbackDiv);
+}
+
+async function submitFeedback(interactionId: number, result: string) {
+  const comment = document.getElementById(`feedback-comment-${interactionId}`).value;
+  
+  await fetch('/api/feedback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ interactionId, result, comment })
+  });
+  
+  // Takk-melding
+  addMessage('Takk for tilbakemeldingen! Dette hjelper oss å bli bedre. 🙏', false);
+  
+  // Hvis "not_resolved"
+  if (result === 'not_resolved') {
+    addMessage('Vil du snakke med en support-agent?', false, [
+      { label: 'Ja, kontakt support', action: 'ESCALATE' }
+    ]);
+  }
+}
+```
+
+══════════════════════════════════════════════════════════════
+DEL 5: SESSION MANAGEMENT
+══════════════════════════════════════════════════════════════
+```typescript
+// Lagre session state for multi-turn conversations
+
+interface SessionState {
+  intent?: string;
+  playbook?: any;
+  collectedData: Record<string, any>;
+  awaitingInput?: string;  // 'phone', 'petId', etc.
+}
+
+const sessionStates = new Map<string, SessionState>();
+
+function getOrCreateSession(sessionId: string): SessionState {
+  if (!sessionStates.has(sessionId)) {
+    sessionStates.set(sessionId, { collectedData: {} });
+  }
+  return sessionStates.get(sessionId)!;
+}
+
+function updateSessionData(sessionId: string, field: string, value: any) {
+  const session = getOrCreateSession(sessionId);
+  session.collectedData[field] = value;
+}
+
+function clearSession(sessionId: string) {
+  sessionStates.delete(sessionId);
+}
+```
+
+══════════════════════════════════════════════════════════════
+DEL 6: TESTING
+══════════════════════════════════════════════════════════════
+
+TEST SCENARIOS:
+
+1. FULL EIERSKIFTE FLOW:

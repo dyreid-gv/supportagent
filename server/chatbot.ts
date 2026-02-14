@@ -9,30 +9,343 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-function buildSystemPrompt(playbook: PlaybookEntry[], ownerContext: any | null, storedUserContext: any | null, prices: ServicePrice[] = [], templates: ResponseTemplate[] = []): string {
+interface SessionState {
+  intent?: string;
+  playbook?: PlaybookEntry;
+  collectedData: Record<string, any>;
+  awaitingInput?: string;
+  selectedPetId?: string;
+  selectedPetName?: string;
+}
+
+const sessionStates = new Map<number, SessionState>();
+
+function getOrCreateSession(conversationId: number): SessionState {
+  if (!sessionStates.has(conversationId)) {
+    sessionStates.set(conversationId, { collectedData: {} });
+  }
+  return sessionStates.get(conversationId)!;
+}
+
+function clearSession(conversationId: number) {
+  sessionStates.delete(conversationId);
+}
+
+interface IntentQuickMatch {
+  intent: string;
+  regex: RegExp;
+}
+
+const INTENT_PATTERNS: IntentQuickMatch[] = [
+  { intent: "OwnershipTransfer", regex: /eierskift|selge|solgt|ny eier|overfør|kjøpt/i },
+  { intent: "LoginIssue", regex: /logg inn|passord|bankid|innlogg/i },
+  { intent: "QRTagActivation", regex: /qr.?tag|qr.?brikke|skann|aktivere tag/i },
+  { intent: "ReportLostPet", regex: /savnet|mistet|borte|forsvunnet/i },
+  { intent: "ReportFoundPet", regex: /funnet|funnet dyr/i },
+  { intent: "PetRegistration", regex: /registrer|chip|søkbart|id.?merk/i },
+  { intent: "SubscriptionManagement", regex: /abonnement|avslutt|forny|oppsigelse/i },
+  { intent: "AppSupport", regex: /app|laste ned|installere|mobil/i },
+  { intent: "PricingInquiry", regex: /pris|kost|betale|gratis/i },
+  { intent: "VetRegistration", regex: /veterinær|klinikk|dyrelege/i },
+  { intent: "SmartTagSupport", regex: /smart.?tag|gps|sporing/i },
+  { intent: "FamilySharing", regex: /familie|deling|del tilgang/i },
+  { intent: "ViewMyPets", regex: /mine dyr|se dyr|dyrene mine|hvilke dyr|vis dyr|har jeg/i },
+];
+
+function quickIntentMatch(message: string): string | null {
+  for (const p of INTENT_PATTERNS) {
+    if (p.regex.test(message)) return p.intent;
+  }
+  return null;
+}
+
+function extractDataFromMessage(message: string, requiredFields: string[] | null): Record<string, any> {
+  if (!requiredFields || requiredFields.length === 0) return {};
+  const extracted: Record<string, any> = {};
+
+  const phoneMatch = message.match(/\b(\d{8})\b/);
+  if (phoneMatch && (requiredFields.includes("newOwnerPhone") || requiredFields.includes("phone"))) {
+    extracted["newOwnerPhone"] = phoneMatch[1];
+    extracted["phone"] = phoneMatch[1];
+  }
+
+  const tagMatch = message.match(/TAG-(\d+)/i);
+  if (tagMatch && requiredFields.includes("tagId")) {
+    extracted["tagId"] = `TAG-${tagMatch[1]}`;
+  }
+
+  return extracted;
+}
+
+function hasAllRequiredData(extractedData: Record<string, any>, requiredFields: string[] | null): boolean {
+  if (!requiredFields || requiredFields.length === 0) return true;
+  return requiredFields.every(field => extractedData[field]);
+}
+
+interface ChatbotResponse {
+  text: string;
+  suggestions?: { label: string; action: string; data?: any }[];
+  actionExecuted?: boolean;
+  actionType?: string;
+  actionSuccess?: boolean;
+  requiresLogin?: boolean;
+  model: string;
+  requestFeedback?: boolean;
+  helpCenterLink?: string | null;
+}
+
+async function executePlaybookAction(
+  playbook: PlaybookEntry,
+  ownerId: string,
+  collectedData: Record<string, any>,
+  ownerContext: any
+): Promise<ChatbotResponse> {
+  const intent = playbook.intent;
+
+  if (intent === "OwnershipTransfer") {
+    const animalId = collectedData.petId || collectedData.animalId;
+    const newOwnerPhone = collectedData.newOwnerPhone;
+    if (!animalId || !newOwnerPhone) {
+      return { text: "Mangler data for eierskifte.", model: "action-error" };
+    }
+    const result = performAction(ownerId, "initiate_transfer", { animalId, newOwnerPhone });
+    if (result.success) {
+      const petName = collectedData.petName || animalId;
+      const paymentNote = playbook.paymentRequired
+        ? ` Betalingslink${playbook.paymentAmount ? ` (${playbook.paymentAmount})` : ""} sendes til ny eier.`
+        : "";
+      return {
+        text: `Eierskifte er startet for ${petName}!\n\nNy eier (${newOwnerPhone}) far SMS med bekreftelseslenke.${paymentNote}\n\nNar begge bekrefter, fulleres eierskiftet. Tidslinje: 1-2 virkedager.`,
+        actionExecuted: true,
+        actionType: "OWNERSHIP_TRANSFER",
+        actionSuccess: true,
+        requestFeedback: true,
+        model: "action-execution",
+      };
+    }
+    return {
+      text: `Kunne ikke starte eierskifte: ${result.message}. Prv igjen eller kontakt support pa support@dyreid.no.`,
+      actionExecuted: true,
+      actionSuccess: false,
+      model: "action-execution-failed",
+    };
+  }
+
+  if (intent === "ReportLostPet") {
+    const animalId = collectedData.petId || collectedData.animalId;
+    if (!animalId) {
+      return { text: "Mangler dyre-ID for a melde savnet.", model: "action-error" };
+    }
+    const result = performAction(ownerId, "mark_lost", { animalId });
+    if (result.success) {
+      return {
+        text: `${collectedData.petName || "Dyret"} er na meldt savnet! SMS-varsling og push-varsler er aktivert. Naboer i omradet vil ogsa bli varslet.\n\nTips: Del gjerne savnet-oppslaget pa sosiale medier for ekstra rekkevidde.`,
+        actionExecuted: true,
+        actionType: "MARK_LOST",
+        actionSuccess: true,
+        requestFeedback: true,
+        model: "action-execution",
+      };
+    }
+    return {
+      text: `Kunne ikke melde savnet: ${result.message}`,
+      actionExecuted: true,
+      actionSuccess: false,
+      model: "action-execution-failed",
+    };
+  }
+
+  if (intent === "ReportFoundPet") {
+    const animalId = collectedData.petId || collectedData.animalId;
+    if (!animalId) {
+      return { text: "Mangler dyre-ID.", model: "action-error" };
+    }
+    const result = performAction(ownerId, "mark_found", { animalId });
+    if (result.success) {
+      return {
+        text: `${collectedData.petName || "Dyret"} er markert som funnet! Savnet-varslingen er deaktivert. Sa flott at dere fant hverandre igjen!`,
+        actionExecuted: true,
+        actionType: "MARK_FOUND",
+        actionSuccess: true,
+        requestFeedback: true,
+        model: "action-execution",
+      };
+    }
+    return {
+      text: `Kunne ikke markere som funnet: ${result.message}`,
+      actionExecuted: true,
+      actionSuccess: false,
+      model: "action-execution-failed",
+    };
+  }
+
+  if (intent === "QRTagActivation" || intent === "ActivateQRTag") {
+    const tagId = collectedData.tagId;
+    if (!tagId) {
+      return { text: "Mangler tag-ID for aktivering.", model: "action-error" };
+    }
+    const result = performAction(ownerId, "activate_qr", { tagId });
+    if (result.success) {
+      return {
+        text: `QR Tag (${tagId}) er na aktivert! Taggen er koblet til dyret ditt og abonnementet er startet.\n\nDu kan na skanne taggen med DyreID-appen eller et vanlig kamera.`,
+        actionExecuted: true,
+        actionType: "ACTIVATE_QR",
+        actionSuccess: true,
+        requestFeedback: true,
+        model: "action-execution",
+      };
+    }
+    return {
+      text: `Kunne ikke aktivere tag: ${result.message}`,
+      actionExecuted: true,
+      actionSuccess: false,
+      model: "action-execution-failed",
+    };
+  }
+
+  if (intent === "SubscriptionManagement" || intent === "RenewSubscription") {
+    const tagId = collectedData.tagId;
+    if (!tagId) {
+      return { text: "Mangler tag-ID for fornyelse.", model: "action-error" };
+    }
+    const result = performAction(ownerId, "renew_subscription", { tagId });
+    if (result.success) {
+      return {
+        text: `Abonnement for tag ${tagId} er fornyet! Betalingslink er sendt via SMS.`,
+        actionExecuted: true,
+        actionType: "RENEW_SUBSCRIPTION",
+        actionSuccess: true,
+        requestFeedback: true,
+        model: "action-execution",
+      };
+    }
+    return {
+      text: `Kunne ikke fornye abonnement: ${result.message}`,
+      actionExecuted: true,
+      actionSuccess: false,
+      model: "action-execution-failed",
+    };
+  }
+
+  return {
+    text: playbook.combinedResponse || playbook.resolutionSteps || "Jeg kan hjelpe deg med dette, men denne handlingen er ikke tilgjengelig automatisk enna. Kontakt support pa support@dyreid.no.",
+    model: "playbook-fallback",
+  };
+}
+
+function guideDataCollection(
+  playbook: PlaybookEntry,
+  session: SessionState,
+  ownerContext: any | null,
+  storedUserContext: any | null,
+  isAuthenticated: boolean
+): ChatbotResponse | null {
+  if (playbook.requiresLogin && !isAuthenticated) {
+    return {
+      text: `For a hjelpe deg med ${playbook.primaryAction || playbook.intent}, ma du logge inn forst. Trykk pa "Logg inn (OTP)"-knappen overst for a identifisere deg.`,
+      requiresLogin: true,
+      suggestions: [{ label: "Logg inn med OTP", action: "REQUEST_LOGIN" }],
+      model: "playbook-guide-login",
+    };
+  }
+
+  const requiredFields = playbook.requiredRuntimeDataArray || [];
+  const missingFields = requiredFields.filter(f => !session.collectedData[f]);
+
+  if (missingFields.includes("petId") || missingFields.includes("animalId")) {
+    const animals = ownerContext?.animals || storedUserContext?.Pets || [];
+    if (animals.length > 1) {
+      const suggestions = animals.map((a: any) => ({
+        label: `${a.name || a.Name} (${a.species || a.Species || ""})`,
+        action: "SELECT_PET",
+        data: { petId: a.animalId || a.AnimalId, petName: a.name || a.Name },
+      }));
+      return {
+        text: "Hvilket dyr gjelder dette?",
+        suggestions,
+        model: "playbook-guide-select-pet",
+      };
+    } else if (animals.length === 1) {
+      const pet = animals[0];
+      session.collectedData["petId"] = pet.animalId || pet.AnimalId;
+      session.collectedData["animalId"] = pet.animalId || pet.AnimalId;
+      session.collectedData["petName"] = pet.name || pet.Name;
+    }
+  }
+
+  if (missingFields.includes("newOwnerPhone") && !session.collectedData["newOwnerPhone"]) {
+    session.awaitingInput = "newOwnerPhone";
+    return {
+      text: "Hva er ny eiers mobilnummer? (8 siffer)",
+      model: "playbook-guide-collect-phone",
+    };
+  }
+
+  if (missingFields.includes("tagId") && !session.collectedData["tagId"]) {
+    const tags = ownerContext?.tags || [];
+    if (tags.length > 0) {
+      const suggestions = tags.map((t: any) => ({
+        label: `${t.type.toUpperCase()} Tag (${t.tagId})${t.assignedAnimalName ? ` - ${t.assignedAnimalName}` : ""}`,
+        action: "SELECT_TAG",
+        data: { tagId: t.tagId },
+      }));
+      return {
+        text: "Hvilken tag gjelder det?",
+        suggestions,
+        model: "playbook-guide-select-tag",
+      };
+    }
+    session.awaitingInput = "tagId";
+    return {
+      text: "Hva er tag-IDen? (f.eks. TAG-001)",
+      model: "playbook-guide-collect-tag",
+    };
+  }
+
+  return null;
+}
+
+function generateSuggestions(playbook: PlaybookEntry): { label: string; action: string; data?: any }[] {
+  const suggestions: { label: string; action: string; data?: any }[] = [];
+  if (playbook.requiresLogin) {
+    suggestions.push({ label: "Logg inn", action: "REQUEST_LOGIN" });
+  }
+  if (playbook.helpCenterArticleUrl) {
+    suggestions.push({ label: "Les mer", action: "OPEN_ARTICLE", data: { url: playbook.helpCenterArticleUrl } });
+  }
+  return suggestions;
+}
+
+function buildSystemPrompt(
+  playbook: PlaybookEntry[],
+  ownerContext: any | null,
+  storedUserContext: any | null,
+  prices: ServicePrice[] = [],
+  templates: ResponseTemplate[] = [],
+  matchedPlaybook?: PlaybookEntry | null
+): string {
   const isAuthenticated = !!(ownerContext || storedUserContext);
 
-  let prompt = `Du er DyreID sin intelligente support-assistent. DyreID er Norges nasjonale kjæledyrregister.
+  let prompt = `Du er DyreID sin intelligente support-assistent. DyreID er Norges nasjonale kjaeledyrregister.
 
-DINE OPPGAVER:
-1. Hjelpe kunder med spørsmål om registrering, eierskifte, QR-brikker, Smart Tags, abonnement, savnet/funnet, Min Side, familiedeling og appen
-2. Identifisere kundens intent og veilede dem til løsning
-3. Utføre handlinger når kunden er autentisert
+VIKTIG FILOSOFI:
+- UTFOR handlinger for kunden nar mulig (beste!)
+- VEILED gjennom prosessen steg-for-steg
+- Gi KONKRETE instruksjoner fra playbook
+- INFORMER kun som siste utvei
+- ALDRI: "Les denne artikkelen" - ALLTID: Gi konkret hjelp direkte
 
 REGLER:
-- Svar ALLTID på norsk
-- Vær hjelpsom, profesjonell og vennlig
-- Ikke avslør personlig informasjon som ikke tilhører den innloggede brukeren
-- Når handlinger krever autentisering, be kunden logge inn via OTP
-- Forklar tydelig hva du gjør og hvorfor
+- Svar ALLTID pa norsk
+- Vaer hjelpsom, profesjonell og vennlig
+- Ikke avslor personlig informasjon som ikke tilhorer den innloggede brukeren
+- Nar handlinger krever autentisering, be kunden logge inn via OTP
+- Forklar tydelig hva du gjor og hvorfor
+- Bruk informasjon fra playbook-entries til a gi presise svar
 
-VIKTIG OM AUTENTISERING:
-- Noen handlinger krever at kunden er innlogget (identifisert via OTP)
-- Før innlogging kan du svare på generelle spørsmål
-- Etter innlogging kan du se kundens profil, dyr, tags, eierskap og utføre handlinger
-- KUNDEN ER ${isAuthenticated ? "INNLOGGET" : "IKKE INNLOGGET"}
+KUNDEN ER ${isAuthenticated ? "INNLOGGET" : "IKKE INNLOGGET"}
 
-HANDLINGER DU KAN UTFØRE (etter autentisering):
+HANDLINGER DU KAN UTFORE (etter autentisering):
 - Vise kundens dyr og profil
 - Melde dyr savnet/funnet
 - Aktivere QR-brikke
@@ -41,7 +354,7 @@ HANDLINGER DU KAN UTFØRE (etter autentisering):
 - Oppdatere profilinformasjon
 - Fornye abonnement
 
-Når du identifiserer at en handling er nødvendig, inkluder en ACTION-blokk i svaret ditt:
+Nar du identifiserer at en handling er nodvendig, inkluder en ACTION-blokk i svaret ditt:
 [ACTION: action_name | param1=value1 | param2=value2]
 
 Gyldige actions:
@@ -55,16 +368,34 @@ Gyldige actions:
 - [ACTION: renew_subscription | tagId=X]
 `;
 
-  if (playbook.length > 0) {
-    prompt += "\n\nSUPPORT PLAYBOOK (brukt til å veilede kunden):\n";
-    for (const entry of playbook) {
-      prompt += `\n--- ${entry.intent} ---`;
-      prompt += `\nKategori: ${entry.hjelpesenterCategory} > ${entry.hjelpesenterSubcategory}`;
-      prompt += `\nNøkkelord: ${entry.keywords}`;
-      prompt += `\nHandling: ${entry.primaryAction}`;
-      prompt += `\nLøsningssteg: ${entry.resolutionSteps}`;
-      prompt += `\nBetaling påkrevd: ${entry.paymentRequiredProbability ? `${Math.round((entry.paymentRequiredProbability || 0) * 100)}%` : "Nei"}`;
-      prompt += `\nKan lukkes automatisk: ${entry.autoCloseProbability ? `${Math.round((entry.autoCloseProbability || 0) * 100)}%` : "Nei"}`;
+  if (matchedPlaybook) {
+    prompt += "\n\nMATCHET PLAYBOOK ENTRY (bruk dette som primaerkilde for svaret):\n";
+    prompt += `Intent: ${matchedPlaybook.intent}\n`;
+    prompt += `Kategori: ${matchedPlaybook.hjelpesenterCategory || ""} > ${matchedPlaybook.hjelpesenterSubcategory || ""}\n`;
+    if (matchedPlaybook.combinedResponse) {
+      prompt += `Anbefalt svar: ${matchedPlaybook.combinedResponse}\n`;
+    }
+    if (matchedPlaybook.resolutionSteps) {
+      prompt += `Losningssteg: ${matchedPlaybook.resolutionSteps}\n`;
+    }
+    if (matchedPlaybook.officialProcedure && matchedPlaybook.officialProcedure.length > 0) {
+      prompt += `Offisiell prosedyre: ${matchedPlaybook.officialProcedure.join(" -> ")}\n`;
+    }
+    if (matchedPlaybook.actionType && matchedPlaybook.actionType !== "INFO_ONLY") {
+      prompt += `Handlingstype: ${matchedPlaybook.actionType}\n`;
+    }
+    if (matchedPlaybook.paymentRequired) {
+      prompt += `Betaling pakrevd: Ja${matchedPlaybook.paymentAmount ? ` (${matchedPlaybook.paymentAmount})` : ""}\n`;
+    }
+    if (matchedPlaybook.helpCenterArticleTitle) {
+      prompt += `Relevant artikkel: ${matchedPlaybook.helpCenterArticleTitle}\n`;
+    }
+    prompt += "\nBRUK DENNE INFORMASJONEN til a gi et presist, hjelpsomt svar. Ikke bare referer til artikkelen - gi svaret direkte.\n";
+  } else if (playbook.length > 0) {
+    prompt += "\n\nSUPPORT PLAYBOOK (oversikt over kjente intents):\n";
+    for (const entry of playbook.slice(0, 20)) {
+      prompt += `\n- ${entry.intent}: ${entry.primaryAction || ""}`;
+      if (entry.keywords) prompt += ` [${entry.keywords}]`;
     }
   }
 
@@ -75,25 +406,16 @@ Gyldige actions:
       if (p.description) prompt += ` (${p.description})`;
       prompt += "\n";
     }
-    prompt += "\nVIKTIG: Bruk KUN prisene listet over. Ikke oppgi priser du er usikker på.\n";
+    prompt += "\nVIKTIG: Bruk KUN prisene listet over. Ikke oppgi priser du er usikker pa.\n";
   }
 
   if (templates.length > 0) {
-    prompt += "\n\nAUTOSVAR-MALER FRA PURESERVICE (bruk disse som grunnlag for dine svar):\n";
-    prompt += "Disse malene er DyreIDs offisielle autosvar og representerer godkjent kundeservice-innhold.\n";
-    prompt += "Bruk informasjonen, formuleringene og instruksjonene fra disse malene når du svarer kunder.\n\n";
-    for (const t of templates) {
-      prompt += `--- ${t.name} ---\n`;
-      if (t.hjelpesenterCategory) prompt += `Kategori: ${t.hjelpesenterCategory}`;
-      if (t.hjelpesenterSubcategory) prompt += ` > ${t.hjelpesenterSubcategory}`;
-      if (t.hjelpesenterCategory) prompt += "\n";
-      if (t.intent) prompt += `Intent: ${t.intent}\n`;
-      if (t.bodyText) {
-        const truncated = t.bodyText.length > 600 ? t.bodyText.substring(0, 600) + "..." : t.bodyText;
-        prompt += `Innhold: ${truncated}\n`;
-      }
+    prompt += "\n\nAUTOSVAR-MALER (bruk disse som grunnlag for svar):\n";
+    for (const t of templates.slice(0, 15)) {
+      prompt += `- ${t.name}`;
+      if (t.intent) prompt += ` [${t.intent}]`;
       if (t.keyPoints && Array.isArray(t.keyPoints) && (t.keyPoints as string[]).length > 0) {
-        prompt += `Nøkkelpunkter: ${(t.keyPoints as string[]).join("; ")}\n`;
+        prompt += `: ${(t.keyPoints as string[]).slice(0, 3).join("; ")}`;
       }
       prompt += "\n";
     }
@@ -108,14 +430,14 @@ Gyldige actions:
     if (ownerContext.animals.length > 0) {
       prompt += "\nDyr:\n";
       for (const animal of ownerContext.animals) {
-        prompt += `- ${animal.name} (${animal.species}, ${animal.breed}) - Status: ${animal.status}, Betaling: ${animal.paymentStatus}, Chip: ${animal.chipNumber}\n`;
+        prompt += `- ${animal.name} (${animal.species}, ${animal.breed}) - ID: ${animal.animalId}, Status: ${animal.status}, Betaling: ${animal.paymentStatus}, Chip: ${animal.chipNumber}\n`;
       }
     }
 
     if (ownerContext.ownerships.length > 0) {
       prompt += "\nEierskap:\n";
       for (const o of ownerContext.ownerships) {
-        prompt += `- ${o.animalName}: ${o.role}${o.pendingTransfer ? " (eierskifte pågår)" : ""}\n`;
+        prompt += `- ${o.animalName}: ${o.role}${o.pendingTransfer ? " (eierskifte pagar)" : ""}\n`;
       }
     }
 
@@ -129,7 +451,7 @@ Gyldige actions:
     if (ownerContext.lostStatuses.some((l: any) => l.lost)) {
       prompt += "\nSavnede dyr:\n";
       for (const l of ownerContext.lostStatuses.filter((l: any) => l.lost)) {
-        prompt += `- ${l.animalName}: Meldt savnet ${l.lostDate}, SMS: ${l.smsEnabled ? "Ja" : "Nei"}, Push: ${l.pushEnabled ? "Ja" : "Nei"}\n`;
+        prompt += `- ${l.animalName}: Meldt savnet ${l.lostDate}\n`;
       }
     }
 
@@ -138,7 +460,7 @@ Gyldige actions:
       if (pa.pendingPayments > 0 || pa.pendingTransfers > 0 || pa.inactiveTags > 0 || pa.missingProfileData.length > 0) {
         prompt += "\nVentende handlinger:\n";
         if (pa.pendingPayments > 0) prompt += `- ${pa.pendingPayments} ubetalte registreringer\n`;
-        if (pa.pendingTransfers > 0) prompt += `- ${pa.pendingTransfers} pågående eierskifter\n`;
+        if (pa.pendingTransfers > 0) prompt += `- ${pa.pendingTransfers} pagaende eierskifter\n`;
         if (pa.inactiveTags > 0) prompt += `- ${pa.inactiveTags} ikke-aktiverte tags\n`;
         if (pa.missingProfileData.length > 0) prompt += `- Manglende data: ${pa.missingProfileData.join(", ")}\n`;
       }
@@ -162,10 +484,8 @@ Gyldige actions:
         prompt += "\n";
       }
     } else if (storedUserContext.NumberOfPets > 0) {
-      prompt += `\nBrukeren har ${storedUserContext.NumberOfPets} registrerte dyr, men detaljerte dyredata er ikke tilgjengelig i denne sesjonen. Informer brukeren om at du vet de har dyr registrert, og at de kan se sine dyr på Min Side (minside.dyreid.no).\n`;
+      prompt += `\nBrukeren har ${storedUserContext.NumberOfPets} registrerte dyr.\n`;
     }
-
-    prompt += "\nMERK: Denne brukeren er logget inn via Min Side (produksjon). Du har tilgang til grunnleggende profilinformasjon. For handlinger som krever spesifikke dyre-IDer (som eierskifte, melde savnet), be brukeren oppgi dyrets navn eller ID.\n";
   }
 
   return prompt;
@@ -191,83 +511,126 @@ function parseActions(text: string): { action: string; params: Record<string, st
   return actions;
 }
 
-interface QuickPattern {
-  regex: RegExp;
-  unauthResponse: string;
-  authResponse: string;
-}
+async function matchUserIntent(
+  message: string,
+  conversationId: number,
+  isAuthenticated: boolean,
+  ownerContext: any | null,
+  storedUserContext: any | null
+): Promise<{ intent: string | null; playbook: PlaybookEntry | null; method: string }> {
+  const session = getOrCreateSession(conversationId);
 
-const QUICK_PATTERNS: QuickPattern[] = [
-  {
-    regex: /eierskift|selge|solgt|ny eier|overfør|kjøpt/i,
-    unauthResponse: "For a hjelpe deg med eierskifte trenger jeg a se hvilke dyr du har registrert. Kan du logge inn forst via OTP-knappen overst?",
-    authResponse: "Jeg kan hjelpe deg med eierskifte! Hvilket dyr gjelder det? Oppgi navnet pa dyret, sa hjelper jeg deg videre.",
-  },
-  {
-    regex: /logg inn|passord|bankid|innlogg/i,
-    unauthResponse: "Har du problemer med innlogging? Jeg kan hjelpe deg. Hvilken innloggingsmetode bruker du (BankID, OTP, e-post)?",
-    authResponse: "Du er allerede innlogget! Har du problemer med innlogging pa en annen tjeneste? Hvilken innloggingsmetode gjelder det (BankID, OTP, e-post)?",
-  },
-  {
-    regex: /qr.?tag|qr.?brikke|skann|aktivere tag/i,
-    unauthResponse: "Jeg kan hjelpe deg med QR Tag! Har du allerede kjopt en, eller lurer du pa hvordan den fungerer?",
-    authResponse: "Jeg kan hjelpe deg med QR Tag! Har du allerede kjopt en du vil aktivere, eller lurer du pa hvordan den fungerer?",
-  },
-  {
-    regex: /savnet|mistet|funnet|borte|forsvunnet/i,
-    unauthResponse: "Jeg hjelper deg gjerne med savnet/funnet. For a melde dyr savnet ma jeg vite hvilket dyr det gjelder. Kan du logge inn forst?",
-    authResponse: "Jeg kan hjelpe deg med a melde dyr savnet eller funnet. Hvilket dyr gjelder det? Oppgi navnet pa dyret.",
-  },
-  {
-    regex: /registrer|chip|søkbart|id.?merk/i,
-    unauthResponse: "Jeg kan hjelpe med registrering! Er dyret allerede chipet, eller trenger du informasjon om ID-merking?",
-    authResponse: "Jeg kan hjelpe med registrering! Er dyret allerede chipet, eller trenger du informasjon om ID-merking?",
-  },
-  {
-    regex: /abonnement|avslutt|forny|oppsigelse/i,
-    unauthResponse: "Jeg kan hjelpe med abonnement! Gjelder det QR Premium, Smart Tag eller DyreID+ appen?",
-    authResponse: "Jeg kan hjelpe med abonnement! Gjelder det QR Premium, Smart Tag eller DyreID+ appen?",
-  },
-  {
-    regex: /app|laste ned|installere|mobil/i,
-    unauthResponse: "DyreID-appen finnes for iOS og Android. Har du problemer med innlogging eller vil du vite om funksjoner?",
-    authResponse: "DyreID-appen finnes for iOS og Android. Har du problemer med innlogging eller vil du vite om funksjoner?",
-  },
-  {
-    regex: /pris|kost|betale|gratis/i,
-    unauthResponse: "Jeg kan gi deg prisinformasjon! Hva lurer du pa? Eierskifte, registrering, QR Tag eller app?",
-    authResponse: "Jeg kan gi deg prisinformasjon! Hva lurer du pa? Eierskifte, registrering, QR Tag eller app?",
-  },
-  {
-    regex: /veterinær|klinikk|dyrelege/i,
-    unauthResponse: "Trenger du hjelp med veterinarregistrering eller skal du endre klinikk?",
-    authResponse: "Trenger du hjelp med veterinarregistrering eller skal du endre klinikk?",
-  },
-  {
-    regex: /smart.?tag|gps|sporing/i,
-    unauthResponse: "Jeg kan hjelpe med Smart Tag! Gjelder det tilkobling, GPS, batteri eller noe annet?",
-    authResponse: "Jeg kan hjelpe med Smart Tag! Gjelder det tilkobling, GPS, batteri eller noe annet?",
-  },
-  {
-    regex: /familie|deling|del tilgang/i,
-    unauthResponse: "Familiedeling lar andre se og administrere dyrene dine. Vil du legge til eller fjerne et familiemedlem?",
-    authResponse: "Familiedeling lar andre se og administrere dyrene dine. Vil du legge til eller fjerne et familiemedlem?",
-  },
-  {
-    regex: /mine dyr|se dyr|dyrene mine|hvilke dyr|vis dyr|har jeg/i,
-    unauthResponse: "For at jeg skal kunne se dine registrerte dyr, ma du logge inn forst. Trykk pa innloggingsknappen og verifiser med OTP.",
-    authResponse: "",
-  },
-];
+  if (session.intent && session.awaitingInput && session.playbook) {
+    const extracted = extractDataFromMessage(message, [session.awaitingInput]);
+    if (Object.keys(extracted).length > 0) {
+      Object.assign(session.collectedData, extracted);
+      session.awaitingInput = undefined;
+    } else {
+      if (session.awaitingInput === "newOwnerPhone") {
+        const digits = message.replace(/\D/g, "");
+        if (digits.length === 8) {
+          session.collectedData["newOwnerPhone"] = digits;
+          session.awaitingInput = undefined;
+        }
+      } else if (session.awaitingInput === "tagId") {
+        session.collectedData["tagId"] = message.trim();
+        session.awaitingInput = undefined;
+      }
+    }
+    return { intent: session.intent, playbook: session.playbook, method: "session-continue" };
+  }
 
-function quickIntentMatch(message: string, isAuthenticated: boolean): string | null {
-  for (const pattern of QUICK_PATTERNS) {
-    if (pattern.regex.test(message)) {
-      const response = isAuthenticated ? pattern.authResponse : pattern.unauthResponse;
-      if (response === "") return null;
-      return response;
+  const quickIntent = quickIntentMatch(message);
+  if (quickIntent) {
+    const playbook = await storage.getPlaybookByIntent(quickIntent);
+    if (playbook) {
+      session.intent = quickIntent;
+      session.playbook = playbook;
+      session.collectedData = {};
+      return { intent: quickIntent, playbook, method: "quick-match" };
     }
   }
+
+  const keywordMatch = await storage.searchPlaybookByKeywords(message);
+  if (keywordMatch) {
+    session.intent = keywordMatch.intent;
+    session.playbook = keywordMatch;
+    session.collectedData = {};
+    return { intent: keywordMatch.intent, playbook: keywordMatch, method: "keyword-match" };
+  }
+
+  if (quickIntent) {
+    session.intent = quickIntent;
+    session.collectedData = {};
+    return { intent: quickIntent, playbook: null, method: "quick-match-no-playbook" };
+  }
+
+  return { intent: null, playbook: null, method: "none" };
+}
+
+async function handlePlaybookResponse(
+  playbook: PlaybookEntry,
+  session: SessionState,
+  conversationId: number,
+  userMessage: string,
+  ownerId: string | null | undefined,
+  ownerContext: any | null,
+  storedUserContext: any | null,
+  isAuthenticated: boolean
+): Promise<ChatbotResponse | null> {
+  const extracted = extractDataFromMessage(userMessage, playbook.requiredRuntimeDataArray);
+  Object.assign(session.collectedData, extracted);
+
+  const actionType = playbook.actionType;
+
+  if (actionType === "API_CALL" && isAuthenticated && ownerId) {
+    const guideResult = guideDataCollection(playbook, session, ownerContext, storedUserContext, isAuthenticated);
+    if (guideResult) return guideResult;
+
+    const requiredFields = playbook.requiredRuntimeDataArray || [];
+    if (hasAllRequiredData(session.collectedData, requiredFields)) {
+      const result = await executePlaybookAction(playbook, ownerId, session.collectedData, ownerContext);
+      if (result.actionSuccess) {
+        clearSession(conversationId);
+      }
+      return result;
+    }
+
+    return {
+      text: playbook.combinedResponse || playbook.resolutionSteps || `Jeg kan hjelpe deg med ${playbook.primaryAction || playbook.intent}.`,
+      suggestions: generateSuggestions(playbook),
+      model: "playbook-guide-fallback",
+    };
+  }
+
+  if (actionType === "API_CALL" && !isAuthenticated) {
+    return {
+      text: `For a ${playbook.primaryAction || "utfore denne handlingen"}, ma du logge inn forst. Trykk pa "Logg inn (OTP)"-knappen overst.`,
+      requiresLogin: true,
+      suggestions: [{ label: "Logg inn med OTP", action: "REQUEST_LOGIN" }],
+      model: "playbook-guide-login",
+    };
+  }
+
+  if (actionType === "FORM_FILL" || actionType === "NAVIGATION") {
+    return {
+      text: playbook.combinedResponse || playbook.resolutionSteps || "Folg instruksjonene for a fullere dette.",
+      suggestions: generateSuggestions(playbook),
+      helpCenterLink: playbook.helpCenterArticleUrl,
+      requiresLogin: !!(playbook.requiresLogin && !isAuthenticated),
+      model: "playbook-instruct",
+    };
+  }
+
+  if (playbook.combinedResponse || playbook.resolutionSteps) {
+    return {
+      text: playbook.combinedResponse || playbook.resolutionSteps || "",
+      helpCenterLink: playbook.helpCenterArticleUrl,
+      suggestions: generateSuggestions(playbook),
+      model: "playbook-info",
+    };
+  }
+
   return null;
 }
 
@@ -293,46 +656,112 @@ export async function* streamChatResponse(
   });
 
   const isAuthenticated = !!(ownerId && (storedUserContext || getMinSideContext(ownerId)));
+  const ownerContext = ownerId ? getMinSideContext(ownerId) : null;
+  const session = getOrCreateSession(conversationId);
 
-  const quickResponse = quickIntentMatch(userMessage, isAuthenticated);
-  if (quickResponse) {
-    await storage.createMessage({
-      conversationId,
-      role: "assistant",
-      content: quickResponse,
-      metadata: { quickMatch: true },
+  const animals = ownerContext?.animals || storedUserContext?.Pets || [];
+  if (animals.length > 0) {
+    const lowerMsg = userMessage.toLowerCase();
+    const matchedPet = animals.find((a: any) => {
+      const name = (a.name || a.Name || "").toLowerCase();
+      return name === lowerMsg || lowerMsg.includes(name);
     });
-
-    const matchedPattern = QUICK_PATTERNS.find(p => p.regex.test(userMessage));
-    const interaction = await storage.logChatbotInteraction({
-      conversationId,
-      userQuestion: userMessage,
-      botResponse: quickResponse,
-      responseMethod: "quick_match",
-      matchedIntent: matchedPattern ? matchedPattern.regex.source.split("|")[0] : null,
-      authenticated: isAuthenticated,
-      responseTimeMs: Date.now() - startTime,
-    });
-    lastInteractionId = interaction.id;
-
-    const quickMsg = await storage.getMessagesByConversation(conversationId);
-    const lastQuickMsg = quickMsg[quickMsg.length - 1];
-    if (lastQuickMsg && lastQuickMsg.role === "assistant") {
-      await db
-        .update(messages)
-        .set({ metadata: { quickMatch: true, interactionId: interaction.id } })
-        .where(eq(messages.id, lastQuickMsg.id));
+    if (matchedPet) {
+      session.collectedData["petId"] = matchedPet.animalId || matchedPet.AnimalId;
+      session.collectedData["animalId"] = matchedPet.animalId || matchedPet.AnimalId;
+      session.collectedData["petName"] = matchedPet.name || matchedPet.Name;
     }
-
-    yield quickResponse;
-    return;
   }
 
-  const playbook = await storage.getActivePlaybookEntries();
+  const tags = ownerContext?.tags || [];
+  if (tags.length > 0) {
+    const tagMatch = userMessage.match(/TAG-\d+/i);
+    if (tagMatch) {
+      const matchedTag = tags.find((t: any) => t.tagId.toLowerCase() === tagMatch[0].toLowerCase());
+      if (matchedTag) {
+        session.collectedData["tagId"] = matchedTag.tagId;
+      }
+    }
+  }
+
+  const { intent, playbook, method } = await matchUserIntent(
+    userMessage, conversationId, isAuthenticated, ownerContext, storedUserContext
+  );
+
+  if (playbook) {
+    const playbookResponse = await handlePlaybookResponse(
+      playbook, session, conversationId, userMessage,
+      ownerId, ownerContext, storedUserContext, isAuthenticated
+    );
+
+    if (playbookResponse) {
+      let responseText = playbookResponse.text;
+
+      if (playbookResponse.suggestions && playbookResponse.suggestions.length > 0) {
+        const suggestionLabels = playbookResponse.suggestions
+          .filter(s => s.action !== "REQUEST_LOGIN" && s.action !== "OPEN_ARTICLE")
+          .map(s => s.label);
+        if (suggestionLabels.length > 0) {
+          responseText += "\n\nValg:\n" + suggestionLabels.map((l, i) => `${i + 1}. ${l}`).join("\n");
+        }
+      }
+
+      const metadata: any = {
+        playbookMatch: true,
+        intent,
+        method,
+        model: playbookResponse.model,
+      };
+      if (playbookResponse.actionExecuted) {
+        metadata.actionExecuted = true;
+        metadata.actionType = playbookResponse.actionType;
+        metadata.actionSuccess = playbookResponse.actionSuccess;
+      }
+      if (playbookResponse.requiresLogin) {
+        metadata.requiresLogin = true;
+      }
+      if (playbookResponse.helpCenterLink) {
+        metadata.helpCenterLink = playbookResponse.helpCenterLink;
+      }
+      if (playbookResponse.suggestions) {
+        metadata.suggestions = playbookResponse.suggestions;
+      }
+
+      const msg = await storage.createMessage({
+        conversationId,
+        role: "assistant",
+        content: responseText,
+        metadata,
+      });
+
+      const interaction = await storage.logChatbotInteraction({
+        conversationId,
+        messageId: msg.id,
+        userQuestion: userMessage,
+        botResponse: responseText,
+        responseMethod: playbookResponse.model,
+        matchedIntent: intent,
+        actionsExecuted: playbookResponse.actionExecuted ? [{ action: playbookResponse.actionType, success: playbookResponse.actionSuccess }] : null,
+        authenticated: isAuthenticated,
+        responseTimeMs: Date.now() - startTime,
+      });
+      lastInteractionId = interaction.id;
+
+      await db
+        .update(messages)
+        .set({ metadata: { ...metadata, interactionId: interaction.id } })
+        .where(eq(messages.id, msg.id));
+
+      yield responseText;
+      return;
+    }
+  }
+
+  const allPlaybook = await storage.getActivePlaybookEntries();
   const activePrices = await storage.getActiveServicePrices();
   const activeTemplates = await storage.getActiveResponseTemplates();
-  const sandboxContext = ownerId ? getMinSideContext(ownerId) : null;
-  const systemPrompt = buildSystemPrompt(playbook, sandboxContext, sandboxContext ? null : storedUserContext, activePrices, activeTemplates);
+  const matchedPb = playbook || (intent ? await storage.getPlaybookByIntent(intent) : null);
+  const systemPrompt = buildSystemPrompt(allPlaybook, ownerContext, ownerContext ? null : storedUserContext, activePrices, activeTemplates, matchedPb);
 
   const history = await storage.getMessagesByConversation(conversationId);
   const chatMessages = history.map((m) => ({
@@ -385,7 +814,10 @@ export async function* streamChatResponse(
     conversationId,
     role: "assistant",
     content: finalContent,
-    metadata: actions.length > 0 ? { actions } : null,
+    metadata: {
+      ...(actions.length > 0 ? { actions } : {}),
+      ...(intent ? { matchedIntent: intent, method } : {}),
+    },
   });
 
   const interaction = await storage.logChatbotInteraction({
@@ -393,7 +825,8 @@ export async function* streamChatResponse(
     messageId: msg.id,
     userQuestion: userMessage,
     botResponse: finalContent,
-    responseMethod: "ai",
+    responseMethod: method !== "none" ? `ai-with-${method}` : "ai",
+    matchedIntent: intent,
     actionsExecuted: actions.length > 0 ? actions : null,
     authenticated: isAuthenticated,
     responseTimeMs: Date.now() - startTime,
@@ -402,6 +835,6 @@ export async function* streamChatResponse(
 
   await db
     .update(messages)
-    .set({ metadata: { ...(actions.length > 0 ? { actions } : {}), interactionId: interaction.id } })
+    .set({ metadata: { ...(actions.length > 0 ? { actions } : {}), interactionId: interaction.id, ...(intent ? { matchedIntent: intent } : {}) } })
     .where(eq(messages.id, msg.id));
 }

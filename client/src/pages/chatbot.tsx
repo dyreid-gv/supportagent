@@ -32,6 +32,9 @@ import {
   ThumbsDown,
   MinusCircle,
   CheckCircle2,
+  Zap,
+  AlertCircle,
+  ExternalLink,
 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -175,9 +178,13 @@ function FeedbackWidget({ interactionId, existingFeedback }: { interactionId: nu
   );
 }
 
-function MessageBubble({ message }: { message: Message }) {
+function MessageBubble({ message, onSuggestionClick }: { message: Message; onSuggestionClick?: (text: string) => void }) {
   const isUser = message.role === "user";
   const interactionId = message.metadata?.interactionId as number | undefined;
+  const actionExecuted = message.metadata?.actionExecuted;
+  const actionSuccess = message.metadata?.actionSuccess;
+  const helpCenterLink = message.metadata?.helpCenterLink as string | undefined;
+  const suggestions = message.metadata?.suggestions as { label: string; action: string; data?: any }[] | undefined;
 
   return (
     <div
@@ -189,22 +196,79 @@ function MessageBubble({ message }: { message: Message }) {
           {isUser ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
         </AvatarFallback>
       </Avatar>
-      <div
-        className={`rounded-lg px-4 py-2 max-w-[80%] ${
-          isUser
-            ? "bg-primary text-primary-foreground"
-            : "bg-muted"
-        }`}
-      >
-        <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-        <p className="text-xs opacity-60 mt-1">
-          {new Date(message.createdAt).toLocaleTimeString("nb-NO", {
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
-        </p>
-        {!isUser && interactionId && (
-          <FeedbackWidget interactionId={interactionId} />
+      <div className="max-w-[80%] space-y-2">
+        <div
+          className={`rounded-lg px-4 py-2 ${
+            isUser
+              ? "bg-primary text-primary-foreground"
+              : "bg-muted"
+          }`}
+        >
+          {!isUser && actionExecuted && (
+            <div className={`flex items-center gap-1.5 mb-1.5 text-xs font-medium ${actionSuccess ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`} data-testid={`status-action-${message.id}`}>
+              {actionSuccess ? <Zap className="h-3.5 w-3.5" /> : <AlertCircle className="h-3.5 w-3.5" />}
+              {actionSuccess ? "Handling utfort" : "Handling feilet"}
+            </div>
+          )}
+          <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+          {helpCenterLink && (
+            <a
+              href={helpCenterLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs mt-1.5 underline hover:no-underline text-muted-foreground"
+              data-testid={`link-helpcenter-${message.id}`}
+            >
+              <ExternalLink className="h-3 w-3" />
+              Les mer pa hjelpesenter
+            </a>
+          )}
+          <p className="text-xs opacity-60 mt-1">
+            {new Date(message.createdAt).toLocaleTimeString("nb-NO", {
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+          </p>
+          {!isUser && interactionId && (
+            <FeedbackWidget interactionId={interactionId} />
+          )}
+        </div>
+        {!isUser && suggestions && suggestions.length > 0 && onSuggestionClick && (
+          <div className="flex flex-wrap gap-1.5">
+            {suggestions.filter(s => s.action === "SELECT_PET" || s.action === "SELECT_TAG").map((s, i) => (
+              <Button
+                key={i}
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  if (s.data?.petId) {
+                    onSuggestionClick(`${s.data.petName || s.label}`);
+                  } else if (s.data?.tagId) {
+                    onSuggestionClick(s.data.tagId);
+                  } else {
+                    onSuggestionClick(s.label);
+                  }
+                }}
+                data-testid={`button-suggestion-${message.id}-${i}`}
+              >
+                {s.label}
+              </Button>
+            ))}
+            {suggestions.filter(s => s.action === "OPEN_ARTICLE" && s.data?.url).map((s, i) => (
+              <a
+                key={`article-${i}`}
+                href={s.data.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid={`link-article-${message.id}-${i}`}
+              >
+                <Button variant="outline" size="sm">
+                  <ExternalLink className="h-3 w-3 mr-1" />
+                  {s.label}
+                </Button>
+              </a>
+            ))}
+          </div>
         )}
       </div>
     </div>
@@ -311,10 +375,9 @@ export default function Chatbot() {
     }
   }, [messages, streamingContent]);
 
-  const sendMessage = useCallback(async () => {
-    if (!inputValue.trim() || !activeConversationId || isSending) return;
+  const doSend = useCallback(async (content: string) => {
+    if (!content.trim() || !activeConversationId || isSending) return;
 
-    const content = inputValue.trim();
     setInputValue("");
     setIsSending(true);
     setStreamingContent("");
@@ -326,7 +389,7 @@ export default function Chatbot() {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content }),
+          body: JSON.stringify({ content: content.trim() }),
         }
       );
 
@@ -366,7 +429,15 @@ export default function Chatbot() {
         queryKey: ["/api/chat/conversations", activeConversationId],
       });
     }
-  }, [inputValue, activeConversationId, isSending]);
+  }, [activeConversationId, isSending]);
+
+  const sendMessage = useCallback(() => {
+    doSend(inputValue);
+  }, [inputValue, doSend]);
+
+  const sendDirectMessage = useCallback((text: string) => {
+    doSend(text);
+  }, [doSend]);
 
   const handleSendOtp = async () => {
     if (!authPhone.trim()) return;
@@ -580,7 +651,13 @@ export default function Chatbot() {
                 )}
 
                 {messages.map((msg) => (
-                  <MessageBubble key={msg.id} message={msg} />
+                  <MessageBubble
+                    key={msg.id}
+                    message={msg}
+                    onSuggestionClick={(text) => {
+                      sendDirectMessage(text);
+                    }}
+                  />
                 ))}
 
                 {streamingContent && <StreamingMessage content={streamingContent} />}
