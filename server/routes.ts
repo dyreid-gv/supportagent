@@ -5,7 +5,7 @@ import { count, sql } from "drizzle-orm";
 import axios from "axios";
 import { db } from "./db";
 import { storage } from "./storage";
-import { streamChatResponse } from "./chatbot";
+import { streamChatResponse, getLastInteractionId } from "./chatbot";
 import { scrapeHjelpesenter } from "./hjelpesenter-scraper";
 import { getMinSideContext, lookupOwnerByPhone, getAllSandboxPhones, performAction } from "./minside-sandbox";
 import {
@@ -499,7 +499,8 @@ export async function registerRoutes(
         res.write(`data: ${JSON.stringify({ content: chunk })}\n\n`);
       }
 
-      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      const interactionId = getLastInteractionId();
+      res.write(`data: ${JSON.stringify({ done: true, interactionId })}\n\n`);
       res.end();
     } catch (error: any) {
       if (res.headersSent) {
@@ -564,6 +565,50 @@ export async function registerRoutes(
 
   app.get("/api/sandbox/phones", async (_req, res) => {
     res.json(getAllSandboxPhones());
+  });
+
+  app.post("/api/feedback", async (req, res) => {
+    try {
+      const { interactionId, result, comment } = req.body;
+      if (!interactionId || !result) {
+        return res.status(400).json({ error: "interactionId and result required" });
+      }
+      if (!["resolved", "partial", "not_resolved"].includes(result)) {
+        return res.status(400).json({ error: "result must be resolved, partial, or not_resolved" });
+      }
+      await storage.updateInteractionFeedback(interactionId, result, comment);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/feedback/stats", async (_req, res) => {
+    try {
+      const stats = await storage.getFeedbackStats();
+      res.json(stats);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/feedback/flagged", async (_req, res) => {
+    try {
+      const flagged = await storage.getFlaggedInteractions();
+      res.json(flagged);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/feedback/interactions", async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 100;
+      const interactions = await storage.getChatbotInteractions(limit);
+      res.json(interactions);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
   });
 
   // ─── MIN SIDE OTP PROXY ──────────────────────────────────────────

@@ -269,12 +269,21 @@ function quickIntentMatch(message: string, isAuthenticated: boolean): string | n
   return null;
 }
 
+let lastInteractionId: number | null = null;
+
+export function getLastInteractionId(): number | null {
+  return lastInteractionId;
+}
+
 export async function* streamChatResponse(
   conversationId: number,
   userMessage: string,
   ownerId?: string | null,
   storedUserContext?: any | null
 ): AsyncGenerator<string, void, unknown> {
+  const startTime = Date.now();
+  lastInteractionId = null;
+
   await storage.createMessage({
     conversationId,
     role: "user",
@@ -291,6 +300,19 @@ export async function* streamChatResponse(
       content: quickResponse,
       metadata: { quickMatch: true },
     });
+
+    const matchedPattern = QUICK_PATTERNS.find(p => p.regex.test(userMessage));
+    const interaction = await storage.logChatbotInteraction({
+      conversationId,
+      userQuestion: userMessage,
+      botResponse: quickResponse,
+      responseMethod: "quick_match",
+      matchedIntent: matchedPattern ? matchedPattern.regex.source.split("|")[0] : null,
+      authenticated: isAuthenticated,
+      responseTimeMs: Date.now() - startTime,
+    });
+    lastInteractionId = interaction.id;
+
     yield quickResponse;
     return;
   }
@@ -348,10 +370,22 @@ export async function* streamChatResponse(
     ? `${cleanResponse}\n\n${actionResults.join("\n")}`
     : cleanResponse;
 
-  await storage.createMessage({
+  const msg = await storage.createMessage({
     conversationId,
     role: "assistant",
     content: finalContent,
     metadata: actions.length > 0 ? { actions } : null,
   });
+
+  const interaction = await storage.logChatbotInteraction({
+    conversationId,
+    messageId: msg.id,
+    userQuestion: userMessage,
+    botResponse: finalContent,
+    responseMethod: "ai",
+    actionsExecuted: actions.length > 0 ? actions : null,
+    authenticated: isAuthenticated,
+    responseTimeMs: Date.now() - startTime,
+  });
+  lastInteractionId = interaction.id;
 }
