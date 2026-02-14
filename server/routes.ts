@@ -631,22 +631,44 @@ export async function registerRoutes(
 
       const verifyData = verifyResponse.data;
       if (verifyData.IsSuccess) {
-        const ownerResponse = await axios.get(
-          `${MINSIDE_URL}/Security/GetOwnerDetailforOTPScreen?emailOrContactNumber=${encodeURIComponent(contactMethod)}`,
-          { timeout: 15000 }
-        );
+        let userData: any = null;
 
-        const userData = ownerResponse.data;
+        try {
+          const cookies = verifyResponse.headers["set-cookie"];
+          const cookieHeader = cookies ? (Array.isArray(cookies) ? cookies.join("; ") : cookies) : "";
 
-        if (conversationId && userData) {
-          const ownerId = userData.OwnerId || `MINSIDE-${contactMethod}`;
+          const ownerResponse = await axios.get(
+            `${MINSIDE_URL}/Security/GetOwnerDetailforOTPScreen?emailOrContactNumber=${encodeURIComponent(contactMethod)}`,
+            {
+              timeout: 15000,
+              headers: cookieHeader ? { Cookie: cookieHeader } : {},
+              maxRedirects: 0,
+              validateStatus: (status: number) => status < 500,
+            }
+          );
+
+          if (ownerResponse.status === 200 && ownerResponse.data && typeof ownerResponse.data === "object") {
+            userData = ownerResponse.data;
+          }
+        } catch (detailErr: any) {
+          console.log("Could not fetch owner details after OTP verify (non-critical):", detailErr.message);
+        }
+
+        const ownerId = userData?.OwnerId || resolvedUserId || `MINSIDE-${contactMethod}`;
+
+        if (conversationId) {
           await storage.updateConversationAuth(parseInt(conversationId), ownerId);
         }
 
         return res.json({
           success: true,
           mode: "production",
-          userContext: userData,
+          userContext: userData || {
+            Phone: contactMethod,
+            OwnerId: ownerId,
+            FirstName: "Bruker",
+            Pets: [],
+          },
         });
       }
 
