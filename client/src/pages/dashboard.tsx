@@ -33,6 +33,11 @@ import {
   Trash2,
   Save,
   Zap,
+  ThumbsUp,
+  ThumbsDown,
+  MinusCircle,
+  MessageSquare,
+  Flag,
 } from "lucide-react";
 import { useState, useCallback } from "react";
 import {
@@ -491,6 +496,45 @@ export default function Dashboard() {
     queryKey: ["/api/templates"],
   });
 
+  interface FeedbackStats {
+    total: number;
+    resolved: number;
+    partial: number;
+    notResolved: number;
+    nofeedback: number;
+    byIntent: Record<string, { total: number; resolved: number; notResolved: number; partial: number }>;
+  }
+
+  interface ChatbotInteraction {
+    id: number;
+    conversationId: number | null;
+    messageId: number | null;
+    userQuestion: string;
+    botResponse: string;
+    responseMethod: string | null;
+    matchedIntent: string | null;
+    matchedCategory: string | null;
+    feedbackResult: string | null;
+    feedbackComment: string | null;
+    flaggedForReview: boolean | null;
+    authenticated: boolean | null;
+    responseTimeMs: number | null;
+    createdAt: string | null;
+    feedbackAt: string | null;
+  }
+
+  const { data: feedbackStats } = useQuery<FeedbackStats>({
+    queryKey: ["/api/feedback/stats"],
+  });
+
+  const { data: flaggedInteractions } = useQuery<ChatbotInteraction[]>({
+    queryKey: ["/api/feedback/flagged"],
+  });
+
+  const { data: recentInteractions } = useQuery<ChatbotInteraction[]>({
+    queryKey: ["/api/feedback/interactions"],
+  });
+
   const [editingPrice, setEditingPrice] = useState<ServicePrice | null>(null);
   const [addingPrice, setAddingPrice] = useState(false);
   const [seedingPrices, setSeedingPrices] = useState(false);
@@ -583,6 +627,9 @@ export default function Dashboard() {
           </TabsTrigger>
           <TabsTrigger value="templates" data-testid="tab-templates">
             Autosvar ({responseTemplates?.length || 0})
+          </TabsTrigger>
+          <TabsTrigger value="feedback" data-testid="tab-feedback">
+            Tilbakemelding
           </TabsTrigger>
         </TabsList>
 
@@ -1205,6 +1252,181 @@ export default function Dashboard() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="feedback" className="mt-4">
+          <div className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-4">
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Totalt</CardTitle>
+                  <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold" data-testid="text-feedback-total">{feedbackStats?.total || 0}</div>
+                  <p className="text-xs text-muted-foreground">interaksjoner logget</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Hjelpsomt</CardTitle>
+                  <ThumbsUp className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-green-600" data-testid="text-feedback-resolved">{feedbackStats?.resolved || 0}</div>
+                  <p className="text-xs text-muted-foreground">
+                    {feedbackStats && feedbackStats.total > 0 ? `${Math.round((feedbackStats.resolved / feedbackStats.total) * 100)}%` : "0%"} av totalt
+                  </p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Delvis</CardTitle>
+                  <MinusCircle className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-yellow-600" data-testid="text-feedback-partial">{feedbackStats?.partial || 0}</div>
+                  <p className="text-xs text-muted-foreground">
+                    {feedbackStats && feedbackStats.total > 0 ? `${Math.round((feedbackStats.partial / feedbackStats.total) * 100)}%` : "0%"} av totalt
+                  </p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Ikke hjelpsomt</CardTitle>
+                  <ThumbsDown className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-red-600" data-testid="text-feedback-not-resolved">{feedbackStats?.notResolved || 0}</div>
+                  <p className="text-xs text-muted-foreground">
+                    {feedbackStats && feedbackStats.total > 0 ? `${Math.round((feedbackStats.notResolved / feedbackStats.total) * 100)}%` : "0%"} av totalt
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+
+            {flaggedInteractions && flaggedInteractions.length > 0 && (
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
+                  <CardTitle className="text-base">Flagget for gjennomgang</CardTitle>
+                  <Badge variant="destructive">
+                    <Flag className="h-3 w-3 mr-1" />
+                    {flaggedInteractions.length}
+                  </Badge>
+                </CardHeader>
+                <CardContent>
+                  <ScrollArea className="h-[300px]">
+                    <div className="space-y-3">
+                      {flaggedInteractions.map((interaction) => (
+                        <div key={interaction.id} className="border rounded-md p-3" data-testid={`flagged-interaction-${interaction.id}`}>
+                          <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <Badge variant="outline">{interaction.responseMethod || "ai"}</Badge>
+                              {interaction.matchedIntent && <Badge variant="secondary">{interaction.matchedIntent}</Badge>}
+                              {interaction.authenticated && <Badge variant="secondary">Innlogget</Badge>}
+                            </div>
+                            <span className="text-xs text-muted-foreground">
+                              {interaction.createdAt ? new Date(interaction.createdAt).toLocaleString("nb-NO") : ""}
+                            </span>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-sm"><span className="font-medium">Sp:</span> {interaction.userQuestion}</p>
+                            <p className="text-sm text-muted-foreground"><span className="font-medium">Sv:</span> {interaction.botResponse.length > 200 ? interaction.botResponse.substring(0, 200) + "..." : interaction.botResponse}</p>
+                            {interaction.feedbackComment && (
+                              <p className="text-sm text-destructive"><span className="font-medium">Kommentar:</span> {interaction.feedbackComment}</p>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </ScrollArea>
+                </CardContent>
+              </Card>
+            )}
+
+            {feedbackStats && Object.keys(feedbackStats.byIntent).length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Tilbakemelding per intent</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ScrollArea className="h-[300px]">
+                    <div className="space-y-2">
+                      {Object.entries(feedbackStats.byIntent)
+                        .sort((a, b) => b[1].total - a[1].total)
+                        .map(([intent, stats]) => {
+                          const successRate = stats.total > 0 ? Math.round(((stats.resolved) / stats.total) * 100) : 0;
+                          return (
+                            <div key={intent} className="flex items-center justify-between gap-2 p-2 rounded-md border" data-testid={`intent-stats-${intent}`}>
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="text-sm font-medium truncate">{intent}</span>
+                                <Badge variant="outline">{stats.total}</Badge>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-1">
+                                  <ThumbsUp className="h-3 w-3 text-green-600" />
+                                  <span className="text-xs">{stats.resolved}</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <MinusCircle className="h-3 w-3 text-yellow-600" />
+                                  <span className="text-xs">{stats.partial}</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <ThumbsDown className="h-3 w-3 text-red-600" />
+                                  <span className="text-xs">{stats.notResolved}</span>
+                                </div>
+                                <Badge variant={successRate >= 70 ? "default" : successRate >= 40 ? "secondary" : "destructive"}>
+                                  {successRate}%
+                                </Badge>
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </ScrollArea>
+                </CardContent>
+              </Card>
+            )}
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Siste interaksjoner</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {!recentInteractions || recentInteractions.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Ingen interaksjoner logget ennå.</p>
+                ) : (
+                  <ScrollArea className="h-[400px]">
+                    <div className="space-y-2">
+                      {recentInteractions.map((interaction) => (
+                        <div key={interaction.id} className="border rounded-md p-3" data-testid={`interaction-${interaction.id}`}>
+                          <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <Badge variant="outline">{interaction.responseMethod || "ai"}</Badge>
+                              {interaction.matchedIntent && <Badge variant="secondary">{interaction.matchedIntent}</Badge>}
+                              {interaction.feedbackResult && (
+                                <Badge variant={interaction.feedbackResult === "resolved" ? "default" : interaction.feedbackResult === "partial" ? "secondary" : "destructive"}>
+                                  {interaction.feedbackResult === "resolved" ? "Hjelpsomt" : interaction.feedbackResult === "partial" ? "Delvis" : "Ikke hjelpsomt"}
+                                </Badge>
+                              )}
+                              {interaction.responseTimeMs && (
+                                <span className="text-xs text-muted-foreground">{interaction.responseTimeMs}ms</span>
+                              )}
+                            </div>
+                            <span className="text-xs text-muted-foreground">
+                              {interaction.createdAt ? new Date(interaction.createdAt).toLocaleString("nb-NO") : ""}
+                            </span>
+                          </div>
+                          <p className="text-sm truncate"><span className="font-medium">Sp:</span> {interaction.userQuestion}</p>
+                          <p className="text-xs text-muted-foreground truncate"><span className="font-medium">Sv:</span> {interaction.botResponse}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </ScrollArea>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
       </Tabs>
     </div>

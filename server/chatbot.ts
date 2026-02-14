@@ -1,7 +1,9 @@
 import OpenAI from "openai";
+import { eq } from "drizzle-orm";
+import { db } from "./db";
 import { storage } from "./storage";
 import { getMinSideContext, performAction, lookupOwnerByPhone } from "./minside-sandbox";
-import type { PlaybookEntry, ServicePrice, ResponseTemplate } from "@shared/schema";
+import { messages, type PlaybookEntry, type ServicePrice, type ResponseTemplate } from "@shared/schema";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -313,6 +315,15 @@ export async function* streamChatResponse(
     });
     lastInteractionId = interaction.id;
 
+    const quickMsg = await storage.getMessagesByConversation(conversationId);
+    const lastQuickMsg = quickMsg[quickMsg.length - 1];
+    if (lastQuickMsg && lastQuickMsg.role === "assistant") {
+      await db
+        .update(messages)
+        .set({ metadata: { quickMatch: true, interactionId: interaction.id } })
+        .where(eq(messages.id, lastQuickMsg.id));
+    }
+
     yield quickResponse;
     return;
   }
@@ -388,4 +399,9 @@ export async function* streamChatResponse(
     responseTimeMs: Date.now() - startTime,
   });
   lastInteractionId = interaction.id;
+
+  await db
+    .update(messages)
+    .set({ metadata: { ...(actions.length > 0 ? { actions } : {}), interactionId: interaction.id } })
+    .where(eq(messages.id, msg.id));
 }

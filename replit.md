@@ -99,7 +99,14 @@ client/src/
 ### Combined Batch Analysis
 - POST /api/training/test-combined (SSE) - Combined batch analysis: category + intent + resolution in one API call per 10 tickets, 5x parallel
 
+### Feedback Loop System
+- POST /api/feedback - Submit feedback (resolved/partial/not_resolved) for a chatbot interaction
+- GET /api/feedback/stats - Feedback statistics with per-intent breakdown
+- GET /api/feedback/flagged - Flagged interactions (not_resolved) for review
+- GET /api/feedback/interactions - Recent chatbot interactions
+
 ## Recent Changes
+- 2026-02-14: Feedback loop system - chatbot_interactions table logs all user/bot exchanges with response method, matched intent, timing. Feedback widget on assistant messages (thumbs up/down/neutral). Dashboard Tilbakemelding tab with stats cards, flagged interactions, per-intent breakdown, and recent interaction log. Interactions flagged when marked "not_resolved".
 - 2026-02-14: Combined batch analysis with 5x parallel processing. Category + intent + resolution in ONE API call per 10 tickets using gpt-5-mini with JSON mode. Autosvar detection, dialog pattern classification, resolution quality scoring. Test endpoint resets and re-analyzes tickets. Dashboard button for triggering combined analysis. Estimated <20 hours for 40K tickets.
 - 2026-02-14: Downloaded all 22 Pureservice auto-response templates, mapped to hjelpesenter categories/intents, stored in response_templates table. Integrated into chatbot system prompt as official response guidelines. Autosvar tab on dashboard shows templates grouped by category with expandable body/key points.
 - 2026-02-14: Added service_prices table with admin UI (Priser tab) for configurable pricing. 10 identified prices from Pureservice templates. Prices injected into chatbot system prompt. CRUD API at /api/prices.

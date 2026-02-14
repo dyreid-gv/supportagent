@@ -28,7 +28,12 @@ import {
   X,
   Sparkles,
   KeyRound,
+  ThumbsUp,
+  ThumbsDown,
+  MinusCircle,
+  CheckCircle2,
 } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
 
 interface Message {
   id: number;
@@ -58,8 +63,121 @@ interface UserContext {
   Pets?: { Name: string; Species: string; Breed?: string; AnimalId?: string; ChipNumber?: string }[];
 }
 
+function FeedbackWidget({ interactionId, existingFeedback }: { interactionId: number; existingFeedback?: string | null }) {
+  const [submitted, setSubmitted] = useState<string | null>(existingFeedback || null);
+  const [showComment, setShowComment] = useState(false);
+  const [comment, setComment] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const submitFeedback = async (result: string) => {
+    setSubmitting(true);
+    try {
+      await apiRequest("POST", "/api/feedback", { interactionId, result, comment: comment || undefined });
+      setSubmitted(result);
+      setShowComment(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/feedback/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/feedback/flagged"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/feedback/interactions"] });
+    } catch (err) {
+      console.error("Feedback error:", err);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (submitted) {
+    return (
+      <div className="flex items-center gap-1.5 mt-1.5">
+        <CheckCircle2 className="h-3 w-3 text-muted-foreground" />
+        <span className="text-xs text-muted-foreground">
+          {submitted === "resolved" ? "Hjelpsomt" : submitted === "partial" ? "Delvis hjelpsomt" : "Ikke hjelpsomt"}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-1.5 space-y-1.5">
+      <div className="flex items-center gap-1">
+        <span className="text-xs text-muted-foreground mr-1">Var dette nyttig?</span>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="toggle-elevate"
+          onClick={() => submitFeedback("resolved")}
+          disabled={submitting}
+          data-testid={`button-feedback-resolved-${interactionId}`}
+        >
+          <ThumbsUp className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="toggle-elevate"
+          onClick={() => setShowComment(true)}
+          disabled={submitting}
+          data-testid={`button-feedback-partial-${interactionId}`}
+        >
+          <MinusCircle className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="toggle-elevate"
+          onClick={() => setShowComment(true)}
+          disabled={submitting}
+          data-testid={`button-feedback-not-resolved-${interactionId}`}
+        >
+          <ThumbsDown className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+      {showComment && (
+        <div className="space-y-1.5">
+          <Textarea
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            placeholder="Fortell oss mer (valgfritt)..."
+            className="text-xs resize-none"
+            rows={2}
+            data-testid={`input-feedback-comment-${interactionId}`}
+          />
+          <div className="flex gap-1.5">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => submitFeedback("partial")}
+              disabled={submitting}
+              data-testid={`button-submit-partial-${interactionId}`}
+            >
+              Delvis hjelpsomt
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => submitFeedback("not_resolved")}
+              disabled={submitting}
+              data-testid={`button-submit-not-resolved-${interactionId}`}
+            >
+              Ikke hjelpsomt
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setShowComment(false)}
+              disabled={submitting}
+            >
+              Avbryt
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MessageBubble({ message }: { message: Message }) {
   const isUser = message.role === "user";
+  const interactionId = message.metadata?.interactionId as number | undefined;
 
   return (
     <div
@@ -85,6 +203,9 @@ function MessageBubble({ message }: { message: Message }) {
             minute: "2-digit",
           })}
         </p>
+        {!isUser && interactionId && (
+          <FeedbackWidget interactionId={interactionId} />
+        )}
       </div>
     </div>
   );
