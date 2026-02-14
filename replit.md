@@ -105,7 +105,14 @@ client/src/
 - GET /api/feedback/flagged - Flagged interactions (not_resolved) for review
 - GET /api/feedback/interactions - Recent chatbot interactions
 
+### Autoreply Detection (Workflow 2B)
+- POST /api/training/generate-keywords (SSE) - Generate keywords for all response templates using OpenAI
+- POST /api/training/detect-autoreply (SSE) - Detect autoreply patterns in scrubbed ticket dialogs
+- GET /api/training/autoreply-stats - Autoreply detection statistics
+
 ## Recent Changes
+- 2026-02-14: Autoreply detection (Workflow 2B) - keywords column added to response_templates, autoreply tracking columns (has_autoreply, autoreply_template_id, autoreply_confidence, human_response_starts_at) added to scrubbed_tickets. Two-step workflow: 1) Generate keywords for 22 templates via OpenAI gpt-4o, 2) Match ticket dialogs to templates using Levenshtein similarity + keyword overlap + subject matching. Dashboard Autosvar-gjenkjenning tab with stats cards, confidence bar, template distribution. Threshold: confidence > 0.6 for autoreply detection.
+- 2026-02-14: Help Center Matching (Workflow 3C) - ticket_help_center_matches table with alignment quality tracking. Dashboard Artikkel-match tab with stats, distribution, top articles, common missing points.
 - 2026-02-14: Feedback loop system - chatbot_interactions table logs all user/bot exchanges with response method, matched intent, timing. Feedback widget on assistant messages (thumbs up/down/neutral). Dashboard Tilbakemelding tab with stats cards, flagged interactions, per-intent breakdown, and recent interaction log. Interactions flagged when marked "not_resolved".
 - 2026-02-14: Combined batch analysis with 5x parallel processing. Category + intent + resolution in ONE API call per 10 tickets using gpt-5-mini with JSON mode. Autosvar detection, dialog pattern classification, resolution quality scoring. Test endpoint resets and re-analyzes tickets. Dashboard button for triggering combined analysis. Estimated <20 hours for 40K tickets.
 - 2026-02-14: Downloaded all 22 Pureservice auto-response templates, mapped to hjelpesenter categories/intents, stored in response_templates table. Integrated into chatbot system prompt as official response guidelines. Autosvar tab on dashboard shows templates grouped by category with expandable body/key points.

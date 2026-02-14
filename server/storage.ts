@@ -148,6 +148,19 @@ export interface IStorage {
   }>;
   deleteAllTicketHelpCenterMatches(): Promise<void>;
 
+  updateTemplateKeywords(templateId: number, keywords: string[]): Promise<void>;
+  getScrubbedTicketsForAutoreply(limit: number): Promise<typeof scrubbedTickets.$inferSelect[]>;
+  updateScrubbedTicketAutoreply(ticketId: number, data: { hasAutoreply: boolean; autoreplyTemplateId: number | null; autoreplyConfidence: number; humanResponseStartsAt: number | null }): Promise<void>;
+  getAutoreplyStats(): Promise<{
+    totalAnalyzed: number;
+    withAutoreply: number;
+    withoutAutoreply: number;
+    unanalyzed: number;
+    avgConfidence: number;
+    templateDistribution: { templateId: number; templateName: string; count: number }[];
+    onlyAutoreply: number;
+  }>;
+
   logChatbotInteraction(interaction: InsertChatbotInteraction): Promise<typeof chatbotInteractions.$inferSelect>;
   updateInteractionFeedback(id: number, feedbackResult: string, feedbackComment?: string): Promise<void>;
   getChatbotInteractions(limit?: number): Promise<typeof chatbotInteractions.$inferSelect[]>;
@@ -666,6 +679,68 @@ export class DatabaseStorage implements IStorage {
 
   async deleteAllHelpCenterArticles() {
     await db.delete(helpCenterArticles);
+  }
+
+  async updateTemplateKeywords(templateId: number, keywords: string[]) {
+    await db.update(responseTemplates)
+      .set({ keywords })
+      .where(eq(responseTemplates.templateId, templateId));
+  }
+
+  async getScrubbedTicketsForAutoreply(limit: number) {
+    return db.select().from(scrubbedTickets)
+      .where(isNull(scrubbedTickets.hasAutoreply))
+      .orderBy(scrubbedTickets.id)
+      .limit(limit);
+  }
+
+  async updateScrubbedTicketAutoreply(ticketId: number, data: { hasAutoreply: boolean; autoreplyTemplateId: number | null; autoreplyConfidence: number; humanResponseStartsAt: number | null }) {
+    await db.update(scrubbedTickets)
+      .set({
+        hasAutoreply: data.hasAutoreply,
+        autoreplyTemplateId: data.autoreplyTemplateId,
+        autoreplyConfidence: data.autoreplyConfidence,
+        humanResponseStartsAt: data.humanResponseStartsAt,
+      })
+      .where(eq(scrubbedTickets.ticketId, ticketId));
+  }
+
+  async getAutoreplyStats() {
+    const totalResult = await db.select({ count: count() }).from(scrubbedTickets).where(sql`has_autoreply IS NOT NULL`);
+    const totalAnalyzed = totalResult[0].count;
+
+    const withResult = await db.select({ count: count() }).from(scrubbedTickets).where(eq(scrubbedTickets.hasAutoreply, true));
+    const withAutoreply = withResult[0].count;
+
+    const withoutResult = await db.select({ count: count() }).from(scrubbedTickets).where(eq(scrubbedTickets.hasAutoreply, false));
+    const withoutAutoreply = withoutResult[0].count;
+
+    const unanalyzedResult = await db.select({ count: count() }).from(scrubbedTickets).where(isNull(scrubbedTickets.hasAutoreply));
+    const unanalyzed = unanalyzedResult[0].count;
+
+    const avgResult = await db.execute(sql`SELECT COALESCE(AVG(autoreply_confidence), 0) as avg FROM scrubbed_tickets WHERE has_autoreply = true`);
+    const avgConfidence = Number((avgResult as any).rows?.[0]?.avg || (avgResult as any)[0]?.avg || 0);
+
+    const distResult = await db.execute(sql`
+      SELECT st.autoreply_template_id as template_id, rt.name as template_name, COUNT(*)::int as count
+      FROM scrubbed_tickets st
+      LEFT JOIN response_templates rt ON st.autoreply_template_id = rt.template_id
+      WHERE st.has_autoreply = true AND st.autoreply_template_id IS NOT NULL
+      GROUP BY st.autoreply_template_id, rt.name
+      ORDER BY count DESC
+    `);
+    const rows = (distResult as any).rows || distResult;
+    const templateDistribution = (Array.isArray(rows) ? rows : []).map((r: any) => ({
+      templateId: r.template_id,
+      templateName: r.template_name || `Template ${r.template_id}`,
+      count: Number(r.count),
+    }));
+
+    const onlyAutoResult = await db.select({ count: count() }).from(scrubbedTickets)
+      .where(and(eq(scrubbedTickets.hasAutoreply, true), isNull(scrubbedTickets.humanResponseStartsAt)));
+    const onlyAutoreply = onlyAutoResult[0].count;
+
+    return { totalAnalyzed, withAutoreply, withoutAutoreply, unanalyzed, avgConfidence, templateDistribution, onlyAutoreply };
   }
 
   async logChatbotInteraction(interaction: InsertChatbotInteraction) {

@@ -220,6 +220,7 @@ function useSSEWorkflow(endpoint: string) {
       queryClient.invalidateQueries({ queryKey: ["/api/training/uncertainty-cases"] });
       queryClient.invalidateQueries({ queryKey: ["/api/training/help-center-match-stats"] });
       queryClient.invalidateQueries({ queryKey: ["/api/training/help-center-matches"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/training/autoreply-stats"] });
     }
   }, [endpoint]);
 
@@ -538,6 +539,18 @@ export default function Dashboard() {
     queryKey: ["/api/feedback/interactions"],
   });
 
+  const { data: autoreplyStats } = useQuery<{
+    totalAnalyzed: number;
+    withAutoreply: number;
+    withoutAutoreply: number;
+    unanalyzed: number;
+    avgConfidence: number;
+    templateDistribution: { templateId: number; templateName: string; count: number }[];
+    onlyAutoreply: number;
+  }>({
+    queryKey: ["/api/training/autoreply-stats"],
+  });
+
   const { data: helpCenterMatchStats } = useQuery<{
     totalMatches: number;
     avgConfidence: number;
@@ -665,6 +678,9 @@ export default function Dashboard() {
           </TabsTrigger>
           <TabsTrigger value="article-match" data-testid="tab-article-match">
             Artikkel-match ({helpCenterMatchStats?.totalMatches || 0})
+          </TabsTrigger>
+          <TabsTrigger value="autoreply-detect" data-testid="tab-autoreply-detect">
+            Autosvar-gjenkjenning
           </TabsTrigger>
         </TabsList>
 
@@ -1470,6 +1486,10 @@ export default function Dashboard() {
             matches={helpCenterMatches}
           />
         </TabsContent>
+
+        <TabsContent value="autoreply-detect" className="mt-4">
+          <AutoReplyDetectionTab stats={autoreplyStats} />
+        </TabsContent>
       </Tabs>
     </div>
   );
@@ -1729,6 +1749,159 @@ function ArticleMatchTab({ stats, matches }: {
                     )}
                   </div>
                 ))}
+              </div>
+            </ScrollArea>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function AutoReplyDetectionTab({ stats }: {
+  stats: {
+    totalAnalyzed: number;
+    withAutoreply: number;
+    withoutAutoreply: number;
+    unanalyzed: number;
+    avgConfidence: number;
+    templateDistribution: { templateId: number; templateName: string; count: number }[];
+    onlyAutoreply: number;
+  } | undefined;
+}) {
+  const keywordWorkflow = useSSEWorkflow("/api/training/generate-keywords");
+  const detectWorkflow = useSSEWorkflow("/api/training/detect-autoreply");
+
+  const autoreplyRate = stats && stats.totalAnalyzed > 0
+    ? Math.round((stats.withAutoreply / stats.totalAnalyzed) * 100)
+    : 0;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3 flex-wrap">
+        <Button
+          data-testid="button-generate-keywords"
+          onClick={() => keywordWorkflow.run()}
+          disabled={keywordWorkflow.isRunning || detectWorkflow.isRunning}
+          size="sm"
+        >
+          {keywordWorkflow.isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+          {keywordWorkflow.isRunning ? "Genererer keywords..." : "1. Generer keywords"}
+        </Button>
+        <Button
+          data-testid="button-detect-autoreply"
+          onClick={() => {
+            detectWorkflow.run();
+            setTimeout(() => {
+              queryClient.invalidateQueries({ queryKey: ["/api/training/autoreply-stats"] });
+            }, 2000);
+          }}
+          disabled={keywordWorkflow.isRunning || detectWorkflow.isRunning}
+          size="sm"
+        >
+          {detectWorkflow.isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+          {detectWorkflow.isRunning ? "Gjenkjenner..." : "2. Kjør gjenkjenning"}
+        </Button>
+        {(keywordWorkflow.isRunning || detectWorkflow.isRunning) && (
+          <Progress value={keywordWorkflow.isRunning ? keywordWorkflow.progress : detectWorkflow.progress} className="flex-1 min-w-[200px]" />
+        )}
+      </div>
+
+      {(keywordWorkflow.error || detectWorkflow.error) && (
+        <div className="flex items-center gap-1 text-xs text-destructive">
+          <AlertCircle className="h-3 w-3 shrink-0" />
+          <span>{keywordWorkflow.error || detectWorkflow.error}</span>
+        </div>
+      )}
+
+      {(keywordWorkflow.logs.length > 0 || detectWorkflow.logs.length > 0) && (
+        <ScrollArea className="h-[120px] border rounded-md p-2">
+          {[...keywordWorkflow.logs, ...detectWorkflow.logs].map((l, i) => (
+            <p key={i} className="text-xs text-muted-foreground">{l}</p>
+          ))}
+        </ScrollArea>
+      )}
+
+      <div className="grid gap-3 md:grid-cols-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Analyserte tickets</CardTitle>
+            <FileText className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold" data-testid="text-autoreply-analyzed">{stats?.totalAnalyzed || 0}</div>
+            <p className="text-xs text-muted-foreground">{stats?.unanalyzed || 0} gjenstår</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Med autosvar</CardTitle>
+            <CheckCircle className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-600" data-testid="text-autoreply-with">{stats?.withAutoreply || 0}</div>
+            <p className="text-xs text-muted-foreground">{autoreplyRate}% av analyserte</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Uten autosvar</CardTitle>
+            <MessageSquare className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold" data-testid="text-autoreply-without">{stats?.withoutAutoreply || 0}</div>
+            <p className="text-xs text-muted-foreground">{stats && stats.totalAnalyzed > 0 ? 100 - autoreplyRate : 0}% av analyserte</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Kun autosvar</CardTitle>
+            <AlertTriangle className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-orange-600" data-testid="text-autoreply-only">{stats?.onlyAutoreply || 0}</div>
+            <p className="text-xs text-muted-foreground">ingen menneskelig oppfølging</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {stats?.avgConfidence !== undefined && stats.totalAnalyzed > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Snitt confidence (autosvar-match)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-3">
+              <Progress value={stats.avgConfidence * 100} className="flex-1" />
+              <span className="text-sm font-semibold">{(stats.avgConfidence * 100).toFixed(1)}%</span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {stats?.templateDistribution && stats.templateDistribution.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Mest brukte autosvar-templates</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ScrollArea className="h-[300px]">
+              <div className="space-y-2">
+                {stats.templateDistribution.map((item, i) => {
+                  const pct = stats.withAutoreply > 0 ? Math.round((item.count / stats.withAutoreply) * 100) : 0;
+                  return (
+                    <div key={item.templateId} className="flex items-center gap-3 p-2 border rounded-md" data-testid={`autoreply-template-${item.templateId}`}>
+                      <Badge variant="outline">{i + 1}</Badge>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm truncate font-medium">{item.templateName}</p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <Progress value={pct} className="flex-1 h-2" />
+                          <span className="text-xs text-muted-foreground whitespace-nowrap">{item.count} ({pct}%)</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </ScrollArea>
           </CardContent>

@@ -1135,6 +1135,213 @@ Hvis articleId er null, sett confidence til 0 og alignment til null.`;
   return { matched: totalMatched, noMatch: totalNoMatch, errors: totalErrors };
 }
 
+// ─── WORKFLOW 2B: AUTOREPLY DETECTION ─────────────────────────────────────────
+
+function levenshteinDistance(str1: string, str2: string): number {
+  const len1 = str1.length;
+  const len2 = str2.length;
+  if (len1 === 0) return len2;
+  if (len2 === 0) return len1;
+  const matrix: number[][] = [];
+  for (let i = 0; i <= len2; i++) matrix[i] = [i];
+  for (let j = 0; j <= len1; j++) matrix[0][j] = j;
+  for (let i = 1; i <= len2; i++) {
+    for (let j = 1; j <= len1; j++) {
+      if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(matrix[i - 1][j - 1] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j] + 1);
+      }
+    }
+  }
+  return matrix[len2][len1];
+}
+
+function stringSimilarity(str1: string, str2: string): number {
+  const longer = str1.length > str2.length ? str1 : str2;
+  const shorter = str1.length > str2.length ? str2 : str1;
+  if (longer.length === 0) return 1.0;
+  const editDist = levenshteinDistance(longer, shorter);
+  return (longer.length - editDist) / longer.length;
+}
+
+function tokenize(text: string): string[] {
+  return text.toLowerCase().replace(/[^\wæøå\s]/g, " ").split(/\s+/).filter(w => w.length > 2);
+}
+
+interface AutoReplyMatch {
+  hasAutoReply: boolean;
+  templateId: number | null;
+  confidence: number;
+  position: number;
+  humanResponseStartsAt: number | null;
+}
+
+function detectAutoReplyInDialog(ticket: any, templates: any[]): AutoReplyMatch {
+  const messages = ticket.messages || [];
+  const firstAgentIndex = messages.findIndex((m: any) => m.from === "agent");
+  if (firstAgentIndex === -1) {
+    return { hasAutoReply: false, templateId: null, confidence: 0, position: -1, humanResponseStartsAt: null };
+  }
+  const firstAgentMsg = messages[firstAgentIndex];
+  const msgBody = (firstAgentMsg.body || firstAgentMsg.content || "").toString();
+  if (!msgBody || msgBody.length < 10) {
+    return { hasAutoReply: false, templateId: null, confidence: 0, position: firstAgentIndex, humanResponseStartsAt: null };
+  }
+
+  let bestMatch = { templateId: null as number | null, confidence: 0 };
+  for (const template of templates) {
+    const templateBody = template.bodyText || template.body_text || "";
+    const templateKeywords: string[] = template.keywords || [];
+    const templateSubject = template.subject || "";
+
+    const similarity = stringSimilarity(
+      msgBody.substring(0, 200).toLowerCase(),
+      templateBody.substring(0, 200).toLowerCase()
+    );
+
+    let keywordScore = 0;
+    if (templateKeywords.length > 0) {
+      const msgWords = tokenize(msgBody.toLowerCase());
+      const keywordMatches = templateKeywords.filter((kw: string) =>
+        msgWords.some(word => word.includes(kw.toLowerCase()) || kw.toLowerCase().includes(word))
+      ).length;
+      keywordScore = keywordMatches / templateKeywords.length;
+    }
+
+    const subjectMatch = ticket.subject && templateSubject &&
+      ticket.subject.toLowerCase().includes(templateSubject.toLowerCase()) ? 0.3 : 0;
+
+    const score = (similarity * 0.4) + (keywordScore * 0.4) + subjectMatch;
+    if (score > bestMatch.confidence) {
+      bestMatch = { templateId: template.templateId || template.template_id, confidence: score };
+    }
+  }
+
+  const secondAgentIndex = messages.findIndex((m: any, i: number) => i > firstAgentIndex && m.from === "agent");
+
+  return {
+    hasAutoReply: bestMatch.confidence > 0.6,
+    templateId: bestMatch.confidence > 0.6 ? bestMatch.templateId : null,
+    confidence: bestMatch.confidence,
+    position: firstAgentIndex,
+    humanResponseStartsAt: secondAgentIndex !== -1 ? secondAgentIndex : null,
+  };
+}
+
+export async function generateTemplateKeywords(
+  onProgress?: (msg: string, pct: number) => void
+): Promise<{ updated: number }> {
+  onProgress?.("Henter templates...", 0);
+  const templates = await storage.getResponseTemplates();
+  onProgress?.(`Genererer keywords for ${templates.length} templates...`, 10);
+
+  const prompt = `
+Ekstraher 5-10 trigger keywords for hver av disse e-post-templates.
+Fokuser på unike termer som identifiserer hvert emne.
+
+TEMPLATES:
+${templates.map((t, i) => `
+Template ${i + 1} (ID: ${t.templateId}, ${t.name}):
+Subject: ${t.subject || "N/A"}
+Innhold: ${(t.bodyText || "").substring(0, 300)}
+`).join("\n")}
+
+For hver template, identifiser keywords som:
+- Er unike for det temaet
+- Ville forekomme i kundens spørsmål eller agents svar
+- Ikke er generiske ("hei", "takk", etc.)
+
+Return ONLY a JSON array, no other text:
+[
+  { "templateId": <original template_id>, "keywords": ["keyword1", "keyword2", ...] },
+  ...
+]
+  `;
+
+  const response = await openai.chat.completions.create({
+    model: "gpt-4o",
+    messages: [{ role: "user", content: prompt }],
+    response_format: { type: "json_object" },
+    temperature: 0.2,
+  });
+
+  const content = response.choices[0]?.message?.content || "{}";
+  let keywordData: { templateId: number; keywords: string[] }[] = [];
+  try {
+    const parsed = JSON.parse(content);
+    keywordData = Array.isArray(parsed) ? parsed : parsed.templates || parsed.data || parsed.result || [];
+  } catch {
+    onProgress?.("Feil ved parsing av keywords JSON", 50);
+    return { updated: 0 };
+  }
+
+  let updated = 0;
+  for (const item of keywordData) {
+    if (item.templateId && item.keywords && item.keywords.length > 0) {
+      await storage.updateTemplateKeywords(item.templateId, item.keywords);
+      updated++;
+      onProgress?.(`Oppdatert template ${item.templateId} med ${item.keywords.length} keywords`, 10 + (updated / templates.length) * 80);
+    }
+  }
+
+  onProgress?.(`Ferdig! ${updated} templates oppdatert med keywords`, 100);
+  return { updated };
+}
+
+export async function runAutoReplyDetection(
+  onProgress?: (msg: string, pct: number) => void,
+  ticketLimit: number = 1000
+): Promise<{ total: number; withAutoReply: number; withoutAutoReply: number }> {
+  onProgress?.("Starter autosvar-gjenkjenning...", 0);
+
+  const templates = await storage.getResponseTemplates();
+  const templatesWithKeywords = templates.filter(t => t.keywords && t.keywords.length > 0);
+  onProgress?.(`Lastet ${templates.length} templates (${templatesWithKeywords.length} med keywords)`, 5);
+
+  if (templatesWithKeywords.length === 0) {
+    onProgress?.("Ingen templates har keywords - kjor keyword-generering forst!", 100);
+    return { total: 0, withAutoReply: 0, withoutAutoReply: 0 };
+  }
+
+  const tickets = await storage.getScrubbedTicketsForAutoreply(ticketLimit);
+  onProgress?.(`Fant ${tickets.length} uanalyserte tickets`, 10);
+
+  if (tickets.length === 0) {
+    onProgress?.("Ingen uanalyserte tickets funnet", 100);
+    return { total: 0, withAutoReply: 0, withoutAutoReply: 0 };
+  }
+
+  let stats = { total: 0, withAutoReply: 0, withoutAutoReply: 0 };
+
+  for (let i = 0; i < tickets.length; i++) {
+    const ticket = tickets[i];
+    try {
+      const match = detectAutoReplyInDialog(ticket, templatesWithKeywords);
+      await storage.updateScrubbedTicketAutoreply(ticket.ticketId, {
+        hasAutoreply: match.hasAutoReply,
+        autoreplyTemplateId: match.templateId,
+        autoreplyConfidence: match.confidence,
+        humanResponseStartsAt: match.humanResponseStartsAt,
+      });
+
+      stats.total++;
+      if (match.hasAutoReply) stats.withAutoReply++;
+      else stats.withoutAutoReply++;
+
+      if ((i + 1) % 50 === 0 || i === tickets.length - 1) {
+        const pct = 10 + ((i + 1) / tickets.length) * 85;
+        onProgress?.(`Prosessert ${i + 1}/${tickets.length} - ${stats.withAutoReply} med autosvar`, pct);
+      }
+    } catch (err: any) {
+      log(`Error processing ticket ${ticket.ticketId}: ${err.message}`, "training");
+    }
+  }
+
+  onProgress?.(`Ferdig! ${stats.total} analysert: ${stats.withAutoReply} med autosvar (${stats.total > 0 ? Math.round(stats.withAutoReply / stats.total * 100) : 0}%), ${stats.withoutAutoReply} uten`, 100);
+  return stats;
+}
+
 // ─── COMBINED BATCH ANALYSIS (Category + Intent + Resolution in ONE call) ─────
 export async function runCombinedBatchAnalysis(
   onProgress?: (msg: string, pct: number) => void,

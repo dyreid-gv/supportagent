@@ -47,6 +47,10 @@ export const scrubbedTickets = pgTable("scrubbed_tickets", {
   hjelpesenterCategory: text("hjelpesenter_category"),
   hjelpesenterSubcategory: text("hjelpesenter_subcategory"),
   analysisStatus: text("analysis_status").default("pending"),
+  hasAutoreply: boolean("has_autoreply"),
+  autoreplyTemplateId: integer("autoreply_template_id"),
+  autoreplyConfidence: real("autoreply_confidence"),
+  humanResponseStartsAt: integer("human_response_starts_at"),
   scrubbedAt: timestamp("scrubbed_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
@@ -206,6 +210,7 @@ export const responseTemplates = pgTable("response_templates", {
   ticketType: text("ticket_type"),
   intent: text("intent"),
   keyPoints: jsonb("key_points"),
+  keywords: text("keywords").array(),
   isActive: boolean("is_active").default(true),
   fetchedAt: timestamp("fetched_at").default(sql`CURRENT_TIMESTAMP`),
 });

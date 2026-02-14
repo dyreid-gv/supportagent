@@ -1,0 +1,348 @@
+OPPGAVE A: Autosvar-gjenkjenning i dialoger
+
+KONTEKST:
+Vi har 22 autosvar-templates i response_templates tabell.
+Mange tickets starter med et autosvar (kvittering), deretter kommer menneskelig oppfølging.
+
+FORMÅL:
+- Identifisere hvilke tickets startet med autosvar
+- Finne hvilken template som ble brukt
+- Identifisere hvor menneskelig support begynner i dialogen
+
+IMPLEMENTERING:
+
+══════════════════════════════════════════════════════════════
+DEL 1: GENERER KEYWORDS FOR TEMPLATES
+══════════════════════════════════════════════════════════════
+
+1. LEGG TIL KOLONNE:
+```sql
+ALTER TABLE response_templates ADD COLUMN IF NOT EXISTS
+  keywords TEXT[];
+```
+
+2. GENERER KEYWORDS (batch alle 22 templates):
+```typescript
+async function generateTemplateKeywords() {
+  const templates = await storage.getResponseTemplates();
+  
+  console.log(`Generating keywords for ${templates.length} templates...`);
+  
+  // Batch alle sammen i én API call
+  const prompt = `
+Ekstraher 5-10 trigger keywords for hver av disse e-post-templates.
+Fokuser på unike termer som identifiserer hvert emne.
+
+TEMPLATES:
+${templates.map((t, i) => `
+Template ${i + 1} (${t.name}):
+Subject: ${t.subject}
+Innhold: ${t.bodyText.substring(0, 300)}
+`).join('\n')}
+
+For hver template, identifiser keywords som:
+- Er unike for det temaet
+- Ville forekomme i kundens spørsmål eller agents svar
+- Ikke er generiske ("hei", "takk", etc.)
+
+Return JSON array:
+[
+  {
+    "templateId": 1,
+    "keywords": ["eierskifte", "390", "overføring", "personnummer"]
+  },
+  {
+    "templateId": 2,
+    "keywords": [...]
+  },
+  ...
+]
+  `;
+  
+  const result = await callOpenAI(prompt, { model: 'gpt-4o' });
+  const keywordData = JSON.parse(result);
+  
+  // Lagre keywords
+  for (const item of keywordData) {
+    await db.query(`
+      UPDATE response_templates SET
+        keywords = $1,
+        updated_at = NOW()
+      WHERE template_id = $2
+    `, [item.keywords, item.templateId]);
+    
+    console.log(`✓ Updated template ${item.templateId} with ${item.keywords.length} keywords`);
+  }
+  
+  console.log('✅ Keywords generated for all templates!');
+}
+```
+
+══════════════════════════════════════════════════════════════
+DEL 2: MATCHING-FUNKSJON
+══════════════════════════════════════════════════════════════
+
+3. NY TABELL FOR RESULTATER (hvis ikke allerede finnes):
+```sql
+-- Legg til kolonner i scrubbed_tickets:
+ALTER TABLE scrubbed_tickets ADD COLUMN IF NOT EXISTS
+  has_autoreply BOOLEAN DEFAULT false,
+  autoreply_template_id INTEGER,
+  autoreply_confidence FLOAT,
+  human_response_starts_at INTEGER;  -- Index i messages array
+
+CREATE INDEX idx_tickets_autoreply ON scrubbed_tickets(has_autoreply);
+CREATE INDEX idx_tickets_template ON scrubbed_tickets(autoreply_template_id);
+```
+
+4. MATCHING-FUNKSJON:
+```typescript
+interface AutoReplyMatch {
+  hasAutoReply: boolean;
+  templateId: number | null;
+  confidence: number;
+  position: number;  // Index i messages array
+  humanResponseStartsAt: number | null;
+}
+
+async function detectAutoReplyInDialog(
+  ticket: any, 
+  templates: any[]
+): Promise<AutoReplyMatch> {
+  
+  // 1. Finn første agent-melding
+  const messages = ticket.messages || [];
+  const firstAgentIndex = messages.findIndex(m => m.from === 'agent');
+  
+  if (firstAgentIndex === -1) {
+    return {
+      hasAutoReply: false,
+      templateId: null,
+      confidence: 0,
+      position: -1,
+      humanResponseStartsAt: null
+    };
+  }
+  
+  const firstAgentMsg = messages[firstAgentIndex];
+  const msgBody = firstAgentMsg.body || '';
+  
+  // 2. Match mot alle templates
+  let bestMatch = { templateId: null, confidence: 0 };
+  
+  for (const template of templates) {
+    if (!template.keywords || template.keywords.length === 0) continue;
+    
+    // a) String similarity (første 200 tegn)
+    const similarity = stringSimilarity(
+      msgBody.substring(0, 200).toLowerCase(),
+      template.bodyText.substring(0, 200).toLowerCase()
+    );
+    
+    // b) Keyword overlap
+    const msgWords = tokenize(msgBody.toLowerCase());
+    const keywordMatches = template.keywords.filter(kw => 
+      msgWords.some(word => word.includes(kw.toLowerCase()) || kw.toLowerCase().includes(word))
+    ).length;
+    const keywordScore = template.keywords.length > 0 
+      ? keywordMatches / template.keywords.length 
+      : 0;
+    
+    // c) Subject match
+    const subjectMatch = ticket.subject && template.subject &&
+      ticket.subject.toLowerCase().includes(template.subject.toLowerCase())
+      ? 0.3 : 0;
+    
+    // Kombinert score:
+    const score = (similarity * 0.4) + (keywordScore * 0.4) + subjectMatch;
+    
+    if (score > bestMatch.confidence) {
+      bestMatch = { 
+        templateId: template.templateId, 
+        confidence: score 
+      };
+    }
+  }
+  
+  // 3. Finn hvor menneskelig respons starter
+  // (andre agent-melding, hvis den finnes)
+  const secondAgentIndex = messages.findIndex(
+    (m, i) => i > firstAgentIndex && m.from === 'agent'
+  );
+  
+  return {
+    hasAutoReply: bestMatch.confidence > 0.6,
+    templateId: bestMatch.confidence > 0.6 ? bestMatch.templateId : null,
+    confidence: bestMatch.confidence,
+    position: firstAgentIndex,
+    humanResponseStartsAt: secondAgentIndex !== -1 ? secondAgentIndex : null
+  };
+}
+
+// Helper: String similarity (Levenshtein ratio)
+function stringSimilarity(str1: string, str2: string): number {
+  const longer = str1.length > str2.length ? str1 : str2;
+  const shorter = str1.length > str2.length ? str2 : str1;
+  
+  if (longer.length === 0) return 1.0;
+  
+  const editDistance = levenshteinDistance(longer, shorter);
+  return (longer.length - editDistance) / longer.length;
+}
+
+function levenshteinDistance(str1: string, str2: string): number {
+  const matrix = [];
+  
+  for (let i = 0; i <= str2.length; i++) {
+    matrix[i] = [i];
+  }
+  
+  for (let j = 0; j <= str1.length; j++) {
+    matrix[0][j] = j;
+  }
+  
+  for (let i = 1; i <= str2.length; i++) {
+    for (let j = 1; j <= str1.length; j++) {
+      if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j] + 1
+        );
+      }
+    }
+  }
+  
+  return matrix[str2.length][str1.length];
+}
+
+// Helper: Tokenize
+function tokenize(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^\wæøå\s]/g, ' ')
+    .split(/\s+/)
+    .filter(word => word.length > 2);  // Skip korte ord
+}
+```
+
+══════════════════════════════════════════════════════════════
+DEL 3: WORKFLOW
+══════════════════════════════════════════════════════════════
+
+5. NY WORKFLOW 2B: Autosvar-gjenkjenning
+```typescript
+async function runAutoReplyDetection() {
+  console.log('🔍 Starting autoreply detection...');
+  
+  // Hent templates én gang
+  const templates = await storage.getResponseTemplates();
+  console.log(`Loaded ${templates.length} templates with keywords`);
+  
+  // Hent unprocessed tickets
+  const tickets = await db.query(`
+    SELECT * FROM scrubbed_tickets
+    WHERE has_autoreply IS NULL
+    ORDER BY id
+    LIMIT 1000
+  `);
+  
+  console.log(`Processing ${tickets.rows.length} tickets`);
+  
+  let stats = {
+    total: 0,
+    withAutoReply: 0,
+    withoutAutoReply: 0,
+    templateDistribution: {} as Record<number, number>
+  };
+  
+  for (const ticket of tickets.rows) {
+    const match = await detectAutoReplyInDialog(ticket, templates);
+    
+    // Lagre resultat
+    await db.query(`
+      UPDATE scrubbed_tickets SET
+        has_autoreply = $1,
+        autoreply_template_id = $2,
+        autoreply_confidence = $3,
+        human_response_starts_at = $4
+      WHERE id = $5
+    `, [
+      match.hasAutoReply,
+      match.templateId,
+      match.confidence,
+      match.humanResponseStartsAt,
+      ticket.id
+    ]);
+    
+    stats.total++;
+    if (match.hasAutoReply) {
+      stats.withAutoReply++;
+      if (match.templateId) {
+        stats.templateDistribution[match.templateId] = 
+          (stats.templateDistribution[match.templateId] || 0) + 1;
+      }
+    } else {
+      stats.withoutAutoReply++;
+    }
+    
+    if (stats.total % 100 === 0) {
+      console.log(`Processed ${stats.total}/${tickets.rows.length}...`);
+    }
+  }
+  
+  console.log('✅ Autoreply detection complete!');
+  console.log(`
+Stats:
+- Total tickets: ${stats.total}
+- With autoreply: ${stats.withAutoReply} (${(stats.withAutoReply/stats.total*100).toFixed(1)}%)
+- Without autoreply: ${stats.withoutAutoReply} (${(stats.withoutAutoReply/stats.total*100).toFixed(1)}%)
+
+Template distribution:
+${Object.entries(stats.templateDistribution)
+  .sort((a, b) => b[1] - a[1])
+  .slice(0, 10)
+  .map(([tid, count]) => `  Template ${tid}: ${count} tickets`)
+  .join('\n')}
+  `);
+  
+  return stats;
+}
+```
+
+══════════════════════════════════════════════════════════════
+DEL 4: DASHBOARD
+══════════════════════════════════════════════════════════════
+
+6. NY TAB: "Autosvar" i dashboard
+
+Vis:
+- Total tickets analysert
+- % med autosvar vs uten
+- Gjennomsnittlig confidence
+- Topp 10 mest brukte templates (med navn)
+- Fordeling: hvor mange har kun autosvar (humanResponseStartsAt = null)
+- Graf: Autosvar-rate per kategori
+
+══════════════════════════════════════════════════════════════
+KJØRING
+══════════════════════════════════════════════════════════════
+
+TRINN 1: Generer keywords
+→ Kjør generateTemplateKeywords()
+→ Verifiser at alle 22 templates har keywords
+
+TRINN 2: Test på 100 tickets
+→ Kjør runAutoReplyDetection() med LIMIT 100
+→ Rapporter stats
+
+TRINN 3: Hvis OK - kjør på alle
+→ Fjern LIMIT
+→ Kjør på alle tickets
+
+FORVENTET RESULTAT:
+- 60-70% av tickets har autosvar
+- Topp 5 templates dekker ~80% av autosvar
+- Gjennomsnittlig confidence > 0.75

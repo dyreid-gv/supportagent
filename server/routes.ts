@@ -20,6 +20,8 @@ import {
   submitManualReview,
   runCombinedBatchAnalysis,
   runHelpCenterMatching,
+  generateTemplateKeywords,
+  runAutoReplyDetection,
   type BatchMetrics,
 } from "./training-agent";
 import {
@@ -1402,6 +1404,49 @@ export async function registerRoutes(
     try {
       const matches = await storage.getTicketHelpCenterMatches(200);
       res.json(matches);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/training/generate-keywords", async (_req, res) => {
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    });
+    try {
+      const result = await generateTemplateKeywords((msg, pct) => {
+        res.write(`data: ${JSON.stringify({ message: msg, progress: pct })}\n\n`);
+      });
+      res.write(`data: ${JSON.stringify({ message: `Ferdig! ${result.updated} templates oppdatert`, progress: 100, done: true })}\n\n`);
+    } catch (error: any) {
+      res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+    }
+    res.end();
+  });
+
+  app.post("/api/training/detect-autoreply", async (_req, res) => {
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    });
+    try {
+      const result = await runAutoReplyDetection((msg, pct) => {
+        res.write(`data: ${JSON.stringify({ message: msg, progress: pct })}\n\n`);
+      });
+      res.write(`data: ${JSON.stringify({ message: `Ferdig! ${result.withAutoReply} av ${result.total} med autosvar`, progress: 100, done: true })}\n\n`);
+    } catch (error: any) {
+      res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+    }
+    res.end();
+  });
+
+  app.get("/api/training/autoreply-stats", async (_req, res) => {
+    try {
+      const stats = await storage.getAutoreplyStats();
+      res.json(stats);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
