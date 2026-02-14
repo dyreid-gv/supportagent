@@ -16,7 +16,9 @@ import {
   trainingRuns,
   servicePrices,
   responseTemplates,
+  helpCenterArticles,
   type InsertRawTicket,
+  type InsertHelpCenterArticle,
   type InsertScrubbedTicket,
   type InsertCategoryMapping,
   type InsertIntentClassification,
@@ -118,6 +120,12 @@ export interface IStorage {
   upsertResponseTemplate(template: InsertResponseTemplate): Promise<typeof responseTemplates.$inferSelect>;
   getResponseTemplateCount(): Promise<number>;
   deleteAllResponseTemplates(): Promise<void>;
+
+  upsertHelpCenterArticle(article: InsertHelpCenterArticle): Promise<void>;
+  getHelpCenterArticles(): Promise<typeof helpCenterArticles.$inferSelect[]>;
+  getHelpCenterArticlesByCategory(category: string): Promise<typeof helpCenterArticles.$inferSelect[]>;
+  getHelpCenterArticleCount(): Promise<number>;
+  deleteAllHelpCenterArticles(): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -592,6 +600,44 @@ export class DatabaseStorage implements IStorage {
 
   async deleteAllResponseTemplates() {
     await db.delete(responseTemplates);
+  }
+
+  async upsertHelpCenterArticle(article: InsertHelpCenterArticle): Promise<void> {
+    await db
+      .insert(helpCenterArticles)
+      .values(article)
+      .onConflictDoUpdate({
+        target: helpCenterArticles.url,
+        set: {
+          articleId: article.articleId,
+          urlSlug: article.urlSlug,
+          title: article.title,
+          bodyHtml: article.bodyHtml,
+          bodyText: article.bodyText,
+          hjelpesenterCategory: article.hjelpesenterCategory,
+          hjelpesenterSubcategory: article.hjelpesenterSubcategory,
+          categoryPath: article.categoryPath,
+          relatedArticleUrls: article.relatedArticleUrls,
+          scrapedAt: new Date(),
+        },
+      });
+  }
+
+  async getHelpCenterArticles() {
+    return db.select().from(helpCenterArticles).orderBy(helpCenterArticles.hjelpesenterCategory);
+  }
+
+  async getHelpCenterArticlesByCategory(category: string) {
+    return db.select().from(helpCenterArticles).where(eq(helpCenterArticles.hjelpesenterCategory, category));
+  }
+
+  async getHelpCenterArticleCount() {
+    const result = await db.select({ count: count() }).from(helpCenterArticles);
+    return result[0].count;
+  }
+
+  async deleteAllHelpCenterArticles() {
+    await db.delete(helpCenterArticles);
   }
 }
 

@@ -6,6 +6,7 @@ import axios from "axios";
 import { db } from "./db";
 import { storage } from "./storage";
 import { streamChatResponse } from "./chatbot";
+import { scrapeHjelpesenter } from "./hjelpesenter-scraper";
 import { getMinSideContext, lookupOwnerByPhone, getAllSandboxPhones, performAction } from "./minside-sandbox";
 import {
   runIngestion,
@@ -378,6 +379,53 @@ export async function registerRoutes(
       }
       await storage.replaceHjelpesenterCategories(cats);
       res.json({ loaded: cats.length });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ─── HJELPESENTER ARTICLES ─────────────────────────────────────
+  app.post("/api/hjelpesenter/scrape", async (req, res) => {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+
+    const send = (data: any) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+
+    try {
+      const result = await scrapeHjelpesenter((msg, pct) => {
+        send({ message: msg, progress: pct });
+      });
+      send({ message: "Ferdig!", progress: 100, result });
+      res.end();
+    } catch (error: any) {
+      send({ error: error.message });
+      res.end();
+    }
+  });
+
+  app.get("/api/hjelpesenter/articles", async (_req, res) => {
+    try {
+      const articles = await storage.getHelpCenterArticles();
+      res.json(articles);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/hjelpesenter/articles/count", async (_req, res) => {
+    try {
+      const count = await storage.getHelpCenterArticleCount();
+      res.json({ count });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/hjelpesenter/articles/category/:category", async (req, res) => {
+    try {
+      const articles = await storage.getHelpCenterArticlesByCategory(req.params.category);
+      res.json(articles);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

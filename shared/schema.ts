@@ -210,6 +210,21 @@ export const responseTemplates = pgTable("response_templates", {
   fetchedAt: timestamp("fetched_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
+export const helpCenterArticles = pgTable("help_center_articles", {
+  id: serial("id").primaryKey(),
+  articleId: integer("article_id").unique(),
+  url: text("url").notNull().unique(),
+  urlSlug: text("url_slug"),
+  title: text("title").notNull(),
+  bodyHtml: text("body_html"),
+  bodyText: text("body_text"),
+  hjelpesenterCategory: text("hjelpesenter_category"),
+  hjelpesenterSubcategory: text("hjelpesenter_subcategory"),
+  categoryPath: text("category_path"),
+  relatedArticleUrls: jsonb("related_article_urls"),
+  scrapedAt: timestamp("scraped_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
 export const trainingRuns = pgTable("training_runs", {
   id: serial("id").primaryKey(),
   workflow: text("workflow").notNull(),
@@ -222,6 +237,7 @@ export const trainingRuns = pgTable("training_runs", {
   errorLog: text("error_log"),
 });
 
+export const insertHelpCenterArticleSchema = createInsertSchema(helpCenterArticles).omit({ id: true });
 export const insertResponseTemplateSchema = createInsertSchema(responseTemplates).omit({ id: true });
 export const insertServicePriceSchema = createInsertSchema(servicePrices).omit({ id: true });
 export const insertRawTicketSchema = createInsertSchema(rawTickets).omit({ id: true });
@@ -257,6 +273,8 @@ export type Conversation = typeof conversations.$inferSelect;
 export type InsertConversation = z.infer<typeof insertConversationSchema>;
 export type Message = typeof messages.$inferSelect;
 export type InsertMessage = z.infer<typeof insertMessageSchema>;
+export type HelpCenterArticle = typeof helpCenterArticles.$inferSelect;
+export type InsertHelpCenterArticle = z.infer<typeof insertHelpCenterArticleSchema>;
 export type ResponseTemplate = typeof responseTemplates.$inferSelect;
 export type InsertResponseTemplate = z.infer<typeof insertResponseTemplateSchema>;
 export type ServicePrice = typeof servicePrices.$inferSelect;
