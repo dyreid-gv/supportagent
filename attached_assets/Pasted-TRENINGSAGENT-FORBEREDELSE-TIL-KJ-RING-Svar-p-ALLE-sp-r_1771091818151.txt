@@ -1,0 +1,275 @@
+TRENINGSAGENT - FORBEREDELSE TIL KJØRING
+Svar på ALLE spørsmålene under. For hvert punkt, skriv JA/NEI og gi detaljer.
+
+════════════════════════════════════════════════════════════════════
+
+DEL 1: AUTOSVAR-TEMPLATES (Grunnlag for forbedring A)
+════════════════════════════════════════════════════════════════════
+
+1.1 TILGJENGELIGHET
+□ Finnes de 22 autosvar-malene fra Pureservice strukturert i prosjektet?
+   JA/NEI: _____
+   Hvis JA → Hvor? (filsti): _____
+   Hvis JA → Format? (JSON/CSV/database): _____
+
+1.2 STRUKTUR
+□ Har hver mal følgende data?
+   - Unik ID: JA/NEI _____
+   - Kategori (hvilken kategori den tilhører): JA/NEI _____
+   - Emne/subject pattern: JA/NEI _____
+   - Full tekst: JA/NEI _____
+   - Trigger keywords: JA/NEI _____
+
+1.3 EKSEMPEL
+Vis et eksempel på hvordan én mal ser ut (kopier strukturen):
+
+1.4 TILGANG FRA KODE
+□ Kan training-agent lese disse malene fra koden?
+   JA/NEI: _____
+   Hvis JA → Vis funksjonen som leser dem:
+
+
+════════════════════════════════════════════════════════════════════
+
+DEL 2: BATCH PROCESSING (Kritisk for ytelse)
+════════════════════════════════════════════════════════════════════
+
+2.1 NÅVÆRENDE PROSESSERING
+□ Hvordan prosesseres tickets nå?
+   - Én om gangen (sekvensiellt): JA/NEI _____
+   - I batches: JA/NEI _____
+   
+2.2 OPENAI API CALLS
+□ Hvor mange OpenAI API calls gjøres per ticket?
+   Antall: _____
+   
+□ Sendes flere tickets i samme API call?
+   JA/NEI: _____
+   Hvis JA → Hvor mange tickets per call?: _____
+
+2.3 ESTIMERT KJØRETID
+□ Hvor lang tid tar det å prosessere 100 tickets nå?
+   Tid: _____ minutter
+   
+□ Hvis du ekstrapolerer til 40,000 tickets, hvor lang tid?
+   Estimat: _____ timer
+
+2.4 BATCH FUNKSJON
+□ Finnes det en funksjon som sender flere tickets til OpenAI samtidig?
+   JA/NEI: _____
+   Hvis JA → Vis funksjonen:
+
+
+════════════════════════════════════════════════════════════════════
+
+DEL 3: AUTOSVAR-GJENKJENNING (Forbedring A)
+════════════════════════════════════════════════════════════════════
+
+3.1 IMPLEMENTERING
+□ Er autosvar-gjenkjenning implementert?
+   JA/NEI: _____
+   
+□ Hvis JA, hvordan fungerer den?
+   Forklar metoden: _____
+
+3.2 DIALOG-ANALYSE
+□ Kan systemet skille mellom:
+   - Første melding i dialog (autosvar): JA/NEI _____
+   - Påfølgende meldinger (ekte support): JA/NEI _____
+   - Kundemeldinger vs agentmeldinger: JA/NEI _____
+
+3.3 MATCHING
+□ Hvordan matches autosvar mot templates?
+   - String matching: JA/NEI _____
+   - Semantic similarity: JA/NEI _____
+   - Keyword matching: JA/NEI _____
+   - Annet: _____
+
+3.4 OUTPUT
+□ Lagres det om en ticket startet med autosvar?
+   JA/NEI: _____
+   Hvis JA → Hvor? (felt i database): _____
+   Hvis JA → Hvilken template-ID?: JA/NEI _____
+
+
+════════════════════════════════════════════════════════════════════
+
+DEL 4: DIALOG-MØNSTER ANALYSE (Forbedring B)
+════════════════════════════════════════════════════════════════════
+
+4.1 MØNSTERGJENKJENNING
+□ Analyseres dialogsekvensen (autosvar → kunde → løsning)?
+   JA/NEI: _____
+
+4.2 KATEGORISERING
+□ Identifiseres disse mønstre?
+   - Kun autosvar, ingen oppfølging: JA/NEI _____
+   - Autosvar → én oppfølging → løsning: JA/NEI _____
+   - Autosvar → flere oppfølginger → løsning: JA/NEI _____
+   - Direkte menneskelig respons (ingen autosvar): JA/NEI _____
+
+4.3 OUTPUT
+□ Lagres mønstertype per ticket?
+   JA/NEI: _____
+   Hvis JA → Hvor?: _____
+
+
+════════════════════════════════════════════════════════════════════
+
+DEL 5: GENERELLE → STANDARD KLASSIFISERING (Forbedring C)
+════════════════════════════════════════════════════════════════════
+
+5.1 GJENKJENNING
+□ Identifiseres "Generell e-post til DyreID" saker?
+   JA/NEI: _____
+   Hvis JA → Hvor mange i datasettet?: _____
+
+5.2 REKLASSIFISERING
+□ Re-analyseres disse for å finne faktisk kategori?
+   JA/NEI: _____
+   
+□ Lagres både original OG reklassifisert kategori?
+   JA/NEI: _____
+
+5.3 STATISTIKK
+□ Kan systemet vise topp-kategorier "Generell" egentlig tilhører?
+   JA/NEI: _____
+   Hvis JA → Vis eksempel på output:
+
+
+════════════════════════════════════════════════════════════════════
+
+DEL 6: RESOLUSJONS-KVALITET (Forbedring D)
+════════════════════════════════════════════════════════════════════
+
+6.1 KVALITETSVURDERING
+□ Vurderes om kunden fikk en reell løsning?
+   JA/NEI: _____
+
+6.2 KRITERIER
+□ Hvilke kriterier brukes for "god løsning"?
+   Liste kriteriene: _____
+
+6.3 KATEGORISERING
+□ Klassifiseres saker i kvalitetsnivåer?
+   - "high" (klar løsning): JA/NEI _____
+   - "medium" (delvis løsning): JA/NEI _____
+   - "low" (vag løsning): JA/NEI _____
+   - "none" (ingen løsning): JA/NEI _____
+
+6.4 OUTPUT
+□ Lagres resolution_quality per ticket?
+   JA/NEI: _____
+   □ Identifiseres hva som mangler (missing_elements)?
+   JA/NEI: _____
+
+
+════════════════════════════════════════════════════════════════════
+
+DEL 7: PLAYBOOK OUTPUT FORMAT
+════════════════════════════════════════════════════════════════════
+
+7.1 NÅVÆRENDE STRUKTUR
+Vis nåværende PlaybookEntry interface/type:
+
+
+7.2 NYE FELT
+□ Inneholder playbook disse feltene for A-D forbedringer?
+   - autosvar_available: JA/NEI _____
+   - autosvar_template_id: JA/NEI _____
+   - typical_dialog_pattern: JA/NEI _____
+   - original_category (for reklassifiserte): JA/NEI _____
+   - resolution_quality: JA/NEI _____
+   - missing_elements: JA/NEI _____
+   - chatbot_response_template: JA/NEI _____
+
+7.3 LAGRING
+□ Hvor lagres ferdig playbook?
+   Filsti/database: _____
+   Format: _____
+
+
+════════════════════════════════════════════════════════════════════
+
+DEL 8: TESTING & VALIDERING
+════════════════════════════════════════════════════════════════════
+
+8.1 TEST SUBSET
+□ Kan systemet kjøre på kun 100 tickets for testing?
+   JA/NEI: _____
+   Hvis JA → Hvordan? (kommando/funksjon): _____
+
+8.2 METRICS
+□ Måles og logges disse metrics?
+   - Autosvar detected count: JA/NEI _____
+   - Dialog patterns found: JA/NEI _____
+   - Reclassified count: JA/NEI _____
+   - No resolution count: JA/NEI _____
+   - API calls made: JA/NEI _____
+   - Total cost: JA/NEI _____
+   - Processing time: JA/NEI _____
+
+8.3 LOGGING
+□ Hvor logges metrics?
+   Console/fil/database: _____
+
+
+════════════════════════════════════════════════════════════════════
+
+DEL 9: ERROR HANDLING
+════════════════════════════════════════════════════════════════════
+
+9.1 API FAILURES
+□ Hva skjer hvis OpenAI API feiler midtveis?
+   - Stopper hele kjøringen: JA/NEI _____
+   - Fortsetter med neste batch: JA/NEI _____
+   - Retry logic: JA/NEI _____
+
+9.2 CHECKPOINT
+□ Lagres progress underveis?
+   JA/NEI: _____
+   Hvis JA → Hvor ofte?: _____
+
+9.3 RESUME
+□ Kan kjøring fortsette fra checkpoint ved feil?
+   JA/NEI _____
+
+
+════════════════════════════════════════════════════════════════════
+
+DEL 10: KOSTNADER & RESSURSER
+════════════════════════════════════════════════════════════════════
+
+10.1 OPENAI BRUK
+□ Hvilken modell brukes?
+   Model: _____
+   Cost per 1M tokens: $_____
+
+10.2 ESTIMAT FOR 40K TICKETS
+□ Estimert totalkostnad for full kjøring:
+   $_____
+   
+□ Estimert total tid:
+   _____ timer
+
+10.3 RATE LIMITS
+□ Er rate limiting implementert for OpenAI?
+   JA/NEI _____
+   Max requests/minute: _____
+
+
+════════════════════════════════════════════════════════════════════
+
+OPPSUMMERING
+════════════════════════════════════════════════════════════════════
+
+Basert på svarene over, gi en oppsummering:
+
+KLART TIL KJØRING:
+- Liste ting som fungerer: _____
+
+MANGLER FØR KJØRING:
+- Liste ting som må implementeres: _____
+
+ANBEFALINGER:
+- Liste forbedringer som bør gjøres: _____
