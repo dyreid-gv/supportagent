@@ -133,6 +133,29 @@ function parseActions(text: string): { action: string; params: Record<string, st
   return actions;
 }
 
+const QUICK_PATTERNS: { regex: RegExp; response: string }[] = [
+  { regex: /eierskift|selge|solgt|ny eier|overfør|kjøpt/i, response: "For å hjelpe deg med eierskifte trenger jeg å se hvilke dyr du har registrert. Kan du logge inn først via OTP-knappen øverst?" },
+  { regex: /logg inn|passord|bankid|innlogg/i, response: "Har du problemer med innlogging? Jeg kan hjelpe deg. Hvilken innloggingsmetode bruker du (BankID, OTP, e-post)?" },
+  { regex: /qr.?tag|qr.?brikke|skann|aktivere tag/i, response: "Jeg kan hjelpe deg med QR Tag! Har du allerede kjøpt en, eller lurer du på hvordan den fungerer?" },
+  { regex: /savnet|mistet|funnet|borte|forsvunnet/i, response: "Jeg hjelper deg gjerne med savnet/funnet. For å melde dyr savnet må jeg vite hvilket dyr det gjelder. Kan du logge inn først?" },
+  { regex: /registrer|chip|søkbart|id.?merk/i, response: "Jeg kan hjelpe med registrering! Er dyret allerede chipet, eller trenger du informasjon om ID-merking?" },
+  { regex: /abonnement|avslutt|forny|oppsigelse/i, response: "Jeg kan hjelpe med abonnement! Gjelder det QR Premium, Smart Tag eller DyreID+ appen?" },
+  { regex: /app|laste ned|installere|mobil/i, response: "DyreID-appen finnes for iOS og Android. Har du problemer med innlogging eller vil du vite om funksjoner?" },
+  { regex: /pris|kost|betale|gratis/i, response: "Jeg kan gi deg prisinformasjon! Hva lurer du på? Eierskifte, registrering, QR Tag eller app?" },
+  { regex: /veterinær|klinikk|dyrelege/i, response: "Trenger du hjelp med veterinærregistrering eller skal du endre klinikk?" },
+  { regex: /smart.?tag|gps|sporing/i, response: "Jeg kan hjelpe med Smart Tag! Gjelder det tilkobling, GPS, batteri eller noe annet?" },
+  { regex: /familie|deling|del tilgang/i, response: "Familiedeling lar andre se og administrere dyrene dine. Vil du legge til eller fjerne et familiemedlem?" },
+];
+
+function quickIntentMatch(message: string): string | null {
+  for (const pattern of QUICK_PATTERNS) {
+    if (pattern.regex.test(message)) {
+      return pattern.response;
+    }
+  }
+  return null;
+}
+
 export async function* streamChatResponse(
   conversationId: number,
   userMessage: string,
@@ -143,6 +166,18 @@ export async function* streamChatResponse(
     role: "user",
     content: userMessage,
   });
+
+  const quickResponse = quickIntentMatch(userMessage);
+  if (quickResponse) {
+    await storage.createMessage({
+      conversationId,
+      role: "assistant",
+      content: quickResponse,
+      metadata: { quickMatch: true },
+    });
+    yield quickResponse;
+    return;
+  }
 
   const playbook = await storage.getActivePlaybookEntries();
   const ownerContext = ownerId ? getMinSideContext(ownerId) : null;

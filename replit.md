@@ -50,7 +50,10 @@ client/src/
 - **GDPR Compliance**: Regex-based PII masking before AI analysis
 - **CSV-Loaded Categories**: 9 hjelpesenter categories with 36 subcategories loaded from CSV file
 - **34 Known Intents**: Comprehensive intent classification (LoginIssue, OwnershipTransfer, QRTagActivation, etc.)
+- **Batch Processing**: Intent classification sends 5 tickets per Claude call (5x faster)
 - **Review Queue**: Manual review UI for uncertain classifications and new intents
+- **OTP Auth**: Two-step OTP login via Min Side (minside.dyreid.no) with sandbox fallback for demo phones
+- **Quick Intent Matching**: 11 regex patterns for instant responses (<1s) before falling back to Claude
 - **Sandbox Users**: 5 demo profiles (91000001-91000005) with varied scenarios
 - **Chatbot Actions**: Mark lost/found, activate QR, initiate transfers, send payment links
 - **Streaming Responses**: SSE-based real-time AI responses
@@ -61,7 +64,7 @@ client/src/
 - POST /api/training/scrub (SSE)
 - POST /api/training/categorize (SSE)
 - POST /api/training/analyze-uncategorized (SSE)
-- POST /api/training/classify (SSE)
+- POST /api/training/classify (SSE) - batch mode: 5 tickets per Claude call
 - POST /api/training/extract-resolutions (SSE)
 - POST /api/training/detect-uncertainty (SSE)
 - POST /api/training/generate-playbook (SSE)
@@ -71,10 +74,21 @@ client/src/
 - GET /api/training/uncertainty-cases
 - GET /api/training/stats
 
+### OTP Authentication (proxy to Min Side)
+- POST /api/auth/send-otp - Send OTP to phone/email (proxied via backend, sandbox fallback)
+- POST /api/auth/verify-otp - Verify OTP code and get user context
+- GET /api/auth/user-context - Get user details by contact method
+
 ### Data
 - GET /api/playbook
 - GET /api/categories
 - POST /api/categories/reload-csv
+
+### Admin/Export
+- GET /api/admin/tables - Table overview with row counts
+- GET /api/admin/export/:table - Export table as JSON or CSV
+- GET /api/admin/export-all - Export all tables as JSON
+- GET /api/admin/schema - Database schema info
 
 ## Environment Variables
 - `PURESERVICE_API_KEY` - API key for Pureservice ticket system
@@ -83,4 +97,5 @@ client/src/
 - `AI_INTEGRATIONS_ANTHROPIC_API_KEY` - Claude API key (auto-provided via integration)
 
 ## Recent Changes
+- 2026-02-14: OTP integration with Min Side (minside.dyreid.no) via backend proxy, quick intent matching (11 patterns), batch intent classification (5x faster), admin panel with data export
 - 2026-02-13: Complete 9-workflow Training Agent with dashboard, review queue UI, CSV-loaded categories, 34 known intents, uncertainty detection, uncategorized theme analysis

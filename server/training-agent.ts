@@ -365,9 +365,14 @@ export async function runIntentClassification(
     const unclassified = await storage.getUnclassifiedScrubbedTickets(batchSize);
     if (unclassified.length === 0) break;
 
-    for (const ticket of unclassified) {
-      try {
-        const prompt = `Du er en support intent classifier for DyreID.
+    const batchPromptSize = 5;
+    for (let batchStart = 0; batchStart < unclassified.length; batchStart += batchPromptSize) {
+      const batch = unclassified.slice(batchStart, batchStart + batchPromptSize);
+
+      if (batch.length === 1) {
+        const ticket = batch[0];
+        try {
+          const prompt = `Du er en support intent classifier for DyreID.
 
 OPPGAVE: Klassifiser intent for denne ticketen basert på dialog.
 
@@ -403,41 +408,194 @@ SVAR I JSON:
   "reasoning": "Why this classification?"
 }`;
 
-        const text = await callClaude(prompt);
-        const result = extractJson(text);
+          const text = await callClaude(prompt);
+          const result = extractJson(text);
 
-        await storage.insertIntentClassification({
-          ticketId: ticket.ticketId,
-          intent: result.intent,
-          intentConfidence: result.intent_confidence,
-          isNewIntent: result.is_new_intent || false,
-          keywords: result.keywords,
-          requiredRuntimeData: result.required_runtime_data,
-          requiredAction: result.required_action,
-          actionEndpoint: result.action_endpoint,
-          paymentRequired: result.payment_required || false,
-          autoClosePossible: result.auto_close_possible || false,
-          reasoning: result.reasoning,
-        });
-        await storage.updateScrubbedTicketAnalysis(ticket.ticketId, "classified");
-
-        if (result.is_new_intent) {
-          await storage.insertReviewQueueItem({
-            reviewType: "new_intent",
-            referenceId: ticket.ticketId,
-            priority: "high",
-            data: result,
+          await storage.insertIntentClassification({
+            ticketId: ticket.ticketId,
+            intent: result.intent,
+            intentConfidence: result.intent_confidence,
+            isNewIntent: result.is_new_intent || false,
+            keywords: result.keywords,
+            requiredRuntimeData: result.required_runtime_data,
+            requiredAction: result.required_action,
+            actionEndpoint: result.action_endpoint,
+            paymentRequired: result.payment_required || false,
+            autoClosePossible: result.auto_close_possible || false,
+            reasoning: result.reasoning,
           });
-        }
+          await storage.updateScrubbedTicketAnalysis(ticket.ticketId, "classified");
 
-        totalClassified++;
-      } catch (err: any) {
-        totalErrors++;
-        log(`Intent classification error ticket ${ticket.ticketId}: ${err.message}`, "training");
+          if (result.is_new_intent) {
+            await storage.insertReviewQueueItem({
+              reviewType: "new_intent",
+              referenceId: ticket.ticketId,
+              priority: "high",
+              data: result,
+            });
+          }
+
+          totalClassified++;
+        } catch (err: any) {
+          totalErrors++;
+          log(`Intent classification error ticket ${ticket.ticketId}: ${err.message}`, "training");
+        }
+      } else {
+        try {
+          const ticketsBlock = batch.map((ticket, idx) => `
+TICKET ${idx + 1} (ID: ${ticket.ticketId}):
+Kategori: ${ticket.hjelpesenterCategory || ticket.category || "Ukjent"}
+Underkategori: ${ticket.hjelpesenterSubcategory || "Ukjent"}
+Emne: ${ticket.subject || "Ingen"}
+Kundespørsmål: ${ticket.customerQuestion || "Ingen"}
+Agentsvar: ${ticket.agentAnswer || "Ingen"}
+Løsning: ${ticket.resolution || "Ingen"}`).join("\n---");
+
+          const batchPrompt = `Du er en support intent classifier for DyreID.
+
+OPPGAVE: Klassifiser intent for ALLE ${batch.length} tickets nedenfor.
+
+${ticketsBlock}
+
+KJENTE INTENTS (bruk disse hvis mulig):
+${intentsStr}
+
+INSTRUKSJONER:
+1. Analyser hva kunden faktisk ønsker å oppnå i HVER ticket
+2. Klassifiser til en av kjente intents ELLER foreslå ny intent
+3. Ekstraher nøkkelord som trigger denne intent
+4. Identifiser hvilke runtime-data som trengs
+5. Identifiser hvilken action som løste saken
+
+SVAR SOM JSON ARRAY med ett objekt per ticket, i SAMME rekkefølge:
+[
+  {
+    "ticket_id": 12345,
+    "intent": "Intent name",
+    "intent_confidence": 0.0-1.0,
+    "is_new_intent": false,
+    "keywords": "keyword1, keyword2",
+    "required_runtime_data": "PetId, PaymentStatus",
+    "required_action": "Send betalingslink",
+    "action_endpoint": "POST /Registration/PaymentLink",
+    "payment_required": false,
+    "auto_close_possible": false,
+    "reasoning": "Why this classification?"
+  }
+]`;
+
+          const text = await callClaude(batchPrompt, "claude-haiku-4-5", 8192);
+          const results = extractJson(text);
+          const resultsArray = Array.isArray(results) ? results : [results];
+
+          for (let i = 0; i < batch.length; i++) {
+            const ticket = batch[i];
+            const result = resultsArray[i] || resultsArray.find((r: any) => r.ticket_id === ticket.ticketId);
+            if (!result) {
+              totalErrors++;
+              log(`Batch classification missing result for ticket ${ticket.ticketId}`, "training");
+              continue;
+            }
+
+            try {
+              await storage.insertIntentClassification({
+                ticketId: ticket.ticketId,
+                intent: result.intent,
+                intentConfidence: result.intent_confidence,
+                isNewIntent: result.is_new_intent || false,
+                keywords: result.keywords,
+                requiredRuntimeData: result.required_runtime_data,
+                requiredAction: result.required_action,
+                actionEndpoint: result.action_endpoint,
+                paymentRequired: result.payment_required || false,
+                autoClosePossible: result.auto_close_possible || false,
+                reasoning: result.reasoning,
+              });
+              await storage.updateScrubbedTicketAnalysis(ticket.ticketId, "classified");
+
+              if (result.is_new_intent) {
+                await storage.insertReviewQueueItem({
+                  reviewType: "new_intent",
+                  referenceId: ticket.ticketId,
+                  priority: "high",
+                  data: result,
+                });
+              }
+
+              totalClassified++;
+            } catch (err: any) {
+              totalErrors++;
+              log(`Intent classification save error ticket ${ticket.ticketId}: ${err.message}`, "training");
+            }
+          }
+        } catch (err: any) {
+          log(`Batch intent classification error: ${err.message}, falling back to individual`, "training");
+          for (const ticket of batch) {
+            try {
+              const prompt = `Du er en support intent classifier for DyreID.
+
+OPPGAVE: Klassifiser intent for denne ticketen.
+
+TICKET:
+Kategori: ${ticket.hjelpesenterCategory || ticket.category || "Ukjent"}
+Emne: ${ticket.subject || "Ingen"}
+Kundespørsmål: ${ticket.customerQuestion || "Ingen"}
+Agentsvar: ${ticket.agentAnswer || "Ingen"}
+
+KJENTE INTENTS: ${intentsStr}
+
+SVAR I JSON:
+{
+  "intent": "Intent name",
+  "intent_confidence": 0.0-1.0,
+  "is_new_intent": false,
+  "keywords": "keyword1, keyword2",
+  "required_runtime_data": "",
+  "required_action": "",
+  "action_endpoint": "",
+  "payment_required": false,
+  "auto_close_possible": false,
+  "reasoning": "Why?"
+}`;
+
+              const text = await callClaude(prompt);
+              const result = extractJson(text);
+
+              await storage.insertIntentClassification({
+                ticketId: ticket.ticketId,
+                intent: result.intent,
+                intentConfidence: result.intent_confidence,
+                isNewIntent: result.is_new_intent || false,
+                keywords: result.keywords,
+                requiredRuntimeData: result.required_runtime_data,
+                requiredAction: result.required_action,
+                actionEndpoint: result.action_endpoint,
+                paymentRequired: result.payment_required || false,
+                autoClosePossible: result.auto_close_possible || false,
+                reasoning: result.reasoning,
+              });
+              await storage.updateScrubbedTicketAnalysis(ticket.ticketId, "classified");
+
+              if (result.is_new_intent) {
+                await storage.insertReviewQueueItem({
+                  reviewType: "new_intent",
+                  referenceId: ticket.ticketId,
+                  priority: "high",
+                  data: result,
+                });
+              }
+
+              totalClassified++;
+            } catch (innerErr: any) {
+              totalErrors++;
+              log(`Fallback classification error ticket ${ticket.ticketId}: ${innerErr.message}`, "training");
+            }
+          }
+        }
       }
     }
 
-    onProgress?.(`Klassifisert ${totalClassified} tickets`, 50);
+    onProgress?.(`Klassifisert ${totalClassified} tickets (batch-modus)`, 50);
   }
 
   onProgress?.(`Intent-klassifisering ferdig: ${totalClassified}, ${totalErrors} feil`, 100);

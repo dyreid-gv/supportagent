@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { z } from "zod";
 import { count } from "drizzle-orm";
+import axios from "axios";
 import { db } from "./db";
 import { storage } from "./storage";
 import { streamChatResponse } from "./chatbot";
@@ -491,6 +492,141 @@ export async function registerRoutes(
 
   app.get("/api/sandbox/phones", async (_req, res) => {
     res.json(getAllSandboxPhones());
+  });
+
+  // ─── MIN SIDE OTP PROXY ──────────────────────────────────────────
+  const MINSIDE_URL = "https://minside.dyreid.no";
+
+  app.post("/api/auth/send-otp", async (req, res) => {
+    try {
+      const { contactMethod } = req.body;
+      if (!contactMethod) {
+        return res.status(400).json({ error: "contactMethod er påkrevd" });
+      }
+
+      const sandboxOwner = lookupOwnerByPhone(contactMethod);
+      if (sandboxOwner) {
+        return res.json({ success: true, mode: "sandbox", message: `OTP sendt til ${contactMethod} (sandbox-modus)` });
+      }
+
+      const response = await axios.post(`${MINSIDE_URL}/Security/SendOtp`, {
+        contactMethod,
+      }, {
+        headers: { "Content-Type": "application/json" },
+        timeout: 15000,
+      });
+
+      res.json({ success: true, mode: "production", data: response.data });
+    } catch (error: any) {
+      console.error("Send OTP error:", error.response?.data || error.message);
+      res.status(error.response?.status || 500).json({
+        error: error.response?.data || "Kunne ikke sende OTP",
+      });
+    }
+  });
+
+  app.post("/api/auth/verify-otp", async (req, res) => {
+    try {
+      const { contactMethod, otpCode, conversationId } = req.body;
+      if (!contactMethod || !otpCode) {
+        return res.status(400).json({ error: "contactMethod og otpCode er påkrevd" });
+      }
+
+      const sandboxOwner = lookupOwnerByPhone(contactMethod);
+      if (sandboxOwner) {
+        const context = getMinSideContext(sandboxOwner.ownerId);
+        if (conversationId) {
+          await storage.updateConversationAuth(parseInt(conversationId), sandboxOwner.ownerId);
+        }
+        return res.json({
+          success: true,
+          mode: "sandbox",
+          userContext: {
+            FirstName: sandboxOwner.firstName,
+            LastName: sandboxOwner.lastName,
+            Email: sandboxOwner.email,
+            Phone: sandboxOwner.phone,
+            OwnerId: sandboxOwner.ownerId,
+            Pets: context?.animals.map(a => ({
+              Name: a.name,
+              Species: a.species,
+              Breed: a.breed,
+              ChipNumber: a.chipNumber,
+              AnimalId: a.animalId,
+            })) || [],
+          },
+        });
+      }
+
+      const verifyResponse = await axios.post(`${MINSIDE_URL}/Security/ValidateOtp`, {
+        contactMethod,
+        otpCode,
+      }, {
+        headers: { "Content-Type": "application/json" },
+        timeout: 15000,
+      });
+
+      if (verifyResponse.status === 200) {
+        const detailResponse = await axios.get(
+          `${MINSIDE_URL}/Security/GetOwnerDetailforOTPScreen?emailOrContactNumber=${encodeURIComponent(contactMethod)}`,
+          { timeout: 15000 }
+        );
+
+        const userData = detailResponse.data;
+
+        if (conversationId && userData) {
+          const ownerId = userData.OwnerId || `MINSIDE-${contactMethod}`;
+          await storage.updateConversationAuth(parseInt(conversationId), ownerId);
+        }
+
+        return res.json({
+          success: true,
+          mode: "production",
+          userContext: userData,
+        });
+      }
+
+      res.status(401).json({ success: false, error: "Feil OTP-kode" });
+    } catch (error: any) {
+      console.error("Verify OTP error:", error.response?.data || error.message);
+      res.status(error.response?.status || 500).json({
+        success: false,
+        error: error.response?.data || "Kunne ikke verifisere OTP",
+      });
+    }
+  });
+
+  app.get("/api/auth/user-context", async (req, res) => {
+    try {
+      const { contactMethod } = req.query;
+      if (!contactMethod) {
+        return res.status(400).json({ error: "contactMethod er påkrevd" });
+      }
+
+      const sandboxOwner = lookupOwnerByPhone(contactMethod as string);
+      if (sandboxOwner) {
+        const context = getMinSideContext(sandboxOwner.ownerId);
+        return res.json({
+          FirstName: sandboxOwner.firstName,
+          LastName: sandboxOwner.lastName,
+          Pets: context?.animals.map(a => ({
+            Name: a.name,
+            Species: a.species,
+            Breed: a.breed,
+          })) || [],
+        });
+      }
+
+      const response = await axios.get(
+        `${MINSIDE_URL}/Security/GetOwnerDetailforOTPScreen?emailOrContactNumber=${encodeURIComponent(contactMethod as string)}`,
+        { timeout: 15000 }
+      );
+      res.json(response.data);
+    } catch (error: any) {
+      res.status(error.response?.status || 500).json({
+        error: error.response?.data || "Kunne ikke hente brukerdata",
+      });
+    }
   });
 
   // ─── ADMIN EXPORT ENDPOINTS ─────────────────────────────────────

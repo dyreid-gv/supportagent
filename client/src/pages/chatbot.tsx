@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -26,6 +26,8 @@ import {
   Loader2,
   MessageSquare,
   X,
+  Sparkles,
+  KeyRound,
 } from "lucide-react";
 
 interface Message {
@@ -45,14 +47,13 @@ interface Conversation {
   messages?: Message[];
 }
 
-interface AuthResult {
-  authenticated: boolean;
-  owner: {
-    ownerId: string;
-    firstName: string;
-    lastName: string;
-  };
-  animalCount: number;
+interface UserContext {
+  FirstName: string;
+  LastName?: string;
+  Email?: string;
+  Phone?: string;
+  OwnerId?: string;
+  Pets?: { Name: string; Species: string; Breed?: string; AnimalId?: string; ChipNumber?: string }[];
 }
 
 function MessageBubble({ message }: { message: Message }) {
@@ -104,6 +105,28 @@ function StreamingMessage({ content }: { content: string }) {
   );
 }
 
+function TypingIndicator() {
+  return (
+    <div className="flex gap-3" data-testid="typing-indicator">
+      <Avatar className="h-8 w-8 shrink-0">
+        <AvatarFallback className="bg-muted">
+          <Bot className="h-4 w-4" />
+        </AvatarFallback>
+      </Avatar>
+      <div className="rounded-lg px-4 py-3 bg-muted">
+        <div className="flex items-center gap-2">
+          <div className="flex gap-1">
+            <div className="w-2 h-2 bg-foreground/40 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+            <div className="w-2 h-2 bg-foreground/40 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+            <div className="w-2 h-2 bg-foreground/40 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+          </div>
+          <span className="text-xs text-muted-foreground">Skriver...</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Chatbot() {
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
   const [inputValue, setInputValue] = useState("");
@@ -111,7 +134,12 @@ export default function Chatbot() {
   const [isSending, setIsSending] = useState(false);
   const [showAuthDialog, setShowAuthDialog] = useState(false);
   const [authPhone, setAuthPhone] = useState("");
-  const [authResult, setAuthResult] = useState<AuthResult | null>(null);
+  const [authStep, setAuthStep] = useState<"phone" | "otp">("phone");
+  const [otpCode, setOtpCode] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [userContext, setUserContext] = useState<UserContext | null>(null);
+  const [showSuggestions, setShowSuggestions] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -129,7 +157,8 @@ export default function Chatbot() {
     onSuccess: async (res) => {
       const conv = await res.json();
       setActiveConversationId(conv.id);
-      setAuthResult(null);
+      setUserContext(null);
+      setShowSuggestions(true);
       queryClient.invalidateQueries({ queryKey: ["/api/chat/conversations"] });
     },
   });
@@ -159,6 +188,7 @@ export default function Chatbot() {
     setInputValue("");
     setIsSending(true);
     setStreamingContent("");
+    setShowSuggestions(false);
 
     try {
       const response = await fetch(
@@ -208,27 +238,89 @@ export default function Chatbot() {
     }
   }, [inputValue, activeConversationId, isSending]);
 
-  const handleAuth = async () => {
-    if (!authPhone.trim() || !activeConversationId) return;
+  const handleSendOtp = async () => {
+    if (!authPhone.trim()) return;
+    setAuthLoading(true);
+    setAuthError("");
 
     try {
-      const res = await apiRequest("POST", `/api/chat/conversations/${activeConversationId}/auth`, {
-        phone: authPhone.trim(),
+      const res = await fetch("/api/auth/send-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contactMethod: authPhone.trim() }),
       });
-      const result: AuthResult = await res.json();
-      setAuthResult(result);
-      setShowAuthDialog(false);
-      setAuthPhone("");
+      const data = await res.json();
 
-      queryClient.invalidateQueries({
-        queryKey: ["/api/chat/conversations", activeConversationId],
-      });
+      if (res.ok && data.success) {
+        setAuthStep("otp");
+        if (data.mode === "sandbox") {
+          setAuthError("Sandbox-modus: skriv inn vilkarlig kode (f.eks. 123456)");
+        }
+      } else {
+        setAuthError(data.error || "Kunne ikke sende OTP");
+      }
     } catch (err: any) {
-      alert(err.message || "Autentisering feilet");
+      setAuthError("Nettverksfeil - pruv igjen");
+    } finally {
+      setAuthLoading(false);
     }
   };
 
-  const isAuthenticated = activeConversation?.authenticated || authResult?.authenticated;
+  const handleVerifyOtp = async () => {
+    if (!otpCode.trim()) return;
+    setAuthLoading(true);
+    setAuthError("");
+
+    try {
+      const res = await fetch("/api/auth/verify-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contactMethod: authPhone.trim(),
+          otpCode: otpCode.trim(),
+          conversationId: activeConversationId?.toString(),
+        }),
+      });
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        setUserContext(data.userContext);
+        setShowAuthDialog(false);
+        setAuthStep("phone");
+        setAuthPhone("");
+        setOtpCode("");
+        queryClient.invalidateQueries({
+          queryKey: ["/api/chat/conversations", activeConversationId],
+        });
+      } else {
+        setAuthError(data.error || "Feil OTP-kode. Pruv igjen.");
+      }
+    } catch (err: any) {
+      setAuthError("Nettverksfeil - pruv igjen");
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const resetAuthDialog = () => {
+    setShowAuthDialog(false);
+    setAuthStep("phone");
+    setAuthPhone("");
+    setOtpCode("");
+    setAuthError("");
+    setAuthLoading(false);
+  };
+
+  const isAuthenticated = activeConversation?.authenticated || !!userContext;
+
+  const suggestedQuestions = [
+    "Hvordan foreta eierskifte?",
+    "Aktivere QR Tag",
+    "Melde dyr savnet",
+    "Problemer med innlogging",
+    "Registrere nytt dyr",
+    "Abonnement og priser",
+  ];
 
   return (
     <div className="flex h-full">
@@ -254,7 +346,8 @@ export default function Chatbot() {
                 }`}
                 onClick={() => {
                   setActiveConversationId(conv.id);
-                  setAuthResult(null);
+                  setUserContext(null);
+                  setShowSuggestions(true);
                 }}
                 data-testid={`conversation-${conv.id}`}
               >
@@ -292,8 +385,8 @@ export default function Chatbot() {
                 DyreID Support
               </h2>
               <p className="text-muted-foreground">
-                Velkommen til DyreID sin intelligente support-assistent. Start en ny samtale for å
-                få hjelp med registrering, eierskifte, QR-brikker og mer.
+                Velkommen til DyreID sin intelligente support-assistent. Start en ny samtale for a
+                fa hjelp med registrering, eierskifte, QR-brikker og mer.
               </p>
               <Button
                 onClick={() => createConversation.mutate()}
@@ -317,9 +410,10 @@ export default function Chatbot() {
                   <Badge data-testid="badge-authenticated">
                     <Shield className="h-3 w-3 mr-1" />
                     Innlogget
-                    {authResult?.owner
-                      ? `: ${authResult.owner.firstName} ${authResult.owner.lastName}`
+                    {userContext
+                      ? `: ${userContext.FirstName}${userContext.LastName ? ` ${userContext.LastName}` : ""}`
                       : ""}
+                    {userContext?.Pets ? ` (${userContext.Pets.length} dyr)` : ""}
                   </Badge>
                 ) : (
                   <Button
@@ -343,27 +437,6 @@ export default function Chatbot() {
                     <p className="text-muted-foreground text-sm">
                       Hei! Jeg er DyreID sin support-assistent. Hva kan jeg hjelpe deg med?
                     </p>
-                    <div className="flex flex-wrap justify-center gap-2 mt-4">
-                      {[
-                        "Jeg vil eierskifte hunden min",
-                        "QR-brikken min virker ikke",
-                        "Dyret mitt er ikke søkbart",
-                        "Hunden min er savnet",
-                      ].map((q) => (
-                        <Button
-                          key={q}
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            setInputValue(q);
-                            inputRef.current?.focus();
-                          }}
-                          data-testid={`button-suggestion-${q.slice(0, 15).replace(/\s/g, "-")}`}
-                        >
-                          {q}
-                        </Button>
-                      ))}
-                    </div>
                   </div>
                 )}
 
@@ -373,20 +446,37 @@ export default function Chatbot() {
 
                 {streamingContent && <StreamingMessage content={streamingContent} />}
 
-                {isSending && !streamingContent && (
-                  <div className="flex gap-3">
-                    <Avatar className="h-8 w-8 shrink-0">
-                      <AvatarFallback className="bg-muted">
-                        <Bot className="h-4 w-4" />
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="rounded-lg px-4 py-2 bg-muted">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    </div>
-                  </div>
-                )}
+                {isSending && !streamingContent && <TypingIndicator />}
               </div>
             </ScrollArea>
+
+            {showSuggestions && messages.length === 0 && (
+              <div className="px-4 pb-2">
+                <div className="max-w-3xl mx-auto">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Sparkles className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-xs text-muted-foreground font-medium">Vanlige sporsmal:</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {suggestedQuestions.map((q) => (
+                      <Button
+                        key={q}
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setInputValue(q);
+                          setShowSuggestions(false);
+                          inputRef.current?.focus();
+                        }}
+                        data-testid={`button-suggestion-${q.slice(0, 15).replace(/\s/g, "-")}`}
+                      >
+                        {q}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="p-3 border-t">
               <div className="flex gap-2 max-w-3xl mx-auto">
@@ -417,33 +507,80 @@ export default function Chatbot() {
         )}
       </div>
 
-      <Dialog open={showAuthDialog} onOpenChange={setShowAuthDialog}>
+      <Dialog open={showAuthDialog} onOpenChange={(open) => { if (!open) resetAuthDialog(); }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Logg inn med OTP</DialogTitle>
+            <DialogTitle>
+              {authStep === "phone" ? "Logg inn med OTP" : "Skriv inn engangskode"}
+            </DialogTitle>
             <DialogDescription>
-              For demo: bruk telefonnummer 91000001-91000005
+              {authStep === "phone"
+                ? "Skriv inn mobilnummer eller e-post for a motta en engangskode. For demo: bruk 91000001-91000005."
+                : `En engangskode er sendt til ${authPhone}. Skriv den inn nedenfor.`}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <Input
-              value={authPhone}
-              onChange={(e) => setAuthPhone(e.target.value)}
-              placeholder="Telefonnummer"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleAuth();
-              }}
-              data-testid="input-auth-phone"
-            />
-            <Button
-              className="w-full"
-              onClick={handleAuth}
-              disabled={!authPhone.trim()}
-              data-testid="button-auth-submit"
-            >
-              <LogIn className="h-4 w-4 mr-2" />
-              Logg inn
-            </Button>
+            {authStep === "phone" ? (
+              <>
+                <Input
+                  value={authPhone}
+                  onChange={(e) => setAuthPhone(e.target.value)}
+                  placeholder="Mobilnummer eller e-post"
+                  onKeyDown={(e) => { if (e.key === "Enter") handleSendOtp(); }}
+                  disabled={authLoading}
+                  data-testid="input-auth-phone"
+                />
+                <Button
+                  className="w-full"
+                  onClick={handleSendOtp}
+                  disabled={!authPhone.trim() || authLoading}
+                  data-testid="button-send-otp"
+                >
+                  {authLoading ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4 mr-2" />
+                  )}
+                  Send engangskode
+                </Button>
+              </>
+            ) : (
+              <>
+                <Input
+                  value={otpCode}
+                  onChange={(e) => setOtpCode(e.target.value)}
+                  placeholder="Skriv inn engangskode"
+                  onKeyDown={(e) => { if (e.key === "Enter") handleVerifyOtp(); }}
+                  disabled={authLoading}
+                  data-testid="input-otp-code"
+                />
+                <Button
+                  className="w-full"
+                  onClick={handleVerifyOtp}
+                  disabled={!otpCode.trim() || authLoading}
+                  data-testid="button-verify-otp"
+                >
+                  {authLoading ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <KeyRound className="h-4 w-4 mr-2" />
+                  )}
+                  Verifiser kode
+                </Button>
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => { setAuthStep("phone"); setOtpCode(""); setAuthError(""); }}
+                  disabled={authLoading}
+                  data-testid="button-back-to-phone"
+                >
+                  Tilbake
+                </Button>
+              </>
+            )}
+            {authError && (
+              <p className="text-sm text-destructive" data-testid="text-auth-error">{authError}</p>
+            )}
           </div>
         </DialogContent>
       </Dialog>
