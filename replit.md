@@ -97,5 +97,6 @@ client/src/
 - `AI_INTEGRATIONS_ANTHROPIC_API_KEY` - Claude API key (auto-provided via integration)
 
 ## Recent Changes
+- 2026-02-14: Fixed chatbot auth context - user context from OTP login now stored in DB (conversations.userContext jsonb) and passed to AI system prompt. Quick intent patterns are auth-aware. Chatbot correctly identifies logged-in users and their pets.
 - 2026-02-14: OTP integration with Min Side (minside.dyreid.no) via backend proxy, quick intent matching (11 patterns), batch intent classification (5x faster), admin panel with data export
 - 2026-02-13: Complete 9-workflow Training Agent with dashboard, review queue UI, CSV-loaded categories, 34 known intents, uncertainty detection, uncategorized theme analysis

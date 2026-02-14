@@ -8,7 +8,9 @@ const anthropic = new Anthropic({
   baseURL: process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL,
 });
 
-function buildSystemPrompt(playbook: PlaybookEntry[], ownerContext: any | null): string {
+function buildSystemPrompt(playbook: PlaybookEntry[], ownerContext: any | null, storedUserContext: any | null): string {
+  const isAuthenticated = !!(ownerContext || storedUserContext);
+
   let prompt = `Du er DyreID sin intelligente support-assistent. DyreID er Norges nasjonale kjæledyrregister.
 
 DINE OPPGAVER:
@@ -27,6 +29,7 @@ VIKTIG OM AUTENTISERING:
 - Noen handlinger krever at kunden er innlogget (identifisert via OTP)
 - Før innlogging kan du svare på generelle spørsmål
 - Etter innlogging kan du se kundens profil, dyr, tags, eierskap og utføre handlinger
+- KUNDEN ER ${isAuthenticated ? "INNLOGGET" : "IKKE INNLOGGET"}
 
 HANDLINGER DU KAN UTFØRE (etter autentisering):
 - Vise kundens dyr og profil
@@ -65,7 +68,7 @@ Gyldige actions:
   }
 
   if (ownerContext) {
-    prompt += "\n\nINNLOGGET BRUKER KONTEKST:\n";
+    prompt += "\n\nINNLOGGET BRUKER KONTEKST (fra sandbox):\n";
     prompt += `Eier: ${ownerContext.owner.firstName} ${ownerContext.owner.lastName}\n`;
     prompt += `Telefon: ${ownerContext.owner.phone}\n`;
     prompt += `E-post: ${ownerContext.owner.email}\n`;
@@ -108,6 +111,29 @@ Gyldige actions:
         if (pa.missingProfileData.length > 0) prompt += `- Manglende data: ${pa.missingProfileData.join(", ")}\n`;
       }
     }
+  } else if (storedUserContext) {
+    prompt += "\n\nINNLOGGET BRUKER KONTEKST (fra Min Side):\n";
+    prompt += `Eier: ${storedUserContext.FirstName || ""} ${storedUserContext.LastName || ""}\n`;
+    prompt += `Telefon: ${storedUserContext.Phone || ""}\n`;
+    prompt += `Eier-ID: ${storedUserContext.OwnerId || ""}\n`;
+    prompt += `Antall dyr: ${storedUserContext.NumberOfPets || 0}\n`;
+
+    if (storedUserContext.Pets && storedUserContext.Pets.length > 0) {
+      prompt += "\nRegistrerte dyr:\n";
+      for (const pet of storedUserContext.Pets) {
+        prompt += `- ${pet.Name}`;
+        if (pet.Species) prompt += ` (${pet.Species}`;
+        if (pet.Breed) prompt += `, ${pet.Breed}`;
+        if (pet.Species) prompt += `)`;
+        if (pet.ChipNumber) prompt += ` - Chip: ${pet.ChipNumber}`;
+        if (pet.AnimalId) prompt += ` - ID: ${pet.AnimalId}`;
+        prompt += "\n";
+      }
+    } else if (storedUserContext.NumberOfPets > 0) {
+      prompt += `\nBrukeren har ${storedUserContext.NumberOfPets} registrerte dyr, men detaljerte dyredata er ikke tilgjengelig i denne sesjonen. Informer brukeren om at du vet de har dyr registrert, og at de kan se sine dyr på Min Side (minside.dyreid.no).\n`;
+    }
+
+    prompt += "\nMERK: Denne brukeren er logget inn via Min Side (produksjon). Du har tilgang til grunnleggende profilinformasjon. For handlinger som krever spesifikke dyre-IDer (som eierskifte, melde savnet), be brukeren oppgi dyrets navn eller ID.\n";
   }
 
   return prompt;
@@ -133,24 +159,81 @@ function parseActions(text: string): { action: string; params: Record<string, st
   return actions;
 }
 
-const QUICK_PATTERNS: { regex: RegExp; response: string }[] = [
-  { regex: /eierskift|selge|solgt|ny eier|overfør|kjøpt/i, response: "For å hjelpe deg med eierskifte trenger jeg å se hvilke dyr du har registrert. Kan du logge inn først via OTP-knappen øverst?" },
-  { regex: /logg inn|passord|bankid|innlogg/i, response: "Har du problemer med innlogging? Jeg kan hjelpe deg. Hvilken innloggingsmetode bruker du (BankID, OTP, e-post)?" },
-  { regex: /qr.?tag|qr.?brikke|skann|aktivere tag/i, response: "Jeg kan hjelpe deg med QR Tag! Har du allerede kjøpt en, eller lurer du på hvordan den fungerer?" },
-  { regex: /savnet|mistet|funnet|borte|forsvunnet/i, response: "Jeg hjelper deg gjerne med savnet/funnet. For å melde dyr savnet må jeg vite hvilket dyr det gjelder. Kan du logge inn først?" },
-  { regex: /registrer|chip|søkbart|id.?merk/i, response: "Jeg kan hjelpe med registrering! Er dyret allerede chipet, eller trenger du informasjon om ID-merking?" },
-  { regex: /abonnement|avslutt|forny|oppsigelse/i, response: "Jeg kan hjelpe med abonnement! Gjelder det QR Premium, Smart Tag eller DyreID+ appen?" },
-  { regex: /app|laste ned|installere|mobil/i, response: "DyreID-appen finnes for iOS og Android. Har du problemer med innlogging eller vil du vite om funksjoner?" },
-  { regex: /pris|kost|betale|gratis/i, response: "Jeg kan gi deg prisinformasjon! Hva lurer du på? Eierskifte, registrering, QR Tag eller app?" },
-  { regex: /veterinær|klinikk|dyrelege/i, response: "Trenger du hjelp med veterinærregistrering eller skal du endre klinikk?" },
-  { regex: /smart.?tag|gps|sporing/i, response: "Jeg kan hjelpe med Smart Tag! Gjelder det tilkobling, GPS, batteri eller noe annet?" },
-  { regex: /familie|deling|del tilgang/i, response: "Familiedeling lar andre se og administrere dyrene dine. Vil du legge til eller fjerne et familiemedlem?" },
+interface QuickPattern {
+  regex: RegExp;
+  unauthResponse: string;
+  authResponse: string;
+}
+
+const QUICK_PATTERNS: QuickPattern[] = [
+  {
+    regex: /eierskift|selge|solgt|ny eier|overfør|kjøpt/i,
+    unauthResponse: "For a hjelpe deg med eierskifte trenger jeg a se hvilke dyr du har registrert. Kan du logge inn forst via OTP-knappen overst?",
+    authResponse: "Jeg kan hjelpe deg med eierskifte! Hvilket dyr gjelder det? Oppgi navnet pa dyret, sa hjelper jeg deg videre.",
+  },
+  {
+    regex: /logg inn|passord|bankid|innlogg/i,
+    unauthResponse: "Har du problemer med innlogging? Jeg kan hjelpe deg. Hvilken innloggingsmetode bruker du (BankID, OTP, e-post)?",
+    authResponse: "Du er allerede innlogget! Har du problemer med innlogging pa en annen tjeneste? Hvilken innloggingsmetode gjelder det (BankID, OTP, e-post)?",
+  },
+  {
+    regex: /qr.?tag|qr.?brikke|skann|aktivere tag/i,
+    unauthResponse: "Jeg kan hjelpe deg med QR Tag! Har du allerede kjopt en, eller lurer du pa hvordan den fungerer?",
+    authResponse: "Jeg kan hjelpe deg med QR Tag! Har du allerede kjopt en du vil aktivere, eller lurer du pa hvordan den fungerer?",
+  },
+  {
+    regex: /savnet|mistet|funnet|borte|forsvunnet/i,
+    unauthResponse: "Jeg hjelper deg gjerne med savnet/funnet. For a melde dyr savnet ma jeg vite hvilket dyr det gjelder. Kan du logge inn forst?",
+    authResponse: "Jeg kan hjelpe deg med a melde dyr savnet eller funnet. Hvilket dyr gjelder det? Oppgi navnet pa dyret.",
+  },
+  {
+    regex: /registrer|chip|søkbart|id.?merk/i,
+    unauthResponse: "Jeg kan hjelpe med registrering! Er dyret allerede chipet, eller trenger du informasjon om ID-merking?",
+    authResponse: "Jeg kan hjelpe med registrering! Er dyret allerede chipet, eller trenger du informasjon om ID-merking?",
+  },
+  {
+    regex: /abonnement|avslutt|forny|oppsigelse/i,
+    unauthResponse: "Jeg kan hjelpe med abonnement! Gjelder det QR Premium, Smart Tag eller DyreID+ appen?",
+    authResponse: "Jeg kan hjelpe med abonnement! Gjelder det QR Premium, Smart Tag eller DyreID+ appen?",
+  },
+  {
+    regex: /app|laste ned|installere|mobil/i,
+    unauthResponse: "DyreID-appen finnes for iOS og Android. Har du problemer med innlogging eller vil du vite om funksjoner?",
+    authResponse: "DyreID-appen finnes for iOS og Android. Har du problemer med innlogging eller vil du vite om funksjoner?",
+  },
+  {
+    regex: /pris|kost|betale|gratis/i,
+    unauthResponse: "Jeg kan gi deg prisinformasjon! Hva lurer du pa? Eierskifte, registrering, QR Tag eller app?",
+    authResponse: "Jeg kan gi deg prisinformasjon! Hva lurer du pa? Eierskifte, registrering, QR Tag eller app?",
+  },
+  {
+    regex: /veterinær|klinikk|dyrelege/i,
+    unauthResponse: "Trenger du hjelp med veterinarregistrering eller skal du endre klinikk?",
+    authResponse: "Trenger du hjelp med veterinarregistrering eller skal du endre klinikk?",
+  },
+  {
+    regex: /smart.?tag|gps|sporing/i,
+    unauthResponse: "Jeg kan hjelpe med Smart Tag! Gjelder det tilkobling, GPS, batteri eller noe annet?",
+    authResponse: "Jeg kan hjelpe med Smart Tag! Gjelder det tilkobling, GPS, batteri eller noe annet?",
+  },
+  {
+    regex: /familie|deling|del tilgang/i,
+    unauthResponse: "Familiedeling lar andre se og administrere dyrene dine. Vil du legge til eller fjerne et familiemedlem?",
+    authResponse: "Familiedeling lar andre se og administrere dyrene dine. Vil du legge til eller fjerne et familiemedlem?",
+  },
+  {
+    regex: /mine dyr|se dyr|dyrene mine|hvilke dyr|vis dyr|har jeg/i,
+    unauthResponse: "For at jeg skal kunne se dine registrerte dyr, ma du logge inn forst. Trykk pa innloggingsknappen og verifiser med OTP.",
+    authResponse: "",
+  },
 ];
 
-function quickIntentMatch(message: string): string | null {
+function quickIntentMatch(message: string, isAuthenticated: boolean): string | null {
   for (const pattern of QUICK_PATTERNS) {
     if (pattern.regex.test(message)) {
-      return pattern.response;
+      const response = isAuthenticated ? pattern.authResponse : pattern.unauthResponse;
+      if (response === "") return null;
+      return response;
     }
   }
   return null;
@@ -159,7 +242,8 @@ function quickIntentMatch(message: string): string | null {
 export async function* streamChatResponse(
   conversationId: number,
   userMessage: string,
-  ownerId?: string | null
+  ownerId?: string | null,
+  storedUserContext?: any | null
 ): AsyncGenerator<string, void, unknown> {
   await storage.createMessage({
     conversationId,
@@ -167,7 +251,9 @@ export async function* streamChatResponse(
     content: userMessage,
   });
 
-  const quickResponse = quickIntentMatch(userMessage);
+  const isAuthenticated = !!(ownerId && (storedUserContext || getMinSideContext(ownerId)));
+
+  const quickResponse = quickIntentMatch(userMessage, isAuthenticated);
   if (quickResponse) {
     await storage.createMessage({
       conversationId,
@@ -180,8 +266,8 @@ export async function* streamChatResponse(
   }
 
   const playbook = await storage.getActivePlaybookEntries();
-  const ownerContext = ownerId ? getMinSideContext(ownerId) : null;
-  const systemPrompt = buildSystemPrompt(playbook, ownerContext);
+  const sandboxContext = ownerId ? getMinSideContext(ownerId) : null;
+  const systemPrompt = buildSystemPrompt(playbook, sandboxContext, sandboxContext ? null : storedUserContext);
 
   const history = await storage.getMessagesByConversation(conversationId);
   const chatMessages = history.map((m) => ({
@@ -218,7 +304,7 @@ export async function* streamChatResponse(
       const result = performAction(ownerId, action, params);
       actionResults.push(
         result.success
-          ? `Handling utført: ${result.message}`
+          ? `Handling utfort: ${result.message}`
           : `Feil: ${result.message}`
       );
     }

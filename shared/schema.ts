@@ -165,6 +165,7 @@ export const conversations = pgTable("conversations", {
   sessionType: text("session_type").default("customer"),
   ownerId: text("owner_id"),
   authenticated: boolean("authenticated").default(false),
+  userContext: jsonb("user_context"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 

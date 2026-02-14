@@ -95,7 +95,7 @@ export interface IStorage {
   getConversation(id: number): Promise<typeof conversations.$inferSelect | undefined>;
   getAllConversations(): Promise<typeof conversations.$inferSelect[]>;
   deleteConversation(id: number): Promise<void>;
-  updateConversationAuth(id: number, ownerId: string): Promise<void>;
+  updateConversationAuth(id: number, ownerId: string, userContext?: any): Promise<void>;
 
   createMessage(data: InsertMessage): Promise<typeof messages.$inferSelect>;
   getMessagesByConversation(conversationId: number): Promise<typeof messages.$inferSelect[]>;
@@ -454,10 +454,14 @@ export class DatabaseStorage implements IStorage {
     await db.delete(conversations).where(eq(conversations.id, id));
   }
 
-  async updateConversationAuth(id: number, ownerId: string): Promise<void> {
+  async updateConversationAuth(id: number, ownerId: string, userContext?: any): Promise<void> {
+    const updateData: any = { authenticated: true, ownerId };
+    if (userContext) {
+      updateData.userContext = userContext;
+    }
     await db
       .update(conversations)
-      .set({ authenticated: true, ownerId })
+      .set(updateData)
       .where(eq(conversations.id, id));
   }
 

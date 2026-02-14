@@ -420,7 +420,8 @@ export async function registerRoutes(
       const generator = streamChatResponse(
         conversationId,
         content,
-        conversation.ownerId
+        conversation.ownerId,
+        conversation.userContext
       );
 
       for await (const chunk of generator) {
@@ -654,15 +655,15 @@ export async function registerRoutes(
           console.log("Could not fetch owner details (non-critical):", detailErr.message);
         }
 
-        function collectCookies(resp: any): string[] {
+        const collectCookies = (resp: any): string[] => {
           const sc = resp.headers["set-cookie"];
           if (!sc) return [];
           return Array.isArray(sc) ? sc : [sc];
-        }
+        };
 
-        function cookieValues(cookieHeaders: string[]): string {
+        const cookieValues = (cookieHeaders: string[]): string => {
           return cookieHeaders.map(c => c.split(";")[0]).join("; ");
-        }
+        };
 
         let petList: any[] = [];
         try {
@@ -739,21 +740,23 @@ export async function registerRoutes(
 
         const ownerId = resolvedUserId || `MINSIDE-${contactMethod}`;
 
+        const userContextData = {
+          FirstName: firstName,
+          LastName: lastName,
+          Phone: contactMethod,
+          OwnerId: ownerId,
+          NumberOfPets: numberOfPets,
+          Pets: petList.length > 0 ? petList : undefined,
+        };
+
         if (conversationId) {
-          await storage.updateConversationAuth(parseInt(conversationId), ownerId);
+          await storage.updateConversationAuth(parseInt(conversationId), ownerId, userContextData);
         }
 
         return res.json({
           success: true,
           mode: "production",
-          userContext: {
-            FirstName: firstName,
-            LastName: lastName,
-            Phone: contactMethod,
-            OwnerId: ownerId,
-            NumberOfPets: numberOfPets,
-            Pets: petList.length > 0 ? petList : undefined,
-          },
+          userContext: userContextData,
         });
       }
 

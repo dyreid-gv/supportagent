@@ -43,6 +43,7 @@ interface Conversation {
   title: string;
   authenticated: boolean;
   ownerId: string | null;
+  userContext?: UserContext | null;
   createdAt: string;
   messages?: Message[];
 }
@@ -53,6 +54,7 @@ interface UserContext {
   Email?: string;
   Phone?: string;
   OwnerId?: string;
+  NumberOfPets?: number;
   Pets?: { Name: string; Species: string; Breed?: string; AnimalId?: string; ChipNumber?: string }[];
 }
 
@@ -175,6 +177,12 @@ export default function Chatbot() {
   });
 
   const messages = activeConversation?.messages || [];
+
+  useEffect(() => {
+    if (activeConversation?.authenticated && activeConversation.userContext && !userContext) {
+      setUserContext(activeConversation.userContext as UserContext);
+    }
+  }, [activeConversation]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -352,7 +360,7 @@ export default function Chatbot() {
                 }`}
                 onClick={() => {
                   setActiveConversationId(conv.id);
-                  setUserContext(null);
+                  setUserContext(conv.userContext || null);
                   setShowSuggestions(true);
                 }}
                 data-testid={`conversation-${conv.id}`}
@@ -419,7 +427,11 @@ export default function Chatbot() {
                     {userContext
                       ? `: ${userContext.FirstName}${userContext.LastName ? ` ${userContext.LastName}` : ""}`
                       : ""}
-                    {userContext?.Pets ? ` (${userContext.Pets.length} dyr)` : ""}
+                    {userContext?.Pets && userContext.Pets.length > 0
+                      ? ` (${userContext.Pets.length} dyr)`
+                      : userContext?.NumberOfPets
+                        ? ` (${userContext.NumberOfPets} dyr)`
+                        : ""}
                   </Badge>
                 ) : (
                   <Button
