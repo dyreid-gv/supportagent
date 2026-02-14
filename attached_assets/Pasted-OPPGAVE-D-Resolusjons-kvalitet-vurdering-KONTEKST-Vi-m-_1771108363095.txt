@@ -1,0 +1,538 @@
+OPPGAVE D: Resolusjons-kvalitet vurdering
+
+KONTEKST:
+Vi må identifisere saker hvor kunden IKKE fikk reell hjelp.
+Dette er kritisk for å:
+- Forbedre agent-opplæring
+- Identifisere svake punkt i support
+- Forbedre autosvar-templates
+- Prioritere hva som trengs i chatbot
+
+4 KVALITETSNIVÅER:
+1. HIGH - Klar løsning med konkrete steg, kunden fikk det de trengte
+2. MEDIUM - Løsning gitt, men vag eller ufullstendig
+3. LOW - Kun informasjon, ingen konkret handling eller løsning
+4. NONE - Ingen løsning gitt (kun autosvar, eller agenten kunne ikke hjelpe)
+
+IMPLEMENTERING:
+
+══════════════════════════════════════════════════════════════
+DEL 1: UTVID DATABASE
+══════════════════════════════════════════════════════════════
+```sql
+-- Ny tabell for resolusjons-kvalitet
+CREATE TABLE IF NOT EXISTS resolution_quality (
+  id SERIAL PRIMARY KEY,
+  ticket_id INTEGER NOT NULL REFERENCES scrubbed_tickets(id),
+  
+  quality_level TEXT NOT NULL,  -- 'high', 'medium', 'low', 'none'
+  confidence FLOAT NOT NULL,
+  
+  -- Hva mangler i løsningen?
+  missing_elements TEXT[],  -- Array av mangler
+  
+  -- Hva var bra?
+  positive_elements TEXT[],  -- Array av positive aspekter
+  
+  reasoning TEXT,  -- AI's forklaring
+  
+  -- Kontekst
+  had_autoreply BOOLEAN,
+  dialog_pattern TEXT,
+  
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_quality_ticket ON resolution_quality(ticket_id);
+CREATE INDEX idx_quality_level ON resolution_quality(quality_level);
+```
+
+══════════════════════════════════════════════════════════════
+DEL 2: KVALITETSVURDERING-FUNKSJON
+══════════════════════════════════════════════════════════════
+```typescript
+interface QualityAssessment {
+  qualityLevel: 'high' | 'medium' | 'low' | 'none';
+  confidence: number;
+  missingElements: string[];
+  positiveElements: string[];
+  reasoning: string;
+}
+
+async function assessResolutionQuality(ticket: any): Promise<QualityAssessment> {
+  const prompt = `
+Vurder om kunden fikk en god løsning i denne support-saken.
+
+SAKEN:
+Subject: ${ticket.subject}
+Kundens spørsmål: ${ticket.customer_question}
+Agentens svar: ${ticket.agent_answer || 'Ingen svar'}
+
+Dialog (hvis flere meldinger):
+${ticket.messages?.map((m, i) => `${i + 1}. ${m.from}: ${m.body}`).join('\n') || 'Ingen dialog'}
+
+KONTEKST:
+- Hadde autosvar: ${ticket.has_autoreply ? 'Ja' : 'Nei'}
+- Dialog-mønster: ${ticket.dialog_pattern || 'Ukjent'}
+- Auto-lukket: ${ticket.auto_closed ? 'Ja' : 'Nei'}
+
+KVALITETSKRITERIER:
+
+HIGH (utmerket løsning):
+- Konkrete, handlingsrettede steg gitt
+- Kunden fikk alt de trengte for å løse problemet
+- Inkluderer relevant info (priser, lenker, kontaktinfo)
+- Profesjonell og hjelpsom tone
+- Kunden bekrefter løsning ELLER saken lukkes raskt uten oppfølging
+
+MEDIUM (ok løsning):
+- Løsning gitt, men vag eller ufullstendig
+- Mangler noen detaljer (f.eks. pris, tidslinje)
+- Kunden må følge opp for mer info
+- Generell veiledning uten konkrete steg
+
+LOW (dårlig løsning):
+- Kun informasjon, ingen konkret handling
+- Agent ba kunden selv finne løsning
+- Vag "prøv dette" uten oppfølging
+- Kunden måtte spørre flere ganger
+
+NONE (ingen løsning):
+- Kun autosvar, ingen menneskelig oppfølging
+- Agent kunne ikke hjelpe / eskallerte til andre
+- Saken lukket uten løsning
+- Kunden fikk ikke svar på sitt spørsmål
+
+VIKTIG SIGNALER:
+- Kun autosvar + auto-lukket = sannsynligvis NONE
+- "Jeg skal undersøke" uten oppfølging = LOW/NONE
+- Konkrete steg + priser/lenker = HIGH
+- Veiledning + "kontakt oss hvis..." = MEDIUM
+
+Return JSON:
+{
+  "qualityLevel": "high" | "medium" | "low" | "none",
+  "confidence": 0.0-1.0,
+  "missingElements": [
+    "Mangler konkrete steg",
+    "Ingen pris oppgitt",
+    "Ingen oppfølging på kundens oppfølgingsspørsmål"
+  ],
+  "positiveElements": [
+    "Gode forklaringer",
+    "Profesjonell tone"
+  ],
+  "reasoning": "Kort forklaring på vurderingen"
+}
+
+Eksempel HIGH:
+{
+  "qualityLevel": "high",
+  "confidence": 0.95,
+  "missingElements": [],
+  "positiveElements": [
+    "Konkrete steg for eierskifte",
+    "Pris oppgitt (676 kr)",
+    "Tidslinje gitt (1-2 dager)",
+    "Lenke til Min Side"
+  ],
+  "reasoning": "Kunden fikk komplett, step-by-step løsning med all nødvendig info"
+}
+
+Eksempel NONE:
+{
+  "qualityLevel": "none",
+  "confidence": 0.9,
+  "missingElements": [
+    "Kun autosvar sendt",
+    "Ingen menneskelig oppfølging",
+    "Kundens spørsmål ikke besvart"
+  ],
+  "positiveElements": [],
+  "reasoning": "Saken auto-lukket med kun autosvar, kunden fikk ikke reell hjelp"
+}
+  `;
+  
+  try {
+    const response = await callOpenAI(prompt, {
+      model: 'gpt-4o',  // Bruk 4o for bedre analyse
+      temperature: 0.3
+    });
+    
+    const result = JSON.parse(response);
+    
+    return {
+      qualityLevel: result.qualityLevel,
+      confidence: result.confidence,
+      missingElements: result.missingElements || [],
+      positiveElements: result.positiveElements || [],
+      reasoning: result.reasoning
+    };
+    
+  } catch (error) {
+    console.error('Quality assessment error:', error);
+    return {
+      qualityLevel: 'none',
+      confidence: 0,
+      missingElements: ['Parsing error'],
+      positiveElements: [],
+      reasoning: 'Error in assessment'
+    };
+  }
+}
+```
+
+══════════════════════════════════════════════════════════════
+DEL 3: BATCH VURDERING
+══════════════════════════════════════════════════════════════
+```typescript
+async function runQualityAssessment() {
+  console.log('📊 Starting resolution quality assessment...');
+  
+  // Hent tickets som trenger vurdering
+  const tickets = await db.query(`
+    SELECT 
+      st.id,
+      st.subject,
+      st.customer_question,
+      st.agent_answer,
+      st.messages,
+      st.auto_closed,
+      st.has_autoreply,
+      st.dialog_pattern
+    FROM scrubbed_tickets st
+    LEFT JOIN resolution_quality rq ON rq.ticket_id = st.id
+    WHERE rq.id IS NULL  -- Ikke allerede vurdert
+    ORDER BY st.id
+    LIMIT 1000
+  `);
+  
+  console.log(`Assessing ${tickets.rows.length} tickets`);
+  
+  const stats = {
+    total: 0,
+    byQuality: {
+      high: 0,
+      medium: 0,
+      low: 0,
+      none: 0
+    },
+    byCategory: {} as Record<string, Record<string, number>>,
+    commonMissingElements: {} as Record<string, number>
+  };
+  
+  // Batch processing (3-5 parallelle for hastighet)
+  const BATCH_SIZE = 5;
+  const batches = [];
+  for (let i = 0; i < tickets.rows.length; i += BATCH_SIZE) {
+    batches.push(tickets.rows.slice(i, i + BATCH_SIZE));
+  }
+  
+  for (const batch of batches) {
+    const assessments = await Promise.all(
+      batch.map(ticket => assessResolutionQuality(ticket))
+    );
+    
+    // Lagre resultater
+    for (let i = 0; i < batch.length; i++) {
+      const ticket = batch[i];
+      const assessment = assessments[i];
+      
+      await db.query(`
+        INSERT INTO resolution_quality (
+          ticket_id,
+          quality_level,
+          confidence,
+          missing_elements,
+          positive_elements,
+          reasoning,
+          had_autoreply,
+          dialog_pattern
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `, [
+        ticket.id,
+        assessment.qualityLevel,
+        assessment.confidence,
+        assessment.missingElements,
+        assessment.positiveElements,
+        assessment.reasoning,
+        ticket.has_autoreply,
+        ticket.dialog_pattern
+      ]);
+      
+      // Oppdater stats
+      stats.total++;
+      stats.byQuality[assessment.qualityLevel]++;
+      
+      // Track common missing elements
+      assessment.missingElements.forEach(elem => {
+        stats.commonMissingElements[elem] = 
+          (stats.commonMissingElements[elem] || 0) + 1;
+      });
+    }
+    
+    if (stats.total % 50 === 0) {
+      console.log(`Assessed ${stats.total}/${tickets.rows.length}...`);
+    }
+    
+    // Rate limiting
+    await sleep(200);
+  }
+  
+  console.log('✅ Quality assessment complete!');
+  console.log(`
+RESULTS:
+- Total assessed: ${stats.total}
+
+QUALITY DISTRIBUTION:
+- HIGH: ${stats.byQuality.high} (${(stats.byQuality.high/stats.total*100).toFixed(1)}%) ✅
+- MEDIUM: ${stats.byQuality.medium} (${(stats.byQuality.medium/stats.total*100).toFixed(1)}%) ⚠️
+- LOW: ${stats.byQuality.low} (${(stats.byQuality.low/stats.total*100).toFixed(1)}%) ❌
+- NONE: ${stats.byQuality.none} (${(stats.byQuality.none/stats.total*100).toFixed(1)}%) ❌❌
+
+TOP MISSING ELEMENTS:
+${Object.entries(stats.commonMissingElements)
+  .sort((a, b) => b[1] - a[1])
+  .slice(0, 10)
+  .map(([elem, count]) => `  ${elem}: ${count} tickets`)
+  .join('\n')}
+  `);
+  
+  return stats;
+}
+```
+
+══════════════════════════════════════════════════════════════
+DEL 4: ANALYSE & INNSIKTER
+══════════════════════════════════════════════════════════════
+```typescript
+// API endpoint for stats
+app.get('/api/training/quality/stats', async (req, res) => {
+  try {
+    // Overall quality distribution
+    const overall = await db.query(`
+      SELECT 
+        quality_level,
+        COUNT(*) as count,
+        AVG(confidence) as avg_confidence
+      FROM resolution_quality
+      GROUP BY quality_level
+      ORDER BY 
+        CASE quality_level
+          WHEN 'high' THEN 1
+          WHEN 'medium' THEN 2
+          WHEN 'low' THEN 3
+          WHEN 'none' THEN 4
+        END
+    `);
+    
+    // Quality by category
+    const byCategory = await db.query(`
+      SELECT 
+        cm.hjelpesenter_category,
+        rq.quality_level,
+        COUNT(*) as count
+      FROM resolution_quality rq
+      JOIN scrubbed_tickets st ON st.id = rq.ticket_id
+      JOIN category_mappings cm ON cm.ticket_id = st.id
+      GROUP BY cm.hjelpesenter_category, rq.quality_level
+      ORDER BY cm.hjelpesenter_category, count DESC
+    `);
+    
+    // Quality by dialog pattern
+    const byPattern = await db.query(`
+      SELECT 
+        dialog_pattern,
+        quality_level,
+        COUNT(*) as count
+      FROM resolution_quality
+      WHERE dialog_pattern IS NOT NULL
+      GROUP BY dialog_pattern, quality_level
+      ORDER BY dialog_pattern, count DESC
+    `);
+    
+    // Most common missing elements
+    const missingElements = await db.query(`
+      SELECT 
+        elem as element,
+        COUNT(*) as occurrence
+      FROM resolution_quality,
+      LATERAL unnest(missing_elements) as elem
+      GROUP BY elem
+      ORDER BY occurrence DESC
+      LIMIT 20
+    `);
+    
+    // Examples of each quality level
+    const examples = await db.query(`
+      SELECT 
+        rq.quality_level,
+        st.subject,
+        st.customer_question,
+        st.agent_answer,
+        rq.reasoning,
+        rq.missing_elements,
+        rq.positive_elements
+      FROM resolution_quality rq
+      JOIN scrubbed_tickets st ON st.id = rq.ticket_id
+      ORDER BY rq.quality_level, RANDOM()
+      LIMIT 40
+    `);
+    
+    // Problematic cases (LOW + NONE)
+    const problematic = await db.query(`
+      SELECT 
+        cm.hjelpesenter_category,
+        COUNT(*) as count,
+        ARRAY_AGG(DISTINCT st.subject ORDER BY st.subject LIMIT 5) as example_subjects
+      FROM resolution_quality rq
+      JOIN scrubbed_tickets st ON st.id = rq.ticket_id
+      JOIN category_mappings cm ON cm.ticket_id = st.id
+      WHERE rq.quality_level IN ('low', 'none')
+      GROUP BY cm.hjelpesenter_category
+      ORDER BY count DESC
+      LIMIT 10
+    `);
+    
+    res.json({
+      overall: overall.rows,
+      byCategory: byCategory.rows,
+      byPattern: byPattern.rows,
+      missingElements: missingElements.rows,
+      examples: examples.rows,
+      problematic: problematic.rows
+    });
+    
+  } catch (error) {
+    console.error('Quality stats error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+```
+
+══════════════════════════════════════════════════════════════
+DEL 5: DASHBOARD TAB
+══════════════════════════════════════════════════════════════
+
+NY TAB: "Resolusjons-kvalitet"
+
+Vis:
+
+1. STAT CARDS (5 kort):
+   - Total vurdert
+   - HIGH (grønn) - "Utmerket løsning"
+   - MEDIUM (gul) - "OK løsning"
+   - LOW (oransje) - "Dårlig løsning"
+   - NONE (rød) - "Ingen løsning"
+
+2. KVALITETSFORDELING (pie chart):
+   - Visualiser fordeling av kvalitetsnivåer
+
+3. KVALITET PER KATEGORI (heatmap eller tabell):
+   Kategori | HIGH | MEDIUM | LOW | NONE | Total
+   ---------|------|--------|-----|------|------
+   Min Side | 45%  | 30%    | 15% | 10%  | 100%
+   ...
+
+4. KVALITET PER DIALOG-MØNSTER (tabell):
+   Mønster | HIGH | MEDIUM | LOW | NONE
+   --------|------|--------|-----|-----
+   Kun autosvar | 0% | 5% | 20% | 75% ⚠️
+   Quick resolution | 60% | 30% | 10% | 0% ✅
+   Extended dialog | 40% | 40% | 15% | 5%
+   Direct human | 70% | 20% | 10% | 0% ✅
+
+5. VANLIGSTE MANGLER (bar chart):
+   - "Mangler konkrete steg": 145 tickets
+   - "Ingen pris oppgitt": 98 tickets
+   - "Ingen oppfølging": 87 tickets
+   - "Vag veiledning": 76 tickets
+   - ...
+
+6. PROBLEMATISKE KATEGORIER (alert boxes):
+   "⚠️ ADVARSEL: Registrering har 35% LOW/NONE kvalitet
+   Topp mangler: Mangler chipnummer-veiledning, Ingen tidslinje"
+
+7. EKSEMPLER (accordion):
+   For hvert kvalitetsnivå, vis 2-3 eksempler med:
+   - Subject
+   - Reasoning
+   - Missing elements
+   - Positive elements
+
+8. INNSIKTER (colored alert):
+   "💡 INNSIKT:
+   - 75% av 'Kun autosvar' saker har NONE kvalitet
+   - 'Direct human response' gir 70% HIGH kvalitet
+   - Eierskifte har best kvalitet (60% HIGH)
+   - Registrering trenger forbedring (35% LOW/NONE)"
+
+9. KNAPP:
+   "Kjør kvalitetsvurdering"
+
+══════════════════════════════════════════════════════════════
+DEL 6: BRUK I PLAYBOOK
+══════════════════════════════════════════════════════════════
+
+Når Playbook genereres, inkluder kvalitetsdata:
+```typescript
+// For hver intent i playbook:
+{
+  intent: "OwnershipTransfer",
+  
+  // ...andre felt...
+  
+  // Resolusjons-kvalitet:
+  avgResolutionQuality: "high",  // Gjennomsnitt av alle tickets
+  qualityDistribution: {
+    high: 0.60,    // 60% HIGH
+    medium: 0.30,
+    low: 0.08,
+    none: 0.02
+  },
+  
+  commonMissingElements: [
+    "Ingen tidslinje oppgitt",
+    "Mangler betalingsinformasjon"
+  ],
+  
+  commonPositiveElements: [
+    "Konkrete steg",
+    "Pris oppgitt",
+    "Profesjonell tone"
+  ],
+  
+  // VIKTIG for chatbot:
+  // Hvis avg quality er LOW/NONE, prioriter forbedring!
+  needsImprovement: false  // true hvis >30% LOW/NONE
+}
+```
+
+══════════════════════════════════════════════════════════════
+KJØRING
+══════════════════════════════════════════════════════════════
+
+TRINN 1: Test på 50 tickets
+→ Kjør runQualityAssessment() med LIMIT 50
+→ Manuelt sjekk 5-10 vurderinger
+→ Er kvalitetsnivåene riktige?
+
+TRINN 2: Juster prompt hvis nødvendig
+→ Hvis for mange HIGH: Øk krav
+→ Hvis for mange NONE: Senk terskelen
+
+TRINN 3: Kjør på alle (1000 eller mer)
+→ Kjør full vurdering
+→ Analyser resultater
+
+FORVENTET RESULTAT:
+- 40-50% HIGH (godt!)
+- 30-35% MEDIUM (ok)
+- 10-15% LOW (kan forbedres)
+- 5-10% NONE (problematisk - må fikses)
+
+KRITISKE INNSIKTER:
+- Hvilke kategorier har lavest kvalitet?
+- Hva er vanligste mangler?
+- Korrelasjon mellom dialog-mønster og kvalitet?
+- Skal autosvar forbedres?

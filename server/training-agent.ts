@@ -1734,3 +1734,126 @@ Return JSON: {"actualCategory":"kategori-navn eller null","actualSubcategory":"u
 
   return { metrics };
 }
+
+// ─── OPPGAVE D: RESOLUSJONS-KVALITET VURDERING ────────────────────────────
+export async function runQualityAssessment(
+  onProgress?: (message: string, percent: number) => void,
+  ticketLimit?: number
+): Promise<{ metrics: BatchMetrics }> {
+  const metrics = createMetrics();
+
+  onProgress?.("Henter tickets som ikke er kvalitetsvurdert...", 5);
+  const limit = ticketLimit || 1000;
+  const tickets = await storage.getTicketsForQualityAssessment(limit);
+  metrics.totalTickets = tickets.length;
+
+  if (tickets.length === 0) {
+    onProgress?.("Ingen tickets trenger kvalitetsvurdering (alle er allerede vurdert).", 100);
+    finalizeMetrics(metrics);
+    return { metrics };
+  }
+
+  onProgress?.(`Vurderer kvalitet på ${tickets.length} tickets med AI...`, 10);
+
+  const BATCH_SIZE = 5;
+  const batches = chunk(tickets, BATCH_SIZE);
+  let processed = 0;
+  const qualityCounts: Record<string, number> = { high: 0, medium: 0, low: 0, none: 0 };
+
+  for (const batch of batches) {
+    const results = await Promise.all(
+      batch.map(async (ticket: any) => {
+        const messagesText = Array.isArray(ticket.messages)
+          ? ticket.messages.slice(0, 10).map((m: any, i: number) => `${i + 1}. ${m.from || m.role || 'Ukjent'}: ${(m.body || m.content || '').substring(0, 500)}`).join('\n')
+          : 'Ingen dialog';
+
+        const prompt = `Vurder om kunden fikk en god løsning i denne support-saken.
+
+SAKEN:
+Subject: ${ticket.subject || 'Ingen subject'}
+Kundens spørsmål: ${(ticket.customerQuestion || '').substring(0, 1500)}
+Agentens svar: ${(ticket.agentAnswer || 'Ingen svar').substring(0, 1500)}
+
+Dialog (hvis flere meldinger):
+${messagesText}
+
+KONTEKST:
+- Hadde autosvar: ${ticket.hasAutoreply ? 'Ja' : 'Nei'}
+- Dialog-mønster: ${ticket.dialogPattern || 'Ukjent'}
+- Auto-lukket: ${ticket.autoClosed ? 'Ja' : 'Nei'}
+
+KVALITETSKRITERIER:
+HIGH: Konkrete steg, kunden fikk alt de trengte, priser/lenker/kontaktinfo, profesjonell tone, bekreftet løsning
+MEDIUM: Løsning gitt men vag/ufullstendig, mangler detaljer, kunden må følge opp, generell veiledning
+LOW: Kun informasjon uten handling, agent ba kunden selv finne løsning, vag "prøv dette", gjentatte spørsmål
+NONE: Kun autosvar uten oppfølging, agent kunne ikke hjelpe, saken lukket uten løsning
+
+VIKTIGE SIGNALER:
+- Kun autosvar + auto-lukket = sannsynligvis NONE
+- "Jeg skal undersøke" uten oppfølging = LOW/NONE
+- Konkrete steg + priser/lenker = HIGH
+- Veiledning + "kontakt oss hvis..." = MEDIUM
+
+Return JSON:
+{
+  "qualityLevel": "high" | "medium" | "low" | "none",
+  "confidence": 0.0-1.0,
+  "missingElements": ["array av mangler"],
+  "positiveElements": ["array av positive aspekter"],
+  "reasoning": "Kort forklaring"
+}`;
+
+        try {
+          const text = await callOpenAI(prompt, "gpt-5-nano", 1024, true);
+          metrics.apiCalls++;
+          metrics.estimatedInputTokens += estimateTokens(prompt);
+          metrics.estimatedOutputTokens += 150;
+
+          const parsed = JSON.parse(text);
+          return {
+            ticketId: ticket.id,
+            qualityLevel: parsed.qualityLevel || 'none',
+            confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0,
+            missingElements: Array.isArray(parsed.missingElements) ? parsed.missingElements : [],
+            positiveElements: Array.isArray(parsed.positiveElements) ? parsed.positiveElements : [],
+            reasoning: parsed.reasoning || 'Ukjent',
+            hadAutoreply: ticket.hasAutoreply || false,
+            dialogPattern: ticket.dialogPattern || null,
+          };
+        } catch (e) {
+          metrics.errors++;
+          return {
+            ticketId: ticket.id,
+            qualityLevel: 'none',
+            confidence: 0,
+            missingElements: ['Parsing error'],
+            positiveElements: [],
+            reasoning: 'Error in assessment',
+            hadAutoreply: ticket.hasAutoreply || false,
+            dialogPattern: ticket.dialogPattern || null,
+          };
+        }
+      })
+    );
+
+    for (const result of results) {
+      await storage.insertResolutionQuality(result);
+      qualityCounts[result.qualityLevel] = (qualityCounts[result.qualityLevel] || 0) + 1;
+      processed++;
+      metrics.processedTickets = processed;
+    }
+
+    const pct = Math.min(95, 10 + Math.round((processed / tickets.length) * 85));
+    onProgress?.(`Vurdert ${processed}/${tickets.length} (H:${qualityCounts.high} M:${qualityCounts.medium} L:${qualityCounts.low} N:${qualityCounts.none})`, pct);
+
+    await new Promise((r) => setTimeout(r, 100));
+  }
+
+  finalizeMetrics(metrics);
+  const total = processed;
+  const highPct = total > 0 ? ((qualityCounts.high / total) * 100).toFixed(1) : '0';
+  const nonePct = total > 0 ? ((qualityCounts.none / total) * 100).toFixed(1) : '0';
+  onProgress?.(`Ferdig! ${total} vurdert. HIGH: ${qualityCounts.high} (${highPct}%), MEDIUM: ${qualityCounts.medium}, LOW: ${qualityCounts.low}, NONE: ${qualityCounts.none} (${nonePct}%). ${metrics.apiCalls} API-kall.`, 100);
+
+  return { metrics };
+}

@@ -43,6 +43,8 @@ import {
   ArrowRight,
   Shuffle,
   Lightbulb,
+  BarChart3,
+  TrendingDown,
 } from "lucide-react";
 import { useState, useCallback } from "react";
 import {
@@ -690,6 +692,19 @@ export default function Dashboard() {
     queryKey: ["/api/training/dialog-pattern-stats"],
   });
 
+  const { data: qualityStats } = useQuery<{
+    total: number;
+    unassessed: number;
+    byQuality: { level: string; count: number; avgConfidence: number }[];
+    byCategory: { category: string; level: string; count: number }[];
+    byPattern: { pattern: string; level: string; count: number }[];
+    missingElements: { element: string; count: number }[];
+    problematic: { category: string; lowNoneCount: number; totalCount: number; pct: number }[];
+    examples: { level: string; subject: string | null; reasoning: string | null; missingElements: string[] | null; positiveElements: string[] | null }[];
+  }>({
+    queryKey: ["/api/training/quality-stats"],
+  });
+
   const { data: reclassStats } = useQuery<{
     totalGeneral: number;
     reclassified: number;
@@ -719,7 +734,7 @@ export default function Dashboard() {
             DyreID Training Agent
           </h1>
           <p className="text-sm text-muted-foreground">
-            11-stegs treningspipeline for support-automatisering
+            12-stegs treningspipeline for support-automatisering
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -809,6 +824,9 @@ export default function Dashboard() {
           </TabsTrigger>
           <TabsTrigger value="reclassification" data-testid="tab-reclassification">
             Reklassifisering ({reclassStats?.reclassified || 0})
+          </TabsTrigger>
+          <TabsTrigger value="quality" data-testid="tab-quality">
+            Kvalitet ({qualityStats?.total || 0})
           </TabsTrigger>
         </TabsList>
 
@@ -909,6 +927,13 @@ export default function Dashboard() {
               description="Reklassifiser 'Generell e-post' til korrekte standardkategorier via AI"
               endpoint="/api/training/reclassify"
               icon={Shuffle}
+            />
+            <WorkflowCard
+              step={12}
+              title="Kvalitetsvurdering"
+              description="Vurder løsningskvalitet (HIGH/MEDIUM/LOW/NONE) med AI-analyse av svar"
+              endpoint="/api/training/assess-quality"
+              icon={BarChart3}
             />
           </div>
           <Card className="mt-4 border-primary/30">
@@ -1633,6 +1658,10 @@ export default function Dashboard() {
 
         <TabsContent value="reclassification" className="mt-4">
           <ReclassificationTab stats={reclassStats} />
+        </TabsContent>
+
+        <TabsContent value="quality" className="mt-4">
+          <QualityTab stats={qualityStats} />
         </TabsContent>
       </Tabs>
     </div>
@@ -2670,6 +2699,417 @@ function ReclassificationTab({ stats }: {
             <Shuffle className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
             <p className="text-sm text-muted-foreground">
               Ingen reklassifiseringsdata ennå. Kjør kategori-mapping (steg 3) først, og deretter reklassifisering for å analysere generelle tickets.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function QualityTab({ stats }: {
+  stats: {
+    total: number;
+    unassessed: number;
+    byQuality: { level: string; count: number; avgConfidence: number }[];
+    byCategory: { category: string; level: string; count: number }[];
+    byPattern: { pattern: string; level: string; count: number }[];
+    missingElements: { element: string; count: number }[];
+    problematic: { category: string; lowNoneCount: number; totalCount: number; pct: number }[];
+    examples: { level: string; subject: string | null; reasoning: string | null; missingElements: string[] | null; positiveElements: string[] | null }[];
+  } | undefined;
+}) {
+  const { isRunning, progress, logs, error, run } = useSSEWorkflow("/api/training/assess-quality");
+  const [showExamples, setShowExamples] = useState<string | null>(null);
+
+  const levelInfo: Record<string, { label: string; color: string; textColor: string }> = {
+    high: { label: "Utmerket", color: "text-green-500", textColor: "text-green-600" },
+    medium: { label: "OK", color: "text-yellow-500", textColor: "text-yellow-600" },
+    low: { label: "Dårlig", color: "text-orange-500", textColor: "text-orange-600" },
+    none: { label: "Ingen", color: "text-red-500", textColor: "text-red-600" },
+  };
+
+  const getQualityCount = (level: string) => stats?.byQuality?.find(q => q.level === level)?.count || 0;
+  const totalAssessed = stats?.total || 0;
+  const getPct = (level: string) => totalAssessed > 0 ? ((getQualityCount(level) / totalAssessed) * 100).toFixed(1) : "0";
+
+  const categoryRows = () => {
+    if (!stats?.byCategory?.length) return [];
+    const catMap: Record<string, Record<string, number>> = {};
+    for (const item of stats.byCategory) {
+      if (!catMap[item.category]) catMap[item.category] = {};
+      catMap[item.category][item.level] = item.count;
+    }
+    return Object.entries(catMap).map(([cat, levels]) => {
+      const total = Object.values(levels).reduce((a, b) => a + b, 0);
+      return {
+        category: cat,
+        high: levels.high || 0,
+        medium: levels.medium || 0,
+        low: levels.low || 0,
+        none: levels.none || 0,
+        total,
+        highPct: total > 0 ? Math.round(((levels.high || 0) / total) * 100) : 0,
+        lowNonePct: total > 0 ? Math.round((((levels.low || 0) + (levels.none || 0)) / total) * 100) : 0,
+      };
+    }).sort((a, b) => b.total - a.total);
+  };
+
+  const patternRows = () => {
+    if (!stats?.byPattern?.length) return [];
+    const patMap: Record<string, Record<string, number>> = {};
+    for (const item of stats.byPattern) {
+      if (!patMap[item.pattern]) patMap[item.pattern] = {};
+      patMap[item.pattern][item.level] = item.count;
+    }
+    return Object.entries(patMap).map(([pattern, levels]) => {
+      const total = Object.values(levels).reduce((a, b) => a + b, 0);
+      return {
+        pattern,
+        high: levels.high || 0,
+        medium: levels.medium || 0,
+        low: levels.low || 0,
+        none: levels.none || 0,
+        total,
+      };
+    }).sort((a, b) => b.total - a.total);
+  };
+
+  const patternLabel: Record<string, string> = {
+    autosvar_only: "Kun autosvar",
+    autosvar_quick_resolution: "Rask løsning",
+    autosvar_extended_dialog: "Utvidet dialog",
+    direct_human_response: "Direkte svar",
+  };
+
+  const examplesForLevel = (level: string) => stats?.examples?.filter(e => e.level === level) || [];
+
+  const highCount = getQualityCount("high");
+  const mediumCount = getQualityCount("medium");
+  const lowNoneCount = getQualityCount("low") + getQualityCount("none");
+  const bestCategory = categoryRows().sort((a, b) => b.highPct - a.highPct)[0];
+  const worstCategory = categoryRows().sort((a, b) => b.lowNonePct - a.lowNonePct)[0];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3 flex-wrap">
+        <Button
+          data-testid="button-run-quality"
+          onClick={() => {
+            run();
+            setTimeout(() => {
+              queryClient.invalidateQueries({ queryKey: ["/api/training/quality-stats"] });
+            }, 3000);
+          }}
+          disabled={isRunning}
+          size="sm"
+        >
+          {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <BarChart3 className="h-4 w-4" />}
+          {isRunning ? "Vurderer..." : "Kjør kvalitetsvurdering"}
+        </Button>
+        {stats?.unassessed !== undefined && stats.unassessed > 0 && (
+          <Badge variant="secondary">{stats.unassessed} uvurdert</Badge>
+        )}
+        {isRunning && <Progress value={progress} className="flex-1 min-w-[200px]" />}
+      </div>
+
+      {error && (
+        <div className="flex items-center gap-1 text-xs text-destructive">
+          <AlertCircle className="h-3 w-3 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {logs.length > 0 && (
+        <ScrollArea className="h-[120px] border rounded-md p-2">
+          {logs.map((l, i) => (
+            <p key={i} className="text-xs text-muted-foreground">{l}</p>
+          ))}
+        </ScrollArea>
+      )}
+
+      <div className="grid gap-3 md:grid-cols-5">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Totalt vurdert</CardTitle>
+            <BarChart3 className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold" data-testid="text-quality-total">{totalAssessed}</div>
+            <p className="text-xs text-muted-foreground">tickets kvalitetsvurdert</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">HIGH</CardTitle>
+            <CheckCircle className="h-4 w-4 text-green-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-600" data-testid="text-quality-high">{highCount}</div>
+            <p className="text-xs text-muted-foreground">{getPct("high")}% - utmerket løsning</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">MEDIUM</CardTitle>
+            <AlertTriangle className="h-4 w-4 text-yellow-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-yellow-600" data-testid="text-quality-medium">{mediumCount}</div>
+            <p className="text-xs text-muted-foreground">{getPct("medium")}% - ok løsning</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">LOW</CardTitle>
+            <TrendingDown className="h-4 w-4 text-orange-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-orange-600" data-testid="text-quality-low">{getQualityCount("low")}</div>
+            <p className="text-xs text-muted-foreground">{getPct("low")}% - dårlig løsning</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">NONE</CardTitle>
+            <AlertCircle className="h-4 w-4 text-red-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-red-600" data-testid="text-quality-none">{getQualityCount("none")}</div>
+            <p className="text-xs text-muted-foreground">{getPct("none")}% - ingen løsning</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {totalAssessed > 0 && (
+        <>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Kvalitetsfordeling</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {["high", "medium", "low", "none"].map(level => {
+                const pct = parseFloat(getPct(level));
+                const info = levelInfo[level];
+                return (
+                  <div key={level} className="space-y-1">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className={`text-sm font-medium ${info.textColor}`}>{info.label} ({level.toUpperCase()})</span>
+                      <span className="text-sm text-muted-foreground">{getQualityCount(level)} tickets ({pct}%)</span>
+                    </div>
+                    <Progress value={pct} className="h-2" />
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
+
+          {categoryRows().length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Kvalitet per kategori</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b">
+                        <th className="text-left py-2 pr-4">Kategori</th>
+                        <th className="text-right py-2 px-2 text-green-600">HIGH</th>
+                        <th className="text-right py-2 px-2 text-yellow-600">MED</th>
+                        <th className="text-right py-2 px-2 text-orange-600">LOW</th>
+                        <th className="text-right py-2 px-2 text-red-600">NONE</th>
+                        <th className="text-right py-2 pl-2">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {categoryRows().map(row => (
+                        <tr key={row.category} className="border-b last:border-0">
+                          <td className="py-2 pr-4 font-medium">{row.category}</td>
+                          <td className="text-right py-2 px-2 text-green-600">{row.high}</td>
+                          <td className="text-right py-2 px-2 text-yellow-600">{row.medium}</td>
+                          <td className="text-right py-2 px-2 text-orange-600">{row.low}</td>
+                          <td className="text-right py-2 px-2 text-red-600">{row.none}</td>
+                          <td className="text-right py-2 pl-2 text-muted-foreground">{row.total}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {patternRows().length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Kvalitet per dialog-mønster</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b">
+                        <th className="text-left py-2 pr-4">Mønster</th>
+                        <th className="text-right py-2 px-2 text-green-600">HIGH</th>
+                        <th className="text-right py-2 px-2 text-yellow-600">MED</th>
+                        <th className="text-right py-2 px-2 text-orange-600">LOW</th>
+                        <th className="text-right py-2 px-2 text-red-600">NONE</th>
+                        <th className="text-right py-2 pl-2">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {patternRows().map(row => {
+                        const total = row.total;
+                        const nonePct = total > 0 ? Math.round((row.none / total) * 100) : 0;
+                        return (
+                          <tr key={row.pattern} className="border-b last:border-0">
+                            <td className="py-2 pr-4 font-medium">
+                              {patternLabel[row.pattern] || row.pattern}
+                              {nonePct > 50 && <Badge variant="destructive" className="ml-2 text-xs">Problematisk</Badge>}
+                            </td>
+                            <td className="text-right py-2 px-2 text-green-600">{row.high}</td>
+                            <td className="text-right py-2 px-2 text-yellow-600">{row.medium}</td>
+                            <td className="text-right py-2 px-2 text-orange-600">{row.low}</td>
+                            <td className="text-right py-2 px-2 text-red-600">{row.none}</td>
+                            <td className="text-right py-2 pl-2 text-muted-foreground">{total}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {stats?.missingElements && stats.missingElements.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Vanligste mangler</CardTitle>
+                <p className="text-xs text-muted-foreground">Hva som oftest mangler i support-svar</p>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {stats.missingElements.slice(0, 10).map((item, i) => {
+                  const maxCount = stats.missingElements[0]?.count || 1;
+                  const pct = (item.count / maxCount) * 100;
+                  return (
+                    <div key={i} className="space-y-1">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <span className="text-sm">{item.element}</span>
+                        <span className="text-sm text-muted-foreground">{item.count} tickets</span>
+                      </div>
+                      <Progress value={pct} className="h-1.5" />
+                    </div>
+                  );
+                })}
+              </CardContent>
+            </Card>
+          )}
+
+          {stats?.problematic && stats.problematic.length > 0 && (
+            <div className="space-y-2">
+              {stats.problematic.filter(p => p.pct >= 25).map((item, i) => (
+                <Card key={i} className="border-destructive/30">
+                  <CardContent className="py-3">
+                    <div className="flex items-start gap-3">
+                      <AlertTriangle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-sm font-medium">Advarsel: {item.category}</p>
+                        <p className="text-sm text-muted-foreground mt-0.5">
+                          {item.pct}% av tickets har LOW/NONE kvalitet ({item.lowNoneCount} av {item.totalCount})
+                        </p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+
+          {(highCount > 0 || lowNoneCount > 0) && (
+            <Card className="border-primary/30">
+              <CardContent className="py-4">
+                <div className="flex items-start gap-3">
+                  <Lightbulb className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium">Innsikt</p>
+                    <div className="text-sm text-muted-foreground mt-1 space-y-1">
+                      <p>{getPct("high")}% av saker har utmerket løsning (HIGH), {getPct("none")}% fikk ingen løsning.</p>
+                      {bestCategory && bestCategory.highPct > 0 && (
+                        <p>Beste kategori: <span className="font-medium text-foreground">{bestCategory.category}</span> ({bestCategory.highPct}% HIGH)</p>
+                      )}
+                      {worstCategory && worstCategory.lowNonePct > 0 && (
+                        <p>Trenger forbedring: <span className="font-medium text-foreground">{worstCategory.category}</span> ({worstCategory.lowNonePct}% LOW/NONE)</p>
+                      )}
+                      {stats?.missingElements?.[0] && (
+                        <p>Vanligste mangel: <span className="font-medium text-foreground">{stats.missingElements[0].element}</span> ({stats.missingElements[0].count} tickets)</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Eksempler per kvalitetsnivå</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {["high", "medium", "low", "none"].map(level => {
+                const info = levelInfo[level];
+                const examples = examplesForLevel(level);
+                if (examples.length === 0) return null;
+                const isOpen = showExamples === level;
+                return (
+                  <div key={level} className="border rounded-md">
+                    <button
+                      data-testid={`button-toggle-examples-${level}`}
+                      className="w-full flex items-center justify-between gap-2 p-3 text-left"
+                      onClick={() => setShowExamples(isOpen ? null : level)}
+                    >
+                      <span className={`text-sm font-medium ${info.textColor}`}>{info.label} ({level.toUpperCase()}) - {examples.length} eksempler</span>
+                      <ArrowRight className={`h-4 w-4 text-muted-foreground transition-transform ${isOpen ? 'rotate-90' : ''}`} />
+                    </button>
+                    {isOpen && (
+                      <div className="px-3 pb-3 space-y-3">
+                        {examples.map((ex, i) => (
+                          <div key={i} className="border-t pt-2 space-y-1">
+                            <p className="text-sm font-medium">{ex.subject || "Uten emne"}</p>
+                            <p className="text-xs text-muted-foreground">{ex.reasoning}</p>
+                            {ex.positiveElements && ex.positiveElements.length > 0 && (
+                              <div className="flex items-center gap-1 flex-wrap">
+                                {ex.positiveElements.map((elem, j) => (
+                                  <Badge key={j} variant="outline" className="text-xs no-default-hover-elevate no-default-active-elevate text-green-600">{elem}</Badge>
+                                ))}
+                              </div>
+                            )}
+                            {ex.missingElements && ex.missingElements.length > 0 && (
+                              <div className="flex items-center gap-1 flex-wrap">
+                                {ex.missingElements.map((elem, j) => (
+                                  <Badge key={j} variant="outline" className="text-xs no-default-hover-elevate no-default-active-elevate text-red-600">{elem}</Badge>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
+        </>
+      )}
+
+      {totalAssessed === 0 && !isRunning && (
+        <Card>
+          <CardContent className="py-8 text-center">
+            <BarChart3 className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
+            <p className="text-sm text-muted-foreground">
+              Ingen kvalitetsvurderinger ennå. Kjør GDPR-skrubbing og kategori-mapping først, deretter kvalitetsvurdering.
             </p>
           </CardContent>
         </Card>

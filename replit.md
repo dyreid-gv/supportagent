@@ -118,7 +118,12 @@ client/src/
 - POST /api/training/reclassify (SSE) - Reclassify "Generell e-post" tickets to correct standard categories via AI
 - GET /api/training/reclassification-stats - Reclassification statistics with per-category breakdown
 
+### Resolution Quality Assessment (Oppgave D)
+- POST /api/training/assess-quality (SSE) - Assess resolution quality (HIGH/MEDIUM/LOW/NONE) for scrubbed tickets via AI
+- GET /api/training/quality-stats - Quality statistics with per-category breakdown, per-pattern breakdown, missing elements, problematic categories, examples
+
 ## Recent Changes
+- 2026-02-14: Resolution Quality Assessment (Oppgave D) - resolution_quality table with qualityLevel, confidence, reasoning, missingElements, positiveElements, customerQuestion, agentAnswer. Pipeline step 12 assesses quality using gpt-5-nano in batches of 5. Dashboard Kvalitet tab with 5 stat cards (total, HIGH, MEDIUM, LOW, NONE), quality distribution bars, per-category table, per-pattern table, top missing elements chart, problematic category alerts (≥25% LOW/NONE), insight card, collapsible examples per level.
 - 2026-02-14: Reclassification (Oppgave C) - Added reclassification columns to category_mappings (needsReclassification, originalCategory, reclassifiedCategory, reclassifiedSubcategory, reclassificationConfidence, reclassificationReasoning). Pipeline step 11 identifies general/generic tickets and reclassifies them to 9 standard categories using gpt-5-nano. Dashboard Reklassifisering tab with 4 stat cards, distribution bars, insight card, truly general list. Confidence threshold 0.6.
 - 2026-02-14: Dialog pattern analysis (Oppgave B) - dialog_pattern, messages_after_autoreply, total_message_count columns added to scrubbed_tickets. 4 patterns: autosvar_only (problematic), autosvar_quick_resolution (efficient), autosvar_extended_dialog (complex), direct_human_response (good service). Dashboard Dialog-mønstre tab with stat cards, distribution bars, per-category table, and problematic cases highlight.
 - 2026-02-14: Autoreply detection (Workflow 2B) - keywords column added to response_templates, autoreply tracking columns (has_autoreply, autoreply_template_id, autoreply_confidence, human_response_starts_at) added to scrubbed_tickets. Two-step workflow: 1) Generate keywords for 22 templates via OpenAI gpt-4o, 2) Match ticket dialogs to templates using Levenshtein similarity + keyword overlap + subject matching. Dashboard Autosvar-gjenkjenning tab with stats cards, confidence bar, template distribution. Threshold: confidence > 0.6 for autoreply detection.

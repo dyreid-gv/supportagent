@@ -19,6 +19,7 @@ import {
   helpCenterArticles,
   chatbotInteractions,
   ticketHelpCenterMatches,
+  resolutionQuality,
   type InsertRawTicket,
   type InsertHelpCenterArticle,
   type InsertScrubbedTicket,
@@ -32,6 +33,7 @@ import {
   type InsertResponseTemplate,
   type InsertChatbotInteraction,
   type InsertTicketHelpCenterMatch,
+  type InsertResolutionQuality,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -169,6 +171,19 @@ export interface IStorage {
     patterns: { pattern: string; count: number; avgMessages: number; avgTotal: number }[];
     byCategory: { category: string; pattern: string; count: number }[];
     problematic: { category: string; count: number }[];
+  }>;
+
+  getTicketsForQualityAssessment(limit: number): Promise<any[]>;
+  insertResolutionQuality(data: InsertResolutionQuality): Promise<void>;
+  getResolutionQualityStats(): Promise<{
+    total: number;
+    unassessed: number;
+    byQuality: { level: string; count: number; avgConfidence: number }[];
+    byCategory: { category: string; level: string; count: number }[];
+    byPattern: { pattern: string; level: string; count: number }[];
+    missingElements: { element: string; count: number }[];
+    problematic: { category: string; lowNoneCount: number; totalCount: number; pct: number }[];
+    examples: { level: string; subject: string | null; reasoning: string | null; missingElements: string[] | null; positiveElements: string[] | null }[];
   }>;
 
   identifyGeneralTickets(): Promise<number>;
@@ -1136,6 +1151,130 @@ export class DatabaseStorage implements IStorage {
 
   async deleteAllTicketHelpCenterMatches() {
     await db.delete(ticketHelpCenterMatches);
+  }
+
+  async getTicketsForQualityAssessment(limit: number) {
+    const assessed = db.select({ ticketId: resolutionQuality.ticketId }).from(resolutionQuality);
+    const rows = await db
+      .select({
+        id: scrubbedTickets.id,
+        ticketId: scrubbedTickets.ticketId,
+        subject: scrubbedTickets.subject,
+        customerQuestion: scrubbedTickets.customerQuestion,
+        agentAnswer: scrubbedTickets.agentAnswer,
+        messages: scrubbedTickets.messages,
+        autoClosed: scrubbedTickets.autoClosed,
+        hasAutoreply: scrubbedTickets.hasAutoreply,
+        dialogPattern: scrubbedTickets.dialogPattern,
+      })
+      .from(scrubbedTickets)
+      .where(sql`${scrubbedTickets.id} NOT IN (${assessed})`)
+      .orderBy(scrubbedTickets.id)
+      .limit(limit);
+    return rows;
+  }
+
+  async insertResolutionQuality(data: InsertResolutionQuality) {
+    await db.insert(resolutionQuality).values(data);
+  }
+
+  async getResolutionQualityStats() {
+    const allRq = await db.select().from(resolutionQuality);
+    const totalScrubbed = await this.getScrubbedTicketCount();
+    const unassessed = totalScrubbed - allRq.length;
+
+    const qualityMap: Record<string, { count: number; totalConf: number }> = {};
+    const catMap: Record<string, Record<string, number>> = {};
+    const patternMap: Record<string, Record<string, number>> = {};
+    const missingMap: Record<string, number> = {};
+    const catTotals: Record<string, { total: number; lowNone: number }> = {};
+
+    for (const rq of allRq) {
+      if (!qualityMap[rq.qualityLevel]) qualityMap[rq.qualityLevel] = { count: 0, totalConf: 0 };
+      qualityMap[rq.qualityLevel].count++;
+      qualityMap[rq.qualityLevel].totalConf += rq.confidence;
+
+      if (rq.dialogPattern) {
+        if (!patternMap[rq.dialogPattern]) patternMap[rq.dialogPattern] = {};
+        patternMap[rq.dialogPattern][rq.qualityLevel] = (patternMap[rq.dialogPattern][rq.qualityLevel] || 0) + 1;
+      }
+
+      if (rq.missingElements) {
+        for (const elem of rq.missingElements) {
+          missingMap[elem] = (missingMap[elem] || 0) + 1;
+        }
+      }
+    }
+
+    const catMappings = await db.select({
+      ticketId: categoryMappings.ticketId,
+      category: categoryMappings.hjelpesenterCategory,
+    }).from(categoryMappings);
+    const ticketCatMap = new Map(catMappings.map(c => [c.ticketId, c.category]));
+
+    for (const rq of allRq) {
+      const cat = ticketCatMap.get(rq.ticketId) || "Ukjent";
+      if (!catMap[cat]) catMap[cat] = {};
+      catMap[cat][rq.qualityLevel] = (catMap[cat][rq.qualityLevel] || 0) + 1;
+      if (!catTotals[cat]) catTotals[cat] = { total: 0, lowNone: 0 };
+      catTotals[cat].total++;
+      if (rq.qualityLevel === "low" || rq.qualityLevel === "none") catTotals[cat].lowNone++;
+    }
+
+    const byQuality = ["high", "medium", "low", "none"].map(level => ({
+      level,
+      count: qualityMap[level]?.count || 0,
+      avgConfidence: qualityMap[level] ? qualityMap[level].totalConf / qualityMap[level].count : 0,
+    }));
+
+    const byCategory: { category: string; level: string; count: number }[] = [];
+    for (const [cat, levels] of Object.entries(catMap)) {
+      for (const [level, cnt] of Object.entries(levels)) {
+        byCategory.push({ category: cat, level, count: cnt });
+      }
+    }
+
+    const byPattern: { pattern: string; level: string; count: number }[] = [];
+    for (const [pattern, levels] of Object.entries(patternMap)) {
+      for (const [level, cnt] of Object.entries(levels)) {
+        byPattern.push({ pattern, level, count: cnt });
+      }
+    }
+
+    const missingElements = Object.entries(missingMap)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 20)
+      .map(([element, cnt]) => ({ element, count: cnt }));
+
+    const problematic = Object.entries(catTotals)
+      .filter(([, v]) => v.lowNone > 0)
+      .map(([category, v]) => ({ category, lowNoneCount: v.lowNone, totalCount: v.total, pct: Math.round((v.lowNone / v.total) * 100) }))
+      .sort((a, b) => b.pct - a.pct)
+      .slice(0, 10);
+
+    const exampleRows = await db
+      .select({
+        level: resolutionQuality.qualityLevel,
+        subject: scrubbedTickets.subject,
+        reasoning: resolutionQuality.reasoning,
+        missingElements: resolutionQuality.missingElements,
+        positiveElements: resolutionQuality.positiveElements,
+      })
+      .from(resolutionQuality)
+      .innerJoin(scrubbedTickets, eq(resolutionQuality.ticketId, scrubbedTickets.id))
+      .orderBy(sql`RANDOM()`)
+      .limit(12);
+
+    return {
+      total: allRq.length,
+      unassessed,
+      byQuality,
+      byCategory,
+      byPattern,
+      missingElements,
+      problematic,
+      examples: exampleRows,
+    };
   }
 }
 

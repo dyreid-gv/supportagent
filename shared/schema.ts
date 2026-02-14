@@ -271,6 +271,19 @@ export const ticketHelpCenterMatches = pgTable("ticket_help_center_matches", {
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
+export const resolutionQuality = pgTable("resolution_quality", {
+  id: serial("id").primaryKey(),
+  ticketId: integer("ticket_id").notNull(),
+  qualityLevel: text("quality_level").notNull(),
+  confidence: real("confidence").notNull(),
+  missingElements: text("missing_elements").array(),
+  positiveElements: text("positive_elements").array(),
+  reasoning: text("reasoning"),
+  hadAutoreply: boolean("had_autoreply"),
+  dialogPattern: text("dialog_pattern"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
 export const trainingRuns = pgTable("training_runs", {
   id: serial("id").primaryKey(),
   workflow: text("workflow").notNull(),
@@ -283,6 +296,7 @@ export const trainingRuns = pgTable("training_runs", {
   errorLog: text("error_log"),
 });
 
+export const insertResolutionQualitySchema = createInsertSchema(resolutionQuality).omit({ id: true });
 export const insertTicketHelpCenterMatchSchema = createInsertSchema(ticketHelpCenterMatches).omit({ id: true });
 export const insertChatbotInteractionSchema = createInsertSchema(chatbotInteractions).omit({ id: true });
 export const insertHelpCenterArticleSchema = createInsertSchema(helpCenterArticles).omit({ id: true });
@@ -329,6 +343,8 @@ export type ResponseTemplate = typeof responseTemplates.$inferSelect;
 export type InsertResponseTemplate = z.infer<typeof insertResponseTemplateSchema>;
 export type ServicePrice = typeof servicePrices.$inferSelect;
 export type InsertServicePrice = z.infer<typeof insertServicePriceSchema>;
+export type ResolutionQualityRecord = typeof resolutionQuality.$inferSelect;
+export type InsertResolutionQuality = z.infer<typeof insertResolutionQualitySchema>;
 export type TicketHelpCenterMatch = typeof ticketHelpCenterMatches.$inferSelect;
 export type InsertTicketHelpCenterMatch = z.infer<typeof insertTicketHelpCenterMatchSchema>;
 export type TrainingRun = typeof trainingRuns.$inferSelect;
