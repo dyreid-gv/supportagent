@@ -244,6 +244,19 @@ export const chatbotInteractions = pgTable("chatbot_interactions", {
   feedbackAt: timestamp("feedback_at"),
 });
 
+export const ticketHelpCenterMatches = pgTable("ticket_help_center_matches", {
+  id: serial("id").primaryKey(),
+  ticketId: integer("ticket_id").notNull(),
+  articleId: integer("article_id").notNull(),
+  matchConfidence: real("match_confidence").notNull(),
+  matchReason: text("match_reason"),
+  followsOfficialProcedure: boolean("follows_official_procedure"),
+  alignmentQuality: text("alignment_quality"),
+  missingFromAgent: text("missing_from_agent").array(),
+  addedByAgent: text("added_by_agent").array(),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
 export const trainingRuns = pgTable("training_runs", {
   id: serial("id").primaryKey(),
   workflow: text("workflow").notNull(),
@@ -256,6 +269,7 @@ export const trainingRuns = pgTable("training_runs", {
   errorLog: text("error_log"),
 });
 
+export const insertTicketHelpCenterMatchSchema = createInsertSchema(ticketHelpCenterMatches).omit({ id: true });
 export const insertChatbotInteractionSchema = createInsertSchema(chatbotInteractions).omit({ id: true });
 export const insertHelpCenterArticleSchema = createInsertSchema(helpCenterArticles).omit({ id: true });
 export const insertResponseTemplateSchema = createInsertSchema(responseTemplates).omit({ id: true });
@@ -301,4 +315,6 @@ export type ResponseTemplate = typeof responseTemplates.$inferSelect;
 export type InsertResponseTemplate = z.infer<typeof insertResponseTemplateSchema>;
 export type ServicePrice = typeof servicePrices.$inferSelect;
 export type InsertServicePrice = z.infer<typeof insertServicePriceSchema>;
+export type TicketHelpCenterMatch = typeof ticketHelpCenterMatches.$inferSelect;
+export type InsertTicketHelpCenterMatch = z.infer<typeof insertTicketHelpCenterMatchSchema>;
 export type TrainingRun = typeof trainingRuns.$inferSelect;

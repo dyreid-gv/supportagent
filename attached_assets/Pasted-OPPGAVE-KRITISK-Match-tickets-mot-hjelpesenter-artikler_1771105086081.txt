@@ -1,0 +1,209 @@
+OPPGAVE KRITISK: Match tickets mot hjelpesenter-artikler
+
+KONTEKST:
+Vi har 64 hjelpesenter-artikler scraped og lagret.
+Nå må Training Agent lære fra dem!
+
+FORMÅL:
+- Finne mest relevant hjelpesenter-artikkel for hver ticket
+- Sammenligne agent-løsning vs offisiell prosedyre
+- Identifisere hva som fungerer best
+
+IMPLEMENTERING:
+
+NY WORKFLOW 3C: Help Center Matching
+(Kjør ETTER kategori-mapping, FØR intent-klassifisering)
+
+1. NY TABELL: ticket_help_center_matches
+```sql
+CREATE TABLE ticket_help_center_matches (
+  id SERIAL PRIMARY KEY,
+  ticket_id INTEGER NOT NULL REFERENCES scrubbed_tickets(id),
+  article_id INTEGER NOT NULL REFERENCES help_center_articles(id),
+  match_confidence FLOAT NOT NULL,
+  match_reason TEXT,
+  
+  -- Sammenligning av agent vs offisiell:
+  follows_official_procedure BOOLEAN,
+  alignment_quality TEXT,  -- 'high', 'medium', 'low', 'contradicts'
+  missing_from_agent TEXT[],  -- Hva mangler i agent-svar
+  added_by_agent TEXT[],      -- Hva har agent lagt til
+  
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_ticket_matches ON ticket_help_center_matches(ticket_id);
+CREATE INDEX idx_article_matches ON ticket_help_center_matches(article_id);
+```
+
+2. MATCHING-FUNKSJON
+```typescript
+async function matchTicketToArticle(ticket: any, articles: any[]) {
+  // Hent artikler i samme kategori
+  const relevantArticles = articles.filter(
+    a => a.category_name === ticket.hjelpesenterCategory
+  );
+  
+  if (relevantArticles.length === 0) return null;
+  
+  // Analyser med OpenAI (batch flere tickets)
+  const prompt = `
+Match denne support-saken mot den mest relevante hjelpesenter-artikkelen.
+
+SAKEN:
+Kategori: ${ticket.hjelpesenterCategory}
+Spørsmål: ${ticket.customerQuestion}
+Agent-løsning: ${ticket.agentAnswer}
+
+TILGJENGELIGE ARTIKLER:
+${relevantArticles.map((a, i) => `
+${i + 1}. ${a.title}
+   Sammendrag: ${a.summary || a.content_text.substring(0, 200)}
+   URL: ${a.full_url}
+`).join('\n')}
+
+Hvilken artikkel matcher best?
+Hvis ingen passer godt (confidence < 0.6), returner null.
+
+Return JSON:
+{
+  articleId: number | null,
+  confidence: 0.0-1.0,
+  matchReason: "kort forklaring"
+}
+  `;
+  
+  return await callOpenAI(prompt);
+}
+```
+
+3. SAMMENLIGN AGENT VS OFFISIELL
+```typescript
+async function compareAgentVsOfficial(ticket: any, article: any) {
+  const prompt = `
+Sammenlign support-agentens løsning mot den offisielle prosedyren fra hjelpesenter.
+
+AGENT-LØSNING:
+${ticket.agentAnswer}
+
+OFFISIELL PROSEDYRE (fra hjelpesenter):
+${article.content_text}
+
+Analyser:
+1. Følger agenten den offisielle prosedyren? (JA/NEI)
+2. Hva er kvaliteten på samsvaret? (high/medium/low/contradicts)
+3. Hva mangler i agent-svaret som finnes i artikkel?
+4. Hva har agent lagt til som ikke står i artikkel?
+
+Return JSON:
+{
+  followsOfficialProcedure: boolean,
+  alignmentQuality: "high" | "medium" | "low" | "contradicts",
+  missingFromAgent: string[],  // Liste over mangler
+  addedByAgent: string[]       // Liste over tillegg
+}
+  `;
+  
+  return await callOpenAI(prompt);
+}
+```
+
+4. KJØR PÅ ALLE TICKETS
+
+I Workflow 3C:
+```typescript
+async function runHelpCenterMatching() {
+  console.log('🔗 Starting help center matching...');
+  
+  // Hent alle artikler én gang
+  const articles = await storage.getHelpCenterArticles();
+  console.log(`Loaded ${articles.length} help center articles`);
+  
+  // Hent unprocessed tickets
+  const tickets = await getTicketsNeedingHelpCenterMatch();
+  console.log(`Processing ${tickets.length} tickets`);
+  
+  // Batch prosessering (10 tickets om gangen)
+  const batches = chunk(tickets, 10);
+  
+  for (const batch of batches) {
+    const results = await Promise.all(
+      batch.map(async ticket => {
+        // 1. Match mot artikkel
+        const match = await matchTicketToArticle(ticket, articles);
+        
+        if (!match || !match.articleId || match.confidence < 0.6) {
+          return null;
+        }
+        
+        const article = articles.find(a => a.id === match.articleId);
+        
+        // 2. Sammenlign agent vs offisiell
+        const comparison = await compareAgentVsOfficial(ticket, article);
+        
+        // 3. Lagre resultat
+        await db.query(`
+          INSERT INTO ticket_help_center_matches (
+            ticket_id, article_id, match_confidence, match_reason,
+            follows_official_procedure, alignment_quality,
+            missing_from_agent, added_by_agent
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        `, [
+          ticket.id,
+          article.id,
+          match.confidence,
+          match.matchReason,
+          comparison.followsOfficialProcedure,
+          comparison.alignmentQuality,
+          comparison.missingFromAgent,
+          comparison.addedByAgent
+        ]);
+        
+        return {
+          ticketId: ticket.id,
+          articleId: article.id,
+          confidence: match.confidence,
+          alignment: comparison.alignmentQuality
+        };
+      })
+    );
+    
+    console.log(`✓ Processed batch of ${batch.length}`);
+    await sleep(200); // Rate limiting
+  }
+  
+  console.log('✅ Help center matching complete!');
+}
+```
+
+5. STATISTIKK
+```typescript
+async function getHelpCenterMatchingStats() {
+  const stats = await db.query(`
+    SELECT 
+      COUNT(*) as total_matches,
+      AVG(match_confidence) as avg_confidence,
+      
+      COUNT(*) FILTER (WHERE alignment_quality = 'high') as high_alignment,
+      COUNT(*) FILTER (WHERE alignment_quality = 'medium') as medium_alignment,
+      COUNT(*) FILTER (WHERE alignment_quality = 'low') as low_alignment,
+      COUNT(*) FILTER (WHERE alignment_quality = 'contradicts') as contradicts,
+      
+      COUNT(*) FILTER (WHERE follows_official_procedure = true) as follows_procedure
+      
+    FROM ticket_help_center_matches
+  `);
+  
+  return stats.rows[0];
+}
+```
+
+KJØR PÅ 100 TICKETS FØRST!
+
+RAPPORTER:
+- Hvor mange tickets matchet en artikkel?
+- Gjennomsnittlig match-confidence?
+- Alignment-fordeling (high/medium/low/contradicts)?
+- Hvor mange følger offisiell prosedyre?
+- Topp 5 mest matchede artikler?
+- Topp 5 vanligste mangler i agent-svar?

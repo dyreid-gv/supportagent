@@ -1,5 +1,8 @@
 import OpenAI from "openai";
+import { sql } from "drizzle-orm";
 import { storage } from "./storage";
+import { db } from "./db";
+import { scrubbedTickets } from "@shared/schema";
 import { scrubTicket } from "./gdpr-scrubber";
 import { fetchTicketsFromPureservice, mapPureserviceToRawTicket } from "./pureservice";
 import { log } from "./index";
@@ -985,6 +988,151 @@ async function saveCombinedResult(ticket: any, result: any, metrics: BatchMetric
   }
 
   metrics.processedTickets++;
+}
+
+// ─── WORKFLOW 3C: HELP CENTER MATCHING ────────────────────────────────
+export async function runHelpCenterMatching(
+  onProgress?: (msg: string, pct: number) => void
+): Promise<{ matched: number; noMatch: number; errors: number }> {
+  let totalMatched = 0;
+  let totalNoMatch = 0;
+  let totalErrors = 0;
+
+  onProgress?.("Starter hjelpesenter artikkel-matching...", 0);
+
+  const articles = await storage.getHelpCenterArticles();
+  if (articles.length === 0) {
+    onProgress?.("Ingen hjelpesenter-artikler funnet. Kjør scraping først.", 100);
+    return { matched: 0, noMatch: 0, errors: 0 };
+  }
+  onProgress?.(`Lastet ${articles.length} hjelpesenter-artikler`, 5);
+
+  const alreadyMatchedIds = new Set(await storage.getMatchedTicketIds());
+
+  const mappedTickets: any[] = [];
+  let offset = 0;
+  const fetchSize = 200;
+  while (true) {
+    const batch = await db
+      .select()
+      .from(scrubbedTickets)
+      .where(sql`${scrubbedTickets.categoryMappingStatus} = 'mapped'`)
+      .limit(fetchSize)
+      .offset(offset);
+    if (batch.length === 0) break;
+    mappedTickets.push(...batch);
+    offset += fetchSize;
+  }
+
+  const tickets = mappedTickets.filter(t => !alreadyMatchedIds.has(t.id));
+
+  if (tickets.length === 0) {
+    onProgress?.("Alle tickets er allerede matchet mot artikler.", 100);
+    return { matched: 0, noMatch: 0, errors: 0 };
+  }
+
+  onProgress?.(`Fant ${tickets.length} tickets å matche (${alreadyMatchedIds.size} allerede matchet)`, 10);
+
+  const articlesByCategory = new Map<string, typeof articles>();
+  for (const a of articles) {
+    const cat = a.hjelpesenterCategory || "Ukjent";
+    if (!articlesByCategory.has(cat)) articlesByCategory.set(cat, []);
+    articlesByCategory.get(cat)!.push(a);
+  }
+
+  const BATCH_SIZE = 5;
+  const batches = chunk(tickets, BATCH_SIZE);
+
+  for (let bi = 0; bi < batches.length; bi++) {
+    const batch = batches[bi];
+
+    try {
+      const ticketsBlock = batch.map((ticket, idx) => {
+        const cat = ticket.hjelpesenterCategory || "Ukjent";
+        const relevantArts = articlesByCategory.get(cat) || articles;
+        const artList = relevantArts.slice(0, 15).map((a: any, i: number) =>
+          `  ${i + 1}. [ID:${a.id}] ${a.title}\n     Sammendrag: ${(a.bodyText || "").substring(0, 200)}`
+        ).join("\n");
+
+        return `TICKET ${idx + 1} (DB-ID: ${ticket.id}):
+Kategori: ${cat}
+Underkategori: ${ticket.hjelpesenterSubcategory || "Ukjent"}
+Spørsmål: ${(ticket.customerQuestion || "Ingen").substring(0, 400)}
+Agentsvar: ${(ticket.agentAnswer || "Ingen").substring(0, 400)}
+
+RELEVANTE ARTIKLER FOR DENNE TICKET:
+${artList}`;
+      }).join("\n---\n");
+
+      const prompt = `Du er en ekspert på DyreID kundesupport. Match HVER ticket mot den mest relevante hjelpesenter-artikkelen, og sammenlign agent-svar mot offisiell prosedyre.
+
+${ticketsBlock}
+
+FOR HVER TICKET:
+1. MATCH: Velg den mest relevante artikkelen (bruk article ID). Hvis ingen passer godt (confidence < 0.5), sett articleId til null.
+2. SAMMENLIGNING: Sammenlign agentens svar mot den offisielle artikkelen.
+
+Svar med JSON:
+{"results": [
+  {
+    "db_id": 123,
+    "articleId": 45,
+    "confidence": 0.85,
+    "matchReason": "Kort forklaring på hvorfor denne artikkelen matcher",
+    "followsOfficialProcedure": true,
+    "alignmentQuality": "high",
+    "missingFromAgent": ["Punkt som mangler"],
+    "addedByAgent": ["Ekstra info agenten la til"]
+  }
+]}
+
+alignmentQuality: "high" (fullt samsvar), "medium" (delvis), "low" (lite samsvar), "contradicts" (motstridende).
+Hvis articleId er null, sett confidence til 0 og alignment til null.`;
+
+      const text = await callOpenAI(prompt, "gpt-5-nano", 4096, true);
+      const parsed = extractJson(text);
+      const results = parsed.results || parsed;
+      const resultsArray = Array.isArray(results) ? results : [results];
+
+      for (let i = 0; i < batch.length; i++) {
+        const ticket = batch[i];
+        const result = resultsArray[i] || resultsArray.find((r: any) => r.db_id === ticket.id);
+
+        if (!result || !result.articleId || result.confidence < 0.5) {
+          totalNoMatch++;
+          continue;
+        }
+
+        try {
+          await storage.insertTicketHelpCenterMatch({
+            ticketId: ticket.id,
+            articleId: result.articleId,
+            matchConfidence: result.confidence,
+            matchReason: result.matchReason || null,
+            followsOfficialProcedure: result.followsOfficialProcedure ?? null,
+            alignmentQuality: result.alignmentQuality || null,
+            missingFromAgent: result.missingFromAgent || null,
+            addedByAgent: result.addedByAgent || null,
+          });
+          totalMatched++;
+        } catch (err: any) {
+          totalErrors++;
+          log(`Help center match save error ticket ${ticket.id}: ${err.message}`, "training");
+        }
+      }
+    } catch (err: any) {
+      totalErrors += batch.length;
+      log(`Help center matching batch error: ${err.message}`, "training");
+    }
+
+    const pct = Math.min(95, 10 + Math.round((bi / batches.length) * 85));
+    onProgress?.(`Matchet ${totalMatched} tickets, ${totalNoMatch} uten match, ${totalErrors} feil (batch ${bi + 1}/${batches.length})`, pct);
+
+    await new Promise(r => setTimeout(r, 200));
+  }
+
+  onProgress?.(`Ferdig! ${totalMatched} matchet, ${totalNoMatch} uten match, ${totalErrors} feil`, 100);
+  return { matched: totalMatched, noMatch: totalNoMatch, errors: totalErrors };
 }
 
 // ─── COMBINED BATCH ANALYSIS (Category + Intent + Resolution in ONE call) ─────

@@ -18,6 +18,7 @@ import {
   responseTemplates,
   helpCenterArticles,
   chatbotInteractions,
+  ticketHelpCenterMatches,
   type InsertRawTicket,
   type InsertHelpCenterArticle,
   type InsertScrubbedTicket,
@@ -30,6 +31,7 @@ import {
   type InsertServicePrice,
   type InsertResponseTemplate,
   type InsertChatbotInteraction,
+  type InsertTicketHelpCenterMatch,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -128,6 +130,23 @@ export interface IStorage {
   getHelpCenterArticlesByCategory(category: string): Promise<typeof helpCenterArticles.$inferSelect[]>;
   getHelpCenterArticleCount(): Promise<number>;
   deleteAllHelpCenterArticles(): Promise<void>;
+
+  insertTicketHelpCenterMatch(match: InsertTicketHelpCenterMatch): Promise<void>;
+  getTicketHelpCenterMatches(limit?: number): Promise<typeof ticketHelpCenterMatches.$inferSelect[]>;
+  getTicketHelpCenterMatchCount(): Promise<number>;
+  getMatchedTicketIds(): Promise<number[]>;
+  getHelpCenterMatchStats(): Promise<{
+    totalMatches: number;
+    avgConfidence: number;
+    highAlignment: number;
+    mediumAlignment: number;
+    lowAlignment: number;
+    contradicts: number;
+    followsProcedure: number;
+    topArticles: { articleId: number; title: string; matchCount: number }[];
+    commonMissing: string[];
+  }>;
+  deleteAllTicketHelpCenterMatches(): Promise<void>;
 
   logChatbotInteraction(interaction: InsertChatbotInteraction): Promise<typeof chatbotInteractions.$inferSelect>;
   updateInteractionFeedback(id: number, feedbackResult: string, feedbackComment?: string): Promise<void>;
@@ -710,6 +729,78 @@ export class DatabaseStorage implements IStorage {
       .from(chatbotInteractions)
       .where(eq(chatbotInteractions.matchedIntent, intent))
       .orderBy(desc(chatbotInteractions.createdAt));
+  }
+
+  async insertTicketHelpCenterMatch(match: InsertTicketHelpCenterMatch) {
+    await db.insert(ticketHelpCenterMatches).values(match);
+  }
+
+  async getTicketHelpCenterMatches(limit = 200) {
+    return db.select().from(ticketHelpCenterMatches).orderBy(desc(ticketHelpCenterMatches.matchConfidence)).limit(limit);
+  }
+
+  async getTicketHelpCenterMatchCount() {
+    const result = await db.select({ count: count() }).from(ticketHelpCenterMatches);
+    return result[0].count;
+  }
+
+  async getMatchedTicketIds(): Promise<number[]> {
+    const rows = await db.select({ ticketId: ticketHelpCenterMatches.ticketId }).from(ticketHelpCenterMatches);
+    return rows.map(r => r.ticketId);
+  }
+
+  async getHelpCenterMatchStats() {
+    const matches = await db.select().from(ticketHelpCenterMatches);
+    const articles = await db.select().from(helpCenterArticles);
+    const articleMap = new Map(articles.map(a => [a.id, a.title]));
+
+    let totalConfidence = 0;
+    let highAlignment = 0, mediumAlignment = 0, lowAlignment = 0, contradicts = 0, followsProcedure = 0;
+    const articleCounts: Record<number, number> = {};
+    const missingCounts: Record<string, number> = {};
+
+    for (const m of matches) {
+      totalConfidence += m.matchConfidence;
+      switch (m.alignmentQuality) {
+        case "high": highAlignment++; break;
+        case "medium": mediumAlignment++; break;
+        case "low": lowAlignment++; break;
+        case "contradicts": contradicts++; break;
+      }
+      if (m.followsOfficialProcedure) followsProcedure++;
+      articleCounts[m.articleId] = (articleCounts[m.articleId] || 0) + 1;
+      if (m.missingFromAgent) {
+        for (const item of m.missingFromAgent) {
+          missingCounts[item] = (missingCounts[item] || 0) + 1;
+        }
+      }
+    }
+
+    const topArticles = Object.entries(articleCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([artId, cnt]) => ({ articleId: Number(artId), title: articleMap.get(Number(artId)) || "Ukjent", matchCount: cnt }));
+
+    const commonMissing = Object.entries(missingCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([item]) => item);
+
+    return {
+      totalMatches: matches.length,
+      avgConfidence: matches.length > 0 ? totalConfidence / matches.length : 0,
+      highAlignment,
+      mediumAlignment,
+      lowAlignment,
+      contradicts,
+      followsProcedure,
+      topArticles,
+      commonMissing,
+    };
+  }
+
+  async deleteAllTicketHelpCenterMatches() {
+    await db.delete(ticketHelpCenterMatches);
   }
 }
 

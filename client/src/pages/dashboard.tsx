@@ -38,6 +38,7 @@ import {
   MinusCircle,
   MessageSquare,
   Flag,
+  Link2,
 } from "lucide-react";
 import { useState, useCallback } from "react";
 import {
@@ -217,6 +218,8 @@ function useSSEWorkflow(endpoint: string) {
       queryClient.invalidateQueries({ queryKey: ["/api/training/review-queue"] });
       queryClient.invalidateQueries({ queryKey: ["/api/training/uncategorized-themes"] });
       queryClient.invalidateQueries({ queryKey: ["/api/training/uncertainty-cases"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/training/help-center-match-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/training/help-center-matches"] });
     }
   }, [endpoint]);
 
@@ -535,6 +538,35 @@ export default function Dashboard() {
     queryKey: ["/api/feedback/interactions"],
   });
 
+  const { data: helpCenterMatchStats } = useQuery<{
+    totalMatches: number;
+    avgConfidence: number;
+    highAlignment: number;
+    mediumAlignment: number;
+    lowAlignment: number;
+    contradicts: number;
+    followsProcedure: number;
+    topArticles: { articleId: number; title: string; matchCount: number }[];
+    commonMissing: string[];
+  }>({
+    queryKey: ["/api/training/help-center-match-stats"],
+  });
+
+  const { data: helpCenterMatches } = useQuery<{
+    id: number;
+    ticketId: number;
+    articleId: number;
+    matchConfidence: number;
+    matchReason: string | null;
+    followsOfficialProcedure: boolean | null;
+    alignmentQuality: string | null;
+    missingFromAgent: string[] | null;
+    addedByAgent: string[] | null;
+    createdAt: string | null;
+  }[]>({
+    queryKey: ["/api/training/help-center-matches"],
+  });
+
   const [editingPrice, setEditingPrice] = useState<ServicePrice | null>(null);
   const [addingPrice, setAddingPrice] = useState(false);
   const [seedingPrices, setSeedingPrices] = useState(false);
@@ -630,6 +662,9 @@ export default function Dashboard() {
           </TabsTrigger>
           <TabsTrigger value="feedback" data-testid="tab-feedback">
             Tilbakemelding
+          </TabsTrigger>
+          <TabsTrigger value="article-match" data-testid="tab-article-match">
+            Artikkel-match ({helpCenterMatchStats?.totalMatches || 0})
           </TabsTrigger>
         </TabsList>
 
@@ -1428,7 +1463,277 @@ export default function Dashboard() {
             </Card>
           </div>
         </TabsContent>
+
+        <TabsContent value="article-match" className="mt-4">
+          <ArticleMatchTab
+            stats={helpCenterMatchStats}
+            matches={helpCenterMatches}
+          />
+        </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+function ArticleMatchTab({ stats, matches }: {
+  stats: {
+    totalMatches: number;
+    avgConfidence: number;
+    highAlignment: number;
+    mediumAlignment: number;
+    lowAlignment: number;
+    contradicts: number;
+    followsProcedure: number;
+    topArticles: { articleId: number; title: string; matchCount: number }[];
+    commonMissing: string[];
+  } | undefined;
+  matches: {
+    id: number;
+    ticketId: number;
+    articleId: number;
+    matchConfidence: number;
+    matchReason: string | null;
+    followsOfficialProcedure: boolean | null;
+    alignmentQuality: string | null;
+    missingFromAgent: string[] | null;
+    addedByAgent: string[] | null;
+    createdAt: string | null;
+  }[] | undefined;
+}) {
+  const { isRunning, progress, logs, error, run } = useSSEWorkflow("/api/training/match-articles");
+
+  const alignmentColor = (q: string | null) => {
+    switch (q) {
+      case "high": return "default";
+      case "medium": return "secondary";
+      case "low": return "outline";
+      case "contradicts": return "destructive";
+      default: return "outline";
+    }
+  };
+
+  const alignmentLabel = (q: string | null) => {
+    switch (q) {
+      case "high": return "Fullt samsvar";
+      case "medium": return "Delvis";
+      case "low": return "Lavt samsvar";
+      case "contradicts": return "Motstridende";
+      default: return "Ukjent";
+    }
+  };
+
+  const totalAligned = stats ? stats.highAlignment + stats.mediumAlignment + stats.lowAlignment + stats.contradicts : 0;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3 flex-wrap">
+        <Button
+          data-testid="button-match-articles"
+          onClick={() => {
+            run();
+            setTimeout(() => {
+              queryClient.invalidateQueries({ queryKey: ["/api/training/help-center-match-stats"] });
+              queryClient.invalidateQueries({ queryKey: ["/api/training/help-center-matches"] });
+            }, 2000);
+          }}
+          disabled={isRunning}
+          size="sm"
+        >
+          {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
+          {isRunning ? "Matcher..." : "Kjør Artikkel-matching"}
+        </Button>
+        {isRunning && <Progress value={progress} className="flex-1 min-w-[200px]" />}
+      </div>
+
+      {error && (
+        <div className="flex items-center gap-1 text-xs text-destructive">
+          <AlertCircle className="h-3 w-3 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {logs.length > 0 && (
+        <ScrollArea className="h-[120px] border rounded-md p-2">
+          {logs.map((l, i) => (
+            <p key={i} className="text-xs text-muted-foreground">{l}</p>
+          ))}
+        </ScrollArea>
+      )}
+
+      <div className="grid gap-3 md:grid-cols-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Totalt matchet</CardTitle>
+            <Link2 className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold" data-testid="text-match-total">{stats?.totalMatches || 0}</div>
+            <p className="text-xs text-muted-foreground">tickets koblet til artikler</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Snitt confidence</CardTitle>
+            <Search className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold" data-testid="text-match-confidence">
+              {stats ? `${(stats.avgConfidence * 100).toFixed(0)}%` : "0%"}
+            </div>
+            <p className="text-xs text-muted-foreground">gjennomsnittlig match-score</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Følger prosedyre</CardTitle>
+            <CheckCircle className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-600" data-testid="text-match-follows">
+              {stats?.followsProcedure || 0}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {stats && stats.totalMatches > 0 ? `${Math.round((stats.followsProcedure / stats.totalMatches) * 100)}%` : "0%"} av matchede
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Motstridende</CardTitle>
+            <AlertTriangle className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-red-600" data-testid="text-match-contradicts">
+              {stats?.contradicts || 0}
+            </div>
+            <p className="text-xs text-muted-foreground">agent motsier offisiell prosedyre</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {totalAligned > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Alignment-fordeling</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-4 gap-3">
+              {[
+                { label: "Fullt samsvar", value: stats?.highAlignment || 0, color: "bg-green-500" },
+                { label: "Delvis", value: stats?.mediumAlignment || 0, color: "bg-yellow-500" },
+                { label: "Lavt samsvar", value: stats?.lowAlignment || 0, color: "bg-orange-500" },
+                { label: "Motstridende", value: stats?.contradicts || 0, color: "bg-red-500" },
+              ].map((item) => (
+                <div key={item.label} className="text-center">
+                  <div className="text-lg font-semibold">{item.value}</div>
+                  <div className={`h-2 rounded-full ${item.color} mt-1`} style={{ width: `${totalAligned > 0 ? (item.value / totalAligned) * 100 : 0}%`, minWidth: item.value > 0 ? "8px" : "0" }} />
+                  <p className="text-xs text-muted-foreground mt-1">{item.label}</p>
+                  <p className="text-xs text-muted-foreground">{totalAligned > 0 ? `${Math.round((item.value / totalAligned) * 100)}%` : "0%"}</p>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <div className="grid gap-3 md:grid-cols-2">
+        {stats?.topArticles && stats.topArticles.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Mest matchede artikler</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ScrollArea className="h-[200px]">
+                <div className="space-y-2">
+                  {stats.topArticles.map((art, i) => (
+                    <div key={art.articleId} className="flex items-center justify-between gap-2 p-2 border rounded-md" data-testid={`top-article-${art.articleId}`}>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Badge variant="outline">{i + 1}</Badge>
+                        <span className="text-sm truncate">{art.title}</span>
+                      </div>
+                      <Badge>{art.matchCount}</Badge>
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
+            </CardContent>
+          </Card>
+        )}
+
+        {stats?.commonMissing && stats.commonMissing.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Vanligste mangler i agent-svar</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ScrollArea className="h-[200px]">
+                <div className="space-y-1.5">
+                  {stats.commonMissing.map((item, i) => (
+                    <div key={i} className="flex items-start gap-2 p-2 border rounded-md">
+                      <AlertCircle className="h-3.5 w-3.5 mt-0.5 text-orange-500 shrink-0" />
+                      <span className="text-sm">{item}</span>
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+
+      {matches && matches.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Siste match-resultater</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ScrollArea className="h-[400px]">
+              <div className="space-y-2">
+                {matches.map((m) => (
+                  <div key={m.id} className="border rounded-md p-3" data-testid={`match-${m.id}`}>
+                    <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <Badge variant="outline">Ticket #{m.ticketId}</Badge>
+                        <Badge variant="outline">Artikkel #{m.articleId}</Badge>
+                        <Badge variant={alignmentColor(m.alignmentQuality)}>{alignmentLabel(m.alignmentQuality)}</Badge>
+                        {m.followsOfficialProcedure !== null && (
+                          <Badge variant={m.followsOfficialProcedure ? "default" : "destructive"}>
+                            {m.followsOfficialProcedure ? "Følger prosedyre" : "Avviker"}
+                          </Badge>
+                        )}
+                      </div>
+                      <span className="text-sm font-medium">{(m.matchConfidence * 100).toFixed(0)}%</span>
+                    </div>
+                    {m.matchReason && (
+                      <p className="text-sm text-muted-foreground mt-1">{m.matchReason}</p>
+                    )}
+                    {m.missingFromAgent && m.missingFromAgent.length > 0 && (
+                      <div className="mt-1.5">
+                        <p className="text-xs font-medium text-orange-600 dark:text-orange-400">Mangler:</p>
+                        <ul className="text-xs text-muted-foreground list-disc pl-4">
+                          {m.missingFromAgent.map((item, i) => (
+                            <li key={i}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {m.addedByAgent && m.addedByAgent.length > 0 && (
+                      <div className="mt-1.5">
+                        <p className="text-xs font-medium text-blue-600 dark:text-blue-400">Tillegg fra agent:</p>
+                        <ul className="text-xs text-muted-foreground list-disc pl-4">
+                          {m.addedByAgent.map((item, i) => (
+                            <li key={i}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

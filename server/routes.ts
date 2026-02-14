@@ -19,6 +19,7 @@ import {
   runPlaybookGeneration,
   submitManualReview,
   runCombinedBatchAnalysis,
+  runHelpCenterMatching,
   type BatchMetrics,
 } from "./training-agent";
 import {
@@ -1361,6 +1362,49 @@ export async function registerRoutes(
       res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
     }
     res.end();
+  });
+
+  // ─── WORKFLOW 3C: HELP CENTER MATCHING ──────────────────────────────
+  app.post("/api/training/match-articles", async (_req, res) => {
+    sseHeaders(res);
+    const runId = await storage.createTrainingRun("help_center_matching", 0);
+
+    try {
+      const result = await runHelpCenterMatching((msg, pct) => {
+        res.write(`data: ${JSON.stringify({ message: msg, progress: pct })}\n\n`);
+      });
+
+      await storage.completeTrainingRun(runId, result.errors);
+
+      res.write(`data: ${JSON.stringify({
+        done: true,
+        matched: result.matched,
+        noMatch: result.noMatch,
+        errors: result.errors,
+      })}\n\n`);
+    } catch (error: any) {
+      await storage.completeTrainingRun(runId, 1, error.message);
+      res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+    }
+    res.end();
+  });
+
+  app.get("/api/training/help-center-match-stats", async (_req, res) => {
+    try {
+      const stats = await storage.getHelpCenterMatchStats();
+      res.json(stats);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/training/help-center-matches", async (_req, res) => {
+    try {
+      const matches = await storage.getTicketHelpCenterMatches(200);
+      res.json(matches);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
   });
 
   return httpServer;
