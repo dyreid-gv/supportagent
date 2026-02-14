@@ -194,6 +194,22 @@ export const servicePrices = pgTable("service_prices", {
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
+export const responseTemplates = pgTable("response_templates", {
+  id: serial("id").primaryKey(),
+  templateId: integer("template_id").notNull().unique(),
+  name: text("name").notNull(),
+  subject: text("subject"),
+  bodyHtml: text("body_html"),
+  bodyText: text("body_text"),
+  hjelpesenterCategory: text("hjelpesenter_category"),
+  hjelpesenterSubcategory: text("hjelpesenter_subcategory"),
+  ticketType: text("ticket_type"),
+  intent: text("intent"),
+  keyPoints: jsonb("key_points"),
+  isActive: boolean("is_active").default(true),
+  fetchedAt: timestamp("fetched_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
 export const trainingRuns = pgTable("training_runs", {
   id: serial("id").primaryKey(),
   workflow: text("workflow").notNull(),
@@ -206,6 +222,7 @@ export const trainingRuns = pgTable("training_runs", {
   errorLog: text("error_log"),
 });
 
+export const insertResponseTemplateSchema = createInsertSchema(responseTemplates).omit({ id: true });
 export const insertServicePriceSchema = createInsertSchema(servicePrices).omit({ id: true });
 export const insertRawTicketSchema = createInsertSchema(rawTickets).omit({ id: true });
 export const insertScrubbedTicketSchema = createInsertSchema(scrubbedTickets).omit({ id: true });
@@ -240,6 +257,8 @@ export type Conversation = typeof conversations.$inferSelect;
 export type InsertConversation = z.infer<typeof insertConversationSchema>;
 export type Message = typeof messages.$inferSelect;
 export type InsertMessage = z.infer<typeof insertMessageSchema>;
+export type ResponseTemplate = typeof responseTemplates.$inferSelect;
+export type InsertResponseTemplate = z.infer<typeof insertResponseTemplateSchema>;
 export type ServicePrice = typeof servicePrices.$inferSelect;
 export type InsertServicePrice = z.infer<typeof insertServicePriceSchema>;
 export type TrainingRun = typeof trainingRuns.$inferSelect;

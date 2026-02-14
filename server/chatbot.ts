@@ -1,13 +1,13 @@
 import OpenAI from "openai";
 import { storage } from "./storage";
 import { getMinSideContext, performAction, lookupOwnerByPhone } from "./minside-sandbox";
-import type { PlaybookEntry, ServicePrice } from "@shared/schema";
+import type { PlaybookEntry, ServicePrice, ResponseTemplate } from "@shared/schema";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-function buildSystemPrompt(playbook: PlaybookEntry[], ownerContext: any | null, storedUserContext: any | null, prices: ServicePrice[] = []): string {
+function buildSystemPrompt(playbook: PlaybookEntry[], ownerContext: any | null, storedUserContext: any | null, prices: ServicePrice[] = [], templates: ResponseTemplate[] = []): string {
   const isAuthenticated = !!(ownerContext || storedUserContext);
 
   let prompt = `Du er DyreID sin intelligente support-assistent. DyreID er Norges nasjonale kjæledyrregister.
@@ -74,6 +74,27 @@ Gyldige actions:
       prompt += "\n";
     }
     prompt += "\nVIKTIG: Bruk KUN prisene listet over. Ikke oppgi priser du er usikker på.\n";
+  }
+
+  if (templates.length > 0) {
+    prompt += "\n\nAUTOSVAR-MALER FRA PURESERVICE (bruk disse som grunnlag for dine svar):\n";
+    prompt += "Disse malene er DyreIDs offisielle autosvar og representerer godkjent kundeservice-innhold.\n";
+    prompt += "Bruk informasjonen, formuleringene og instruksjonene fra disse malene når du svarer kunder.\n\n";
+    for (const t of templates) {
+      prompt += `--- ${t.name} ---\n`;
+      if (t.hjelpesenterCategory) prompt += `Kategori: ${t.hjelpesenterCategory}`;
+      if (t.hjelpesenterSubcategory) prompt += ` > ${t.hjelpesenterSubcategory}`;
+      if (t.hjelpesenterCategory) prompt += "\n";
+      if (t.intent) prompt += `Intent: ${t.intent}\n`;
+      if (t.bodyText) {
+        const truncated = t.bodyText.length > 600 ? t.bodyText.substring(0, 600) + "..." : t.bodyText;
+        prompt += `Innhold: ${truncated}\n`;
+      }
+      if (t.keyPoints && Array.isArray(t.keyPoints) && (t.keyPoints as string[]).length > 0) {
+        prompt += `Nøkkelpunkter: ${(t.keyPoints as string[]).join("; ")}\n`;
+      }
+      prompt += "\n";
+    }
   }
 
   if (ownerContext) {
@@ -276,8 +297,9 @@ export async function* streamChatResponse(
 
   const playbook = await storage.getActivePlaybookEntries();
   const activePrices = await storage.getActiveServicePrices();
+  const activeTemplates = await storage.getActiveResponseTemplates();
   const sandboxContext = ownerId ? getMinSideContext(ownerId) : null;
-  const systemPrompt = buildSystemPrompt(playbook, sandboxContext, sandboxContext ? null : storedUserContext, activePrices);
+  const systemPrompt = buildSystemPrompt(playbook, sandboxContext, sandboxContext ? null : storedUserContext, activePrices, activeTemplates);
 
   const history = await storage.getMessagesByConversation(conversationId);
   const chatMessages = history.map((m) => ({

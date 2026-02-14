@@ -31,6 +31,7 @@ import {
   reviewQueue as reviewQueueTable,
   trainingRuns,
   servicePrices,
+  responseTemplates,
 } from "@shared/schema";
 import fs from "fs";
 import path from "path";
@@ -822,6 +823,7 @@ export async function registerRoutes(
     review_queue: reviewQueueTable,
     training_runs: trainingRuns,
     service_prices: servicePrices,
+    response_templates: responseTemplates,
   };
 
   app.get("/api/admin/tables", async (_req, res) => {
@@ -1011,6 +1013,58 @@ export async function registerRoutes(
         results.push(result);
       }
       res.json({ success: true, count: results.length, prices: results });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ─── RESPONSE TEMPLATES (AUTOSVAR) ─────────────────────────────
+  app.get("/api/templates", async (_req, res) => {
+    try {
+      const templates = await storage.getResponseTemplates();
+      res.json(templates);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/templates/active", async (_req, res) => {
+    try {
+      const templates = await storage.getActiveResponseTemplates();
+      res.json(templates);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/templates/count", async (_req, res) => {
+    try {
+      const count = await storage.getResponseTemplateCount();
+      res.json({ count });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/templates/fetch", async (_req, res) => {
+    try {
+      const { fetchTemplatesFromPureservice, mapTemplateToResponseTemplate } = await import("./pureservice");
+
+      const templates = await fetchTemplatesFromPureservice();
+      let stored = 0;
+
+      for (const template of templates) {
+        const mapped = mapTemplateToResponseTemplate(template);
+        await storage.upsertResponseTemplate(mapped);
+        stored++;
+      }
+
+      res.json({
+        success: true,
+        fetched: templates.length,
+        stored,
+        message: `${stored} autosvar-maler hentet fra Pureservice og lagret med kategorimapping`,
+      });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

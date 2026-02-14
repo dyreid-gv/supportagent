@@ -127,6 +127,22 @@ interface ServicePrice {
   updatedAt: string | null;
 }
 
+interface ResponseTemplate {
+  id: number;
+  templateId: number;
+  name: string;
+  subject: string | null;
+  bodyHtml: string | null;
+  bodyText: string | null;
+  hjelpesenterCategory: string | null;
+  hjelpesenterSubcategory: string | null;
+  ticketType: string | null;
+  intent: string | null;
+  keyPoints: string[] | null;
+  isActive: boolean;
+  fetchedAt: string | null;
+}
+
 interface UncertaintyCase {
   id: number;
   ticketId: number;
@@ -434,9 +450,15 @@ export default function Dashboard() {
     queryKey: ["/api/prices"],
   });
 
+  const { data: responseTemplates } = useQuery<ResponseTemplate[]>({
+    queryKey: ["/api/templates"],
+  });
+
   const [editingPrice, setEditingPrice] = useState<ServicePrice | null>(null);
   const [addingPrice, setAddingPrice] = useState(false);
   const [seedingPrices, setSeedingPrices] = useState(false);
+  const [fetchingTemplates, setFetchingTemplates] = useState(false);
+  const [expandedTemplate, setExpandedTemplate] = useState<number | null>(null);
 
   const stats = data?.stats;
   const runs = data?.runs || [];
@@ -521,6 +543,9 @@ export default function Dashboard() {
           </TabsTrigger>
           <TabsTrigger value="prices" data-testid="tab-prices">
             Priser ({prices?.length || 0})
+          </TabsTrigger>
+          <TabsTrigger value="templates" data-testid="tab-templates">
+            Autosvar ({responseTemplates?.length || 0})
           </TabsTrigger>
         </TabsList>
 
@@ -1038,6 +1063,96 @@ export default function Dashboard() {
               price={editingPrice}
             />
           )}
+        </TabsContent>
+
+        <TabsContent value="templates" className="mt-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
+              <CardTitle className="text-base">Autosvar-maler fra Pureservice</CardTitle>
+              <Button
+                variant="outline"
+                disabled={fetchingTemplates}
+                onClick={async () => {
+                  setFetchingTemplates(true);
+                  try {
+                    await apiRequest("POST", "/api/templates/fetch");
+                    queryClient.invalidateQueries({ queryKey: ["/api/templates"] });
+                  } catch (e) {}
+                  setFetchingTemplates(false);
+                }}
+                data-testid="button-fetch-templates"
+              >
+                {fetchingTemplates ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                {responseTemplates && responseTemplates.length > 0 ? "Oppdater fra Pureservice" : "Hent fra Pureservice"}
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {!responseTemplates || responseTemplates.length === 0 ? (
+                <p className="text-sm text-muted-foreground" data-testid="text-no-templates">
+                  Ingen autosvar-maler lastet ned ennå. Klikk &quot;Hent fra Pureservice&quot; for å laste ned.
+                </p>
+              ) : (
+                <ScrollArea className="h-[500px]">
+                  {Object.entries(
+                    responseTemplates.reduce((acc: Record<string, ResponseTemplate[]>, t) => {
+                      const cat = t.hjelpesenterCategory || "Ukategorisert";
+                      if (!acc[cat]) acc[cat] = [];
+                      acc[cat].push(t);
+                      return acc;
+                    }, {})
+                  ).map(([category, templates]) => (
+                    <div key={category} className="mb-4">
+                      <h3 className="font-semibold text-sm mb-2 text-muted-foreground">{category} ({templates.length})</h3>
+                      <div className="space-y-2">
+                        {templates.map((t) => (
+                          <div
+                            key={t.id}
+                            className="border rounded-md p-3 hover-elevate cursor-pointer"
+                            data-testid={`template-row-${t.templateId}`}
+                            onClick={() => setExpandedTemplate(expandedTemplate === t.id ? null : t.id)}
+                          >
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-medium text-sm" data-testid={`template-name-${t.templateId}`}>{t.name}</span>
+                                {t.intent && <Badge variant="secondary">{t.intent}</Badge>}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {t.hjelpesenterSubcategory && (
+                                  <Badge variant="outline">{t.hjelpesenterSubcategory}</Badge>
+                                )}
+                                <Eye className="h-4 w-4 text-muted-foreground" />
+                              </div>
+                            </div>
+                            {t.ticketType && (
+                              <p className="text-xs text-muted-foreground mt-1">Saktype: {t.ticketType}</p>
+                            )}
+                            {expandedTemplate === t.id && (
+                              <div className="mt-3 pt-3 border-t space-y-2">
+                                <div>
+                                  <p className="text-xs font-semibold text-muted-foreground mb-1">Innhold:</p>
+                                  <p className="text-sm whitespace-pre-wrap" data-testid={`template-body-${t.templateId}`}>
+                                    {t.bodyText || "(Ingen tekst)"}
+                                  </p>
+                                </div>
+                                {t.keyPoints && Array.isArray(t.keyPoints) && t.keyPoints.length > 0 && (
+                                  <div>
+                                    <p className="text-xs font-semibold text-muted-foreground mb-1">Nøkkelpunkter:</p>
+                                    <ul className="text-sm list-disc pl-4">
+                                      {t.keyPoints.map((kp, i) => <li key={i}>{kp}</li>)}
+                                    </ul>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </ScrollArea>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
     </div>

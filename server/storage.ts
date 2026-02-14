@@ -15,6 +15,7 @@ import {
   messages,
   trainingRuns,
   servicePrices,
+  responseTemplates,
   type InsertRawTicket,
   type InsertScrubbedTicket,
   type InsertCategoryMapping,
@@ -24,6 +25,7 @@ import {
   type InsertConversation,
   type InsertMessage,
   type InsertServicePrice,
+  type InsertResponseTemplate,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -107,6 +109,12 @@ export interface IStorage {
   upsertServicePrice(price: InsertServicePrice): Promise<typeof servicePrices.$inferSelect>;
   updateServicePrice(id: number, data: Partial<InsertServicePrice>): Promise<void>;
   deleteServicePrice(id: number): Promise<void>;
+
+  getResponseTemplates(): Promise<typeof responseTemplates.$inferSelect[]>;
+  getActiveResponseTemplates(): Promise<typeof responseTemplates.$inferSelect[]>;
+  upsertResponseTemplate(template: InsertResponseTemplate): Promise<typeof responseTemplates.$inferSelect>;
+  getResponseTemplateCount(): Promise<number>;
+  deleteAllResponseTemplates(): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -525,6 +533,47 @@ export class DatabaseStorage implements IStorage {
 
   async deleteServicePrice(id: number) {
     await db.delete(servicePrices).where(eq(servicePrices.id, id));
+  }
+
+  async getResponseTemplates() {
+    return db.select().from(responseTemplates).orderBy(responseTemplates.hjelpesenterCategory, responseTemplates.name);
+  }
+
+  async getActiveResponseTemplates() {
+    return db.select().from(responseTemplates).where(eq(responseTemplates.isActive, true)).orderBy(responseTemplates.hjelpesenterCategory, responseTemplates.name);
+  }
+
+  async upsertResponseTemplate(template: InsertResponseTemplate) {
+    const [result] = await db
+      .insert(responseTemplates)
+      .values(template)
+      .onConflictDoUpdate({
+        target: responseTemplates.templateId,
+        set: {
+          name: template.name,
+          subject: template.subject,
+          bodyHtml: template.bodyHtml,
+          bodyText: template.bodyText,
+          hjelpesenterCategory: template.hjelpesenterCategory,
+          hjelpesenterSubcategory: template.hjelpesenterSubcategory,
+          ticketType: template.ticketType,
+          intent: template.intent,
+          keyPoints: template.keyPoints,
+          isActive: template.isActive,
+          fetchedAt: new Date(),
+        },
+      })
+      .returning();
+    return result;
+  }
+
+  async getResponseTemplateCount() {
+    const result = await db.select({ count: count() }).from(responseTemplates);
+    return result[0].count;
+  }
+
+  async deleteAllResponseTemplates() {
+    await db.delete(responseTemplates);
   }
 }
 
