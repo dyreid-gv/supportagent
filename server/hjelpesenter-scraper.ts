@@ -94,6 +94,81 @@ function extractSlug(url: string): string {
   return parts[parts.length - 1] || "";
 }
 
+function extractSmartTagHelpContent(html: string): { title: string; bodyText: string; bodyHtml: string; relatedUrls: string[] } {
+  const title = "Super Smart Tag – Hjelpeside";
+  const sections: string[] = [];
+
+  const introMatch = html.match(/<div class="sec_ttl">([\s\S]*?)<\/div>\s*<div class="tab-content">/i);
+  if (introMatch) {
+    const introText = introMatch[1].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+    if (introText) sections.push(introText);
+  }
+
+  const troubleshootMatch = html.match(/<div class="trouble_shoot_sec">([\s\S]*?)<\/div>\s*<div class="super-smarttag-help-faq">/i);
+  if (troubleshootMatch) {
+    let tsHtml = troubleshootMatch[1];
+    let tsText = tsHtml
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+      .replace(/<img[^>]*>/gi, "")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/p>/gi, "\n\n")
+      .replace(/<\/li>/gi, "\n")
+      .replace(/<li[^>]*>/gi, "- ")
+      .replace(/<\/h[1-6]>/gi, "\n\n")
+      .replace(/<h[1-6][^>]*>/gi, "\n")
+      .replace(/<[^>]+>/g, "")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&amp;/g, "&")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+    if (tsText) sections.push("LØSNINGSVEILEDNING:\n" + tsText);
+  }
+
+  const faqMatch = html.match(/<div class="super-smarttag-help-faq">([\s\S]*?)(?:<div class="t3-module|<footer|<div id="t3-footer")/i);
+  if (faqMatch) {
+    const faqHtml = faqMatch[1];
+    const qaRegex = /<div class="smart-accordng">([\s\S]*?)<\/div>[\s\S]*?<div class="accordion-inner">([\s\S]*?)<\/div>\s*<\/div>\s*<\/div>/g;
+    let qaMatch;
+    const qaPairs: string[] = [];
+    while ((qaMatch = qaRegex.exec(faqHtml)) !== null) {
+      const question = qaMatch[1].replace(/<[^>]+>/g, "").trim();
+      let answer = qaMatch[2]
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+        .replace(/<br\s*\/?>/gi, "\n")
+        .replace(/<\/p>/gi, "\n")
+        .replace(/<\/li>/gi, "\n")
+        .replace(/<li[^>]*>/gi, "- ")
+        .replace(/<\/h[1-6]>/gi, "\n")
+        .replace(/<[^>]+>/g, "")
+        .replace(/&nbsp;/g, " ")
+        .replace(/&amp;/g, "&")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+      if (question) {
+        qaPairs.push(`Q: ${question}\nA: ${answer}`);
+      }
+    }
+    if (qaPairs.length > 0) {
+      sections.push("SPØRSMÅL OG SVAR:\n" + qaPairs.join("\n\n"));
+    }
+  }
+
+  const bodyText = sections.join("\n\n---\n\n");
+  const bodyHtml = sections.map(s => `<p>${s}</p>`).join("");
+
+  const relatedUrls: string[] = [];
+  const linkRegex = /href="(https:\/\/www\.dyreid\.no\/(?:hjelp-|dyreid-app|smart-tag|qr-brikke|familiedeling|help-savnet)[^"]*?)"/g;
+  let linkMatch;
+  while ((linkMatch = linkRegex.exec(html)) !== null) {
+    const cleanUrl = linkMatch[1].replace(/\.html$/, "");
+    if (!relatedUrls.includes(cleanUrl)) relatedUrls.push(cleanUrl);
+  }
+
+  return { title, bodyText, bodyHtml, relatedUrls };
+}
+
 function extractArticleContent(html: string): { title: string; bodyText: string; bodyHtml: string; relatedUrls: string[] } {
   let title = "";
   const titleMatch = html.match(/<h1[^>]*itemprop="name"[^>]*>([\s\S]*?)<\/h1>/i)
@@ -187,7 +262,11 @@ export async function scrapeHjelpesenter(
           }
 
           const html = await response.text();
-          const { title, bodyText, bodyHtml, relatedUrls } = extractArticleContent(html);
+
+          const isSmartTagHelp = article.url.endsWith("/smarttag/help");
+          const { title, bodyText, bodyHtml, relatedUrls } = isSmartTagHelp
+            ? extractSmartTagHelpContent(html)
+            : extractArticleContent(html);
 
           if (!title) {
             throw new Error("Could not extract title");
