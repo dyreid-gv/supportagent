@@ -94,8 +94,7 @@ client/src/
 - `PURESERVICE_API_KEY` - API key for Pureservice ticket system
 - `SESSION_SECRET` - Session encryption key
 - `DATABASE_URL` - PostgreSQL connection string (auto-provided)
-- `AI_INTEGRATIONS_OPENAI_API_KEY` - OpenAI API key (auto-provided via Replit AI integration, used by training agent)
-- `AI_INTEGRATIONS_OPENAI_BASE_URL` - OpenAI base URL (auto-provided via Replit AI integration)
+- `OPENAI_API_KEY` - OpenAI API key (user-provided, used by training agent)
 - `AI_INTEGRATIONS_ANTHROPIC_API_KEY` - Claude API key (auto-provided via integration, used by chatbot)
 
 ## Recent Changes
