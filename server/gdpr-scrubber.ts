@@ -9,6 +9,10 @@ const KID_REGEX = /\bKID[\s:]*\d{5,25}\b/gi;
 const PAYMENT_REF_REGEX = /\b(?:ref|referanse|betalingsref)[\s.:]*[\w-]{6,}\b/gi;
 const IP_REGEX = /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g;
 const ACCOUNT_REGEX = /\b\d{4}[\s.]?\d{2}[\s.]?\d{5}\b/g;
+const BROAD_PHONE_REGEX = /\b\d{8,15}\b/g;
+const BROAD_CHIP_REGEX = /\b\d{15}\b/g;
+const REQUEST_NUMBER_REGEX = /requestNumber:\s*\S+/g;
+const SENDER_ID_REGEX = /senderId:\s*\S+/g;
 
 const NORWEGIAN_NAMES = [
   "Ola", "Kari", "Per", "Anne", "Lars", "Marit", "Erik", "Ingrid",
@@ -49,6 +53,10 @@ export function scrubText(text: string | null | undefined): string {
   scrubbed = scrubbed.replace(PAYMENT_REF_REGEX, "<PAYMENT_REF>");
   scrubbed = scrubbed.replace(ADDRESS_REGEX, "<ADDRESS>");
   scrubbed = scrubbed.replace(POSTAL_CODE_REGEX, "<POSTAL>");
+  scrubbed = scrubbed.replace(REQUEST_NUMBER_REGEX, "<REQ>");
+  scrubbed = scrubbed.replace(SENDER_ID_REGEX, "<SENDER>");
+  scrubbed = scrubbed.replace(BROAD_CHIP_REGEX, "<CHIP_ID>");
+  scrubbed = scrubbed.replace(BROAD_PHONE_REGEX, "<PHONE>");
   scrubbed = scrubbed.replace(NAME_REGEX, "<PERSON>");
 
   return scrubbed;
