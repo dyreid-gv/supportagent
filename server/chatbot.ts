@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { INTENTS } from "@shared/intents";
 import { eq } from "drizzle-orm";
 import { db } from "./db";
 import { storage } from "./storage";

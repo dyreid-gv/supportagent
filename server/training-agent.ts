@@ -5,6 +5,7 @@ import { db } from "./db";
 import { scrubbedTickets } from "@shared/schema";
 import { scrubTicket } from "./gdpr-scrubber";
 import { getClosedTickets, mapPureserviceToRawTicket } from "./integrations/pureservice-v3";
+import { INTENTS } from "@shared/intents";
 import { log } from "./index";
 
 const openai = new OpenAI({
@@ -56,42 +57,7 @@ function chunk<T>(arr: T[], size: number): T[][] {
   return chunks;
 }
 
-const KNOWN_INTENTS = [
-  "LoginIssue",
-  "ProfileUpdate",
-  "MissingPet",
-  "PetDeceased",
-  "GDPRDelete",
-  "GDPRExport",
-  "OwnershipTransfer",
-  "OwnershipTransferDead",
-  "NKKOwnership",
-  "OwnershipError",
-  "InactiveRegistration",
-  "ForeignChip",
-  "RegistrationPayment",
-  "ActivationIssue",
-  "ProductComplaint",
-  "QRTagActivation",
-  "QRTagLost",
-  "TagInactive",
-  "ProductReplace",
-  "SmartTagIssue",
-  "SmartTagConnection",
-  "CancelSubscription",
-  "UpgradeSubscription",
-  "BillingIssue",
-  "SubscriptionManagement",
-  "LostPetReport",
-  "FoundPet",
-  "AlertIssue",
-  "FamilySharing",
-  "FamilyAccessLost",
-  "AppLoginIssue",
-  "AppSubscriptionInfo",
-  "AppSupport",
-  "GeneralInquiry",
-];
+const KNOWN_INTENTS = INTENTS;
 
 async function callOpenAI(prompt: string, model: string = "gpt-5-nano", maxTokens: number = 4096, jsonMode: boolean = false): Promise<string> {
   const params: any = {
