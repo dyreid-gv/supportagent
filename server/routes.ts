@@ -8,6 +8,7 @@ import { storage } from "./storage";
 import { streamChatResponse, getLastInteractionId } from "./chatbot";
 import { scrapeHjelpesenter } from "./hjelpesenter-scraper";
 import { getMinSideContext, lookupOwnerByPhone, getAllSandboxPhones, performAction } from "./minside-sandbox";
+import { authenticateWithOTP, fetchPetList, fetchPaymentHistory, storeSession, getStoredSession, type MinSidePet } from "./minside-client";
 import {
   runIngestion,
   runGdprScrubbing,
@@ -717,172 +718,57 @@ export async function registerRoutes(
         const detailResponse = await axios.post(
           `${MINSIDE_URL}/Security/GetDetailfromEmailorPhone?emailOrContactNumber=${encodeURIComponent(contactMethod)}`,
           {},
-          {
-            headers: { "Content-Type": "application/json" },
-            timeout: 15000,
-          }
+          { headers: { "Content-Type": "application/json" }, timeout: 15000 }
         );
         resolvedUserId = detailResponse.data?.UserId;
       }
 
-      console.log("Verify OTP calling LoginWithPasscode with:", {
-        Userid: resolvedUserId,
-        Otp: otpCode,
-        emailorPhone: contactMethod,
-      });
-
-      const verifyResponse = await axios.post(
-        `${MINSIDE_URL}/Security/LoginWithPasscode`,
-        {
-          Userid: resolvedUserId,
-          Otp: otpCode,
-          emailorPhone: contactMethod,
-          LostFoundPageRequest: false,
-          loginViaLink: 0,
-          applicationValue: "",
-          returnUrl: "",
-        },
-        {
-          headers: { "Content-Type": "application/json" },
-          timeout: 15000,
-          maxRedirects: 0,
-          validateStatus: (status: number) => status < 500,
-        }
-      );
-
-      console.log("LoginWithPasscode response status:", verifyResponse.status, "data:", JSON.stringify(verifyResponse.data).substring(0, 500));
-
-      const verifyData = verifyResponse.data;
-      if (verifyData.IsSuccess) {
-        let ownerName = "";
-        let numberOfPets = 0;
-
-        try {
-          const ownerResponse = await axios.post(
-            `${MINSIDE_URL}/Security/GetOwnerDetailforOTPScreen?emailOrContactNumber=${encodeURIComponent(contactMethod)}`,
-            {},
-            {
-              headers: { "Content-Type": "application/json" },
-              timeout: 15000,
-              maxRedirects: 0,
-              validateStatus: (status: number) => status < 500,
-            }
-          );
-
-          if (ownerResponse.status === 200 && ownerResponse.data?.Success) {
-            ownerName = ownerResponse.data.OwnerName || "";
-            numberOfPets = ownerResponse.data.NumberOfPets || 0;
-          }
-        } catch (detailErr: any) {
-          console.log("Could not fetch owner details (non-critical):", detailErr.message);
-        }
-
-        const collectCookies = (resp: any): string[] => {
-          const sc = resp.headers["set-cookie"];
-          if (!sc) return [];
-          return Array.isArray(sc) ? sc : [sc];
-        };
-
-        const cookieValues = (cookieHeaders: string[]): string => {
-          return cookieHeaders.map(c => c.split(";")[0]).join("; ");
-        };
-
-        let petList: any[] = [];
-        try {
-          let allCookieHeaders = collectCookies(verifyResponse);
-
-          if (verifyData.viewUrl) {
-            const sessionResp = await axios.get(
-              `${MINSIDE_URL}${verifyData.viewUrl}`,
-              {
-                headers: { Cookie: cookieValues(allCookieHeaders) },
-                timeout: 15000,
-                maxRedirects: 10,
-                validateStatus: (status: number) => status < 500,
-              }
-            );
-            allCookieHeaders = [...allCookieHeaders, ...collectCookies(sessionResp)];
-          }
-
-          const petsResp = await axios.get(
-            `${MINSIDE_URL}/OwnersPets/Pet/MyPets`,
-            {
-              headers: { Cookie: cookieValues(allCookieHeaders) },
-              timeout: 15000,
-              maxRedirects: 10,
-              validateStatus: (status: number) => status < 500,
-            }
-          );
-
-          console.log("MyPets response status:", petsResp.status, "type:", typeof petsResp.data, "length:", typeof petsResp.data === "string" ? petsResp.data.length : "N/A");
-
-          if (petsResp.status === 200 && typeof petsResp.data === "string") {
-            const html = petsResp.data as string;
-
-            const petBlocks = html.split(/pet-detail-row|pet-item|petRow|PetName/i);
-            console.log("Pet blocks found:", petBlocks.length - 1);
-
-            const namePattern = />\s*(Agora|Alf|Bodil|Odin|Passopp|Zevs|[A-ZÆØÅ][a-zæøå]+)\s*</g;
-
-            const tablePattern = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
-            const rows = html.match(tablePattern) || [];
-            console.log("Table rows found:", rows.length);
-
-            const petNames: string[] = [];
-            const petDataPattern = /<div[^>]*class="[^"]*pet[^"]*"[^>]*>[\s\S]*?<\/div>/gi;
-            const petDivs = html.match(petDataPattern) || [];
-            console.log("Pet divs found:", petDivs.length);
-
-            const h4Pattern = /<h[234][^>]*>\s*([^<]+?)\s*<\/h[234]>/gi;
-            let h4Match;
-            while ((h4Match = h4Pattern.exec(html)) !== null) {
-              const name = h4Match[1].trim();
-              if (name && name.length > 1 && name.length < 30 && !/menu|side|dyr|min|hjem|logg|nav/i.test(name)) {
-                petNames.push(name);
-              }
-            }
-            console.log("H-tag names found:", petNames);
-
-            if (petNames.length > 0) {
-              petList = petNames.map(name => ({ Name: name, Species: "Hund" }));
-            }
-
-            if (petList.length === 0) {
-              const snippet = html.substring(0, 2000);
-              console.log("MyPets HTML snippet:", snippet.replace(/\s+/g, ' ').substring(0, 1000));
-            }
-          }
-        } catch (petErr: any) {
-          console.log("Could not fetch pet list (non-critical):", petErr.message);
-        }
-
-        const nameParts = ownerName.split(" ");
-        const firstName = nameParts[0] || "Bruker";
-        const lastName = nameParts.slice(1).join(" ") || "";
-
-        const ownerId = resolvedUserId || `MINSIDE-${contactMethod}`;
-
-        const userContextData = {
-          FirstName: firstName,
-          LastName: lastName,
-          Phone: contactMethod,
-          OwnerId: ownerId,
-          NumberOfPets: numberOfPets,
-          Pets: petList.length > 0 ? petList : undefined,
-        };
-
-        if (conversationId) {
-          await storage.updateConversationAuth(parseInt(conversationId), ownerId, userContextData);
-        }
-
-        return res.json({
-          success: true,
-          mode: "production",
-          userContext: userContextData,
-        });
+      if (!resolvedUserId) {
+        return res.status(404).json({ error: "Fant ingen bruker med dette nummeret/e-posten." });
       }
 
-      res.status(401).json({ success: false, error: verifyData.viewMessage || "Feil engangskode. Prøv igjen." });
+      const session = await authenticateWithOTP(contactMethod, otpCode, resolvedUserId);
+      if (!session) {
+        return res.status(401).json({ success: false, error: "Feil engangskode. Prøv igjen." });
+      }
+
+      storeSession(session.ownerId, session.cookies, session.ownerInfo);
+
+      let petList: { Name: string; Species: string; Breed: string; ChipNumber: string; PetId: string; DateOfBirth: string; Gender: string }[] = [];
+      try {
+        const pets = await fetchPetList(session.cookies);
+        petList = pets.map(p => ({
+          Name: p.name,
+          Species: p.species,
+          Breed: p.breed,
+          ChipNumber: p.chipNumber,
+          PetId: p.petId,
+          DateOfBirth: p.dateOfBirth,
+          Gender: p.gender,
+        }));
+        console.log(`Fetched ${petList.length} pets from Min Side for ${session.ownerInfo.name}`);
+      } catch (petErr: any) {
+        console.log("Could not fetch pet list (non-critical):", petErr.message);
+      }
+
+      const userContextData = {
+        FirstName: session.ownerInfo.firstName,
+        LastName: session.ownerInfo.lastName,
+        Phone: contactMethod,
+        OwnerId: session.ownerId,
+        NumberOfPets: session.ownerInfo.numberOfPets,
+        Pets: petList.length > 0 ? petList : undefined,
+      };
+
+      if (conversationId) {
+        await storage.updateConversationAuth(parseInt(conversationId), session.ownerId, userContextData);
+      }
+
+      return res.json({
+        success: true,
+        mode: "production",
+        userContext: userContextData,
+      });
     } catch (error: any) {
       const errData = error.response?.data;
       const errMsg = typeof errData === "string" && errData.includes("<html")

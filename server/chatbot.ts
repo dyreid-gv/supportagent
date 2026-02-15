@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { db } from "./db";
 import { storage } from "./storage";
 import { getMinSideContext, performAction, lookupOwnerByPhone } from "./minside-sandbox";
+import { getStoredSession } from "./minside-client";
 import { messages, type PlaybookEntry, type ServicePrice, type ResponseTemplate } from "@shared/schema";
 
 const openai = new OpenAI({
@@ -327,7 +328,7 @@ function guideDataCollection(
       const suggestions = animals.map((a: any) => ({
         label: `${a.name || a.Name} (${a.species || a.Species || ""})`,
         action: "SELECT_PET",
-        data: { petId: a.animalId || a.AnimalId, petName: a.name || a.Name },
+        data: { petId: a.animalId || a.AnimalId || a.PetId || a.petId, petName: a.name || a.Name },
       }));
       return {
         text: "Hvilket dyr gjelder dette?",
@@ -336,8 +337,9 @@ function guideDataCollection(
       };
     } else if (animals.length === 1) {
       const pet = animals[0];
-      session.collectedData["petId"] = pet.animalId || pet.AnimalId;
-      session.collectedData["animalId"] = pet.animalId || pet.AnimalId;
+      const petId = pet.animalId || pet.AnimalId || pet.PetId || pet.petId;
+      session.collectedData["petId"] = petId;
+      session.collectedData["animalId"] = petId;
       session.collectedData["petName"] = pet.name || pet.Name;
     }
   }
@@ -549,7 +551,10 @@ Gyldige actions:
         if (pet.Breed) prompt += `, ${pet.Breed}`;
         if (pet.Species) prompt += `)`;
         if (pet.ChipNumber) prompt += ` - Chip: ${pet.ChipNumber}`;
-        if (pet.AnimalId) prompt += ` - ID: ${pet.AnimalId}`;
+        const id = pet.AnimalId || pet.PetId;
+        if (id) prompt += ` - ID: ${id}`;
+        if (pet.DateOfBirth) prompt += ` - Fodt: ${pet.DateOfBirth}`;
+        if (pet.Gender) prompt += ` - ${pet.Gender}`;
         prompt += "\n";
       }
     } else if (storedUserContext.NumberOfPets > 0) {
@@ -733,11 +738,12 @@ export async function* streamChatResponse(
     const lowerMsg = userMessage.toLowerCase();
     const matchedPet = animals.find((a: any) => {
       const name = (a.name || a.Name || "").toLowerCase();
-      return name === lowerMsg || lowerMsg.includes(name);
+      return name && name.length > 1 && (name === lowerMsg || lowerMsg.includes(name));
     });
     if (matchedPet) {
-      session.collectedData["petId"] = matchedPet.animalId || matchedPet.AnimalId;
-      session.collectedData["animalId"] = matchedPet.animalId || matchedPet.AnimalId;
+      const petId = matchedPet.animalId || matchedPet.AnimalId || matchedPet.PetId || matchedPet.petId;
+      session.collectedData["petId"] = petId;
+      session.collectedData["animalId"] = petId;
       session.collectedData["petName"] = matchedPet.name || matchedPet.Name;
     }
   }

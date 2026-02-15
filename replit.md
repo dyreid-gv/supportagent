@@ -1,141 +1,64 @@
 # DyreID Support AI
 
 ## Overview
-AI-powered support automation system for DyreID (Norway's national pet ID registry). Two integrated parts:
+This project is an AI-powered support automation system for DyreID, Norway's national pet ID registry. It consists of two main components:
 
-1. **Training Agent (DEL 1)**: 9-workflow pipeline that ingests ~40,000 historical support tickets from Pureservice API, GDPR-scrubs them, maps to 9 help center categories (60 subcategories), analyzes uncategorized tickets, classifies intents (62 intents across 10 categories from shared/intents.ts), extracts resolution patterns, detects uncertainty, builds a Support Playbook, and provides manual review UI
-2. **Customer Chatbot (DEL 2)**: Uses the playbook to provide automated support, authenticates via Min Side OTP, retrieves owner/pet context, and executes actions
+1.  **Training Agent**: A sophisticated 9-workflow pipeline designed to ingest historical support tickets, perform GDPR scrubbing, categorize them, classify user intents, extract resolution patterns, detect uncertainties, and ultimately build a comprehensive Support Playbook. This process involves analyzing large datasets of customer interactions to create a robust knowledge base for automated support.
+2.  **Customer Chatbot**: This component utilizes the generated Support Playbook to provide automated customer support. It features user authentication, retrieval of owner and pet context, and the ability to execute specific actions based on user requests, significantly streamlining support operations.
 
-## Architecture
-- **Stack**: Express + Vite + React + PostgreSQL + Drizzle ORM
-- **AI**: OpenAI via egen API-nøkkel (gpt-5-nano for training workflows, gpt-5-mini for complex analysis, gpt-4o for chatbot)
-- **Auth**: OTP-based via Min Side sandbox (demo phones: 91000001-91000005)
+The overarching goal is to enhance DyreID's customer service efficiency, reduce response times, and provide consistent, high-quality support through advanced AI capabilities.
 
-## Project Structure
-```
-shared/
-  schema.ts          - Drizzle schema: 14 tables (raw_tickets, scrubbed_tickets, hjelpesenter_categories, category_mappings, intent_classifications, resolution_patterns, playbook_entries, uncategorized_themes, uncertainty_cases, review_queue, conversations/messages, training_runs, service_prices, response_templates)
-  intents.ts         - 62 intent definitions across 10 categories with keywords, descriptions, slugs. Single source of truth for training-agent.ts and chatbot.ts
-server/
-  routes.ts          - API routes: 9 SSE training endpoints, review queue, chat, MinSide actions
-  storage.ts         - IStorage interface + DatabaseStorage with full CRUD for all 14 tables
-  training-agent.ts  - 9-workflow pipeline with all workflow functions + manual review handler
-  chatbot.ts         - Streaming AI chatbot with playbook context and action execution
-  pureservice.ts     - Pureservice API client for ticket and template fetching, category mapping
-  gdpr-scrubber.ts   - GDPR PII removal: names, phones, emails, addresses, chip numbers, IPs, payment refs
-  minside-sandbox.ts - Demo sandbox with 5 users simulating various pet/owner scenarios
-  db.ts              - Database connection (Neon serverless)
-client/src/
-  App.tsx            - Sidebar layout with Dashboard and Chatbot routes
-  pages/
-    dashboard.tsx    - 9-workflow pipeline controls, 9 stat cards, 8 tabs (Pipeline, Playbook, Review Queue, Themes, Uncertainty, History, Priser, Autosvar)
-    chatbot.tsx      - Chat interface with streaming messages, OTP auth, suggestions
-  components/
-    theme-provider.tsx - Light/dark mode toggle
-    theme-toggle.tsx
-```
+## User Preferences
+I prefer clear and concise communication.
+I value an iterative development process.
+I want to be consulted before any major architectural or feature changes are implemented.
+I expect detailed explanations for complex technical decisions.
+Do not make changes to files in the `shared/` folder without explicit approval.
 
-## 9 Training Workflows
-1. **Pureservice Ticket Ingestion** - Fetch closed tickets from Pureservice API with pagination
-2. **GDPR Scrubbing** - Remove PII (phones, emails, chips, names, addresses, postcodes, IPs, payment refs)
-3. **Hjelpesenter Category Mapping** - Map to 9 DyreID categories via Claude AI (categories loaded from CSV)
-4. **Uncategorized Ticket Analysis** - Cluster analysis of "Ukategorisert" tickets for theme identification
-5. **Intent Classification** - Classify customer intent using 62 intents across 10 categories via OpenAI
-6. **Resolution Extraction** - Extract step-by-step resolution patterns from ticket dialogues
-7. **Uncertainty Detector** - Identify low-confidence classifications and flag for review
-8. **Playbook Builder** - Aggregate all data into final Support Playbook
-9. **Manual Review Handler** - Human review of uncertain cases via Review Queue UI
+## System Architecture
+The system is built on a modern web stack comprising Express, Vite, React, PostgreSQL, and Drizzle ORM. AI capabilities are powered by OpenAI, utilizing different models for training workflows (gpt-5-nano, gpt-5-mini) and the chatbot (gpt-4o). Authentication is handled via an OTP-based system integrated with the Min Side platform, with a sandbox environment for development and testing.
 
-## Key Features
-- **9-Step Pipeline**: SSE-streamed workflows with real-time progress monitoring
-- **GDPR Compliance**: Regex-based PII masking before AI analysis
-- **CSV-Loaded Categories**: 9 hjelpesenter categories with 60 subcategories loaded from CSV file (matches dyreid.no/hjelpesenter)
-- **62 Centralized Intents**: Defined in shared/intents.ts with keywords, descriptions, slugs - covers all hjelpesenter categories
-- **Batch Processing**: Intent classification sends 5 tickets per OpenAI call (5x faster)
-- **Review Queue**: Manual review UI for uncertain classifications and new intents
-- **OTP Auth**: Two-step OTP login via Min Side (minside.dyreid.no) with sandbox fallback for demo phones
-- **Quick Intent Matching**: 62 regex patterns for instant responses (<1s) before falling back to OpenAI
-- **Sandbox Users**: 5 demo profiles (91000001-91000005) with varied scenarios
-- **Chatbot Actions**: Mark lost/found, activate QR, initiate transfers, send payment links
-- **Streaming Responses**: SSE-based real-time AI responses
+**UI/UX Decisions:**
+The client-side application is a React-based single-page application.
+The UI features a sidebar layout for navigation between a Dashboard and Chatbot interface.
+The Dashboard provides real-time monitoring of the 9-workflow pipeline, statistics, and various analytical tabs (Playbook, Review Queue, Themes, Uncertainty, History, Prices, Autoreply).
+The Chatbot interface includes streaming messages, OTP authentication, and interactive suggestions for enhanced user experience.
+A light/dark mode toggle is available for user preference.
 
-## API Endpoints
-### Training Pipeline
-- POST /api/training/ingest (SSE)
-- POST /api/training/scrub (SSE)
-- POST /api/training/categorize (SSE)
-- POST /api/training/analyze-uncategorized (SSE)
-- POST /api/training/classify (SSE) - batch mode: 5 tickets per Claude call
-- POST /api/training/extract-resolutions (SSE)
-- POST /api/training/detect-uncertainty (SSE)
-- POST /api/training/generate-playbook (SSE)
-- GET /api/training/review-queue
-- POST /api/training/submit-review
-- GET /api/training/uncategorized-themes
-- GET /api/training/uncertainty-cases
-- GET /api/training/stats
+**Technical Implementations & Feature Specifications:**
+**Training Agent Workflows:**
+*   **Pureservice Ticket Ingestion**: Fetches closed tickets with pagination.
+*   **GDPR Scrubbing**: Regex-based PII masking for compliance.
+*   **Hjelpesenter Category Mapping**: AI-driven categorization using 9 DyreID categories and 60 subcategories loaded from CSV.
+*   **Uncategorized Ticket Analysis**: Cluster analysis for theme identification.
+*   **Intent Classification**: Classifies customer intent using 62 predefined intents across 10 categories.
+*   **Resolution Extraction**: Extracts step-by-step resolution patterns from dialogues.
+*   **Uncertainty Detector**: Flags low-confidence classifications for manual review.
+*   **Playbook Builder**: Aggregates all processed data into the final Support Playbook, now data-driven rather than AI-generated, incorporating autoreply templates, dialog patterns, reclassification tracking, resolution quality analysis, and chatbot feedback.
+*   **Manual Review Handler**: Provides a UI for human review of uncertain cases and new intents.
 
-### OTP Authentication (proxy to Min Side)
-- POST /api/auth/send-otp - Send OTP to phone/email (proxied via backend, sandbox fallback)
-- POST /api/auth/verify-otp - Verify OTP code and get user context
-- GET /api/auth/user-context - Get user details by contact method
+**Chatbot Features:**
+*   **OTP Authentication**: Secure login via Min Side with sandbox support.
+*   **Quick Intent Matching**: 62 regex patterns for instant responses, falling back to OpenAI.
+*   **Contextual Understanding**: Utilizes user and pet context from authentication for personalized responses.
+*   **Action Execution**: Can mark lost/found pets, activate QR codes, initiate transfers, and send payment links.
+*   **Streaming Responses**: Provides real-time AI responses using Server-Sent Events (SSE).
+*   **Feedback System**: Logs chatbot interactions, user feedback, and flags problematic interactions for review.
 
-### Data
-- GET /api/playbook
-- GET /api/categories
-- POST /api/categories/reload-csv
+**System Design Choices:**
+*   **Database Schema**: Drizzle ORM manages 14 tables, including raw/scrubbed tickets, category mappings, intent classifications, resolution patterns, playbook entries, conversation logs, and training run metadata.
+*   **Centralized Intent Definitions**: 62 intents are defined in `shared/intents.ts` as a single source of truth.
+*   **Batch Processing**: Intent classification processes multiple tickets per API call for efficiency.
+*   **Combined Batch Analysis**: A unified API endpoint for simultaneous category, intent, and resolution analysis, including autoreply detection, dialog pattern classification, and resolution quality scoring.
+*   **Dynamic Pricing**: A `service_prices` table with an admin UI allows for configurable pricing information to be injected into the chatbot's system prompt.
+*   **Autoreply Detection**: Identifies and categorizes autoreply patterns in ticket dialogues, generating keywords for response templates.
+*   **Dialog Pattern Analysis**: Classifies dialogue patterns in tickets to identify efficient vs. problematic resolution flows.
+*   **Reclassification**: AI-driven reclassification of generic tickets to standard categories.
+*   **Resolution Quality Assessment**: AI assesses resolution quality for tickets, providing insights into problematic categories and missing elements.
+*   **Real Min Side Integration**: Direct integration with Min Side for real-time pet list, payment history, and owner information retrieval via HTML parsing, caching session cookies for efficiency.
 
-### Admin/Export
-- GET /api/admin/tables - Table overview with row counts
-- GET /api/admin/export/:table - Export table as JSON or CSV
-- GET /api/admin/export-all - Export all tables as JSON
-- GET /api/admin/schema - Database schema info
-
-## Environment Variables
-- `PURESERVICE_API_KEY` - API key for Pureservice ticket system
-- `SESSION_SECRET` - Session encryption key
-- `DATABASE_URL` - PostgreSQL connection string (auto-provided)
-- `OPENAI_API_KEY` - OpenAI API key (user-provided, used by both training agent and chatbot)
-
-### Combined Batch Analysis
-- POST /api/training/test-combined (SSE) - Combined batch analysis: category + intent + resolution in one API call per 10 tickets, 5x parallel
-
-### Feedback Loop System
-- POST /api/feedback - Submit feedback (resolved/partial/not_resolved) for a chatbot interaction
-- GET /api/feedback/stats - Feedback statistics with per-intent breakdown
-- GET /api/feedback/flagged - Flagged interactions (not_resolved) for review
-- GET /api/feedback/interactions - Recent chatbot interactions
-
-### Autoreply Detection (Workflow 2B)
-- POST /api/training/generate-keywords (SSE) - Generate keywords for all response templates using OpenAI
-- POST /api/training/detect-autoreply (SSE) - Detect autoreply patterns in scrubbed ticket dialogs
-- GET /api/training/autoreply-stats - Autoreply detection statistics
-
-### Dialog Pattern Analysis (Oppgave B)
-- POST /api/training/analyze-dialog-patterns (SSE) - Classify dialog patterns in scrubbed tickets
-- GET /api/training/dialog-pattern-stats - Dialog pattern statistics with per-category breakdown
-
-### Reclassification (Oppgave C)
-- POST /api/training/reclassify (SSE) - Reclassify "Generell e-post" tickets to correct standard categories via AI
-- GET /api/training/reclassification-stats - Reclassification statistics with per-category breakdown
-
-### Resolution Quality Assessment (Oppgave D)
-- POST /api/training/assess-quality (SSE) - Assess resolution quality (HIGH/MEDIUM/LOW/NONE) for scrubbed tickets via AI
-- GET /api/training/quality-stats - Quality statistics with per-category breakdown, per-pattern breakdown, missing elements, problematic categories, examples
-
-## Recent Changes
-- 2026-02-14: Chatbot Action Execution (OPPGAVE FINAL) - Complete rewrite of chatbot.ts with playbook-driven 4-level response hierarchy: (1) EXECUTE action via sandbox API, (2) GUIDE through data collection with pet/tag selection suggestions, (3) INSTRUCT with combined_response from playbook, (4) INFORM as fallback. Session management (SessionState) for multi-turn data collection (awaitingInput for phone, tagId, petId). Intent matching: quick regex → playbook keyword search → OpenAI fallback. New storage methods: getPlaybookByIntent, searchPlaybookByKeywords. Frontend: MessageBubble shows action status indicators (success/fail), help center links, clickable pet/tag selection suggestions. sendDirectMessage for suggestion clicks.
-- 2026-02-14: Enhanced Playbook Generation (Workflow 8) - Now fully data-driven instead of AI-generated. Queries actual ticket data per intent including: (A) autoreply template matching, (B) dialog pattern distribution, (C) reclassification tracking, (D) resolution quality analysis + help center article matching + chatbot feedback stats. Generates combined AI response per intent. 30+ new columns on playbook_entries: autoreply fields, dialog pattern fields, reclassification fields, quality fields, help center fields, action-data fields, feedback counters. Dashboard Playbook tab redesigned with expandable entries showing all A-D data, quality indicators, help center links, feedback stats, search/filter, 4 stat cards. upsertPlaybookEntry uses ON CONFLICT DO UPDATE with unique intent constraint.
-- 2026-02-14: Resolution Quality Assessment (Oppgave D) - resolution_quality table with qualityLevel, confidence, reasoning, missingElements, positiveElements, customerQuestion, agentAnswer. Pipeline step 12 assesses quality using gpt-5-nano in batches of 5. Dashboard Kvalitet tab with 5 stat cards (total, HIGH, MEDIUM, LOW, NONE), quality distribution bars, per-category table, per-pattern table, top missing elements chart, problematic category alerts (≥25% LOW/NONE), insight card, collapsible examples per level.
-- 2026-02-14: Reclassification (Oppgave C) - Added reclassification columns to category_mappings (needsReclassification, originalCategory, reclassifiedCategory, reclassifiedSubcategory, reclassificationConfidence, reclassificationReasoning). Pipeline step 11 identifies general/generic tickets and reclassifies them to 9 standard categories using gpt-5-nano. Dashboard Reklassifisering tab with 4 stat cards, distribution bars, insight card, truly general list. Confidence threshold 0.6.
-- 2026-02-14: Dialog pattern analysis (Oppgave B) - dialog_pattern, messages_after_autoreply, total_message_count columns added to scrubbed_tickets. 4 patterns: autosvar_only (problematic), autosvar_quick_resolution (efficient), autosvar_extended_dialog (complex), direct_human_response (good service). Dashboard Dialog-mønstre tab with stat cards, distribution bars, per-category table, and problematic cases highlight.
-- 2026-02-14: Autoreply detection (Workflow 2B) - keywords column added to response_templates, autoreply tracking columns (has_autoreply, autoreply_template_id, autoreply_confidence, human_response_starts_at) added to scrubbed_tickets. Two-step workflow: 1) Generate keywords for 22 templates via OpenAI gpt-4o, 2) Match ticket dialogs to templates using Levenshtein similarity + keyword overlap + subject matching. Dashboard Autosvar-gjenkjenning tab with stats cards, confidence bar, template distribution. Threshold: confidence > 0.6 for autoreply detection.
-- 2026-02-14: Help Center Matching (Workflow 3C) - ticket_help_center_matches table with alignment quality tracking. Dashboard Artikkel-match tab with stats, distribution, top articles, common missing points.
-- 2026-02-14: Feedback loop system - chatbot_interactions table logs all user/bot exchanges with response method, matched intent, timing. Feedback widget on assistant messages (thumbs up/down/neutral). Dashboard Tilbakemelding tab with stats cards, flagged interactions, per-intent breakdown, and recent interaction log. Interactions flagged when marked "not_resolved".
-- 2026-02-14: Combined batch analysis with 5x parallel processing. Category + intent + resolution in ONE API call per 10 tickets using gpt-5-mini with JSON mode. Autosvar detection, dialog pattern classification, resolution quality scoring. Test endpoint resets and re-analyzes tickets. Dashboard button for triggering combined analysis. Estimated <20 hours for 40K tickets.
-- 2026-02-14: Downloaded all 22 Pureservice auto-response templates, mapped to hjelpesenter categories/intents, stored in response_templates table. Integrated into chatbot system prompt as official response guidelines. Autosvar tab on dashboard shows templates grouped by category with expandable body/key points.
-- 2026-02-14: Added service_prices table with admin UI (Priser tab) for configurable pricing. 10 identified prices from Pureservice templates. Prices injected into chatbot system prompt. CRUD API at /api/prices.
-- 2026-02-14: Switched training agent AI from Claude (Anthropic) to OpenAI via Replit AI Integrations. claude-haiku-4-5 → gpt-5-nano, claude-sonnet-4-5 → gpt-5-mini. Chatbot remains on Claude.
-- 2026-02-14: Fixed chatbot auth context - user context from OTP login now stored in DB (conversations.userContext jsonb) and passed to AI system prompt. Quick intent patterns are auth-aware. Chatbot correctly identifies logged-in users and their pets.
-- 2026-02-14: OTP integration with Min Side (minside.dyreid.no) via backend proxy, quick intent matching (11 patterns), batch intent classification (5x faster), admin panel with data export
-- 2026-02-13: Complete 9-workflow Training Agent with dashboard, review queue UI, CSV-loaded categories, 34 known intents, uncertainty detection, uncategorized theme analysis
+## External Dependencies
+*   **OpenAI API**: Used for various AI tasks including intent classification, resolution extraction, uncertainty detection, playbook generation, autoreply keyword generation, dialog pattern analysis, reclassification, and resolution quality assessment.
+*   **Pureservice API**: Used for ingesting historical support tickets and fetching response templates.
+*   **PostgreSQL (Neon Serverless)**: The primary database for storing all project data.
+*   **Min Side (DyreID's user portal)**: Used for OTP-based user authentication and retrieving user/pet context, integrated via a backend proxy for real users and a sandbox for development.
