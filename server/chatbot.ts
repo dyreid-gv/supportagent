@@ -1648,6 +1648,124 @@ function parseActions(text: string): { action: string; params: Record<string, st
   return actions;
 }
 
+async function gptIntentInterpretation(
+  userMessage: string
+): Promise<{ intent: string | null; confidence: number }> {
+  try {
+    const allowlistedIntents = INTENTS.join(", ");
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      max_completion_tokens: 256,
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content: `Du er en intent-klassifiserer for DyreID (Norges nasjonale kjæledyrregister).
+
+Din ENESTE oppgave er å klassifisere brukerens melding til EN av de godkjente intentene.
+
+GODKJENTE INTENTS:
+${allowlistedIntents}
+
+REGLER:
+- Returner KUN JSON med intent og confidence
+- confidence skal være mellom 0.0 og 1.0
+- Hvis du er usikker, sett confidence lavt
+- Du skal ALDRI generere nye intents
+- Du skal ALDRI forklare prosedyrer
+- Du skal ALDRI svare på spørsmål
+
+EKSEMPLER:
+"jeg vil at datteren min skal være eier av Rex" → {"intent": "OwnershipTransferWeb", "confidence": 0.92}
+"hunden min er borte" → {"intent": "ReportLostPet", "confidence": 0.95}
+"hva koster appen" → {"intent": "AppCost", "confidence": 0.88}
+"feil navn på katten" → {"intent": "WrongInfo", "confidence": 0.90}
+
+Svar KUN med JSON: {"intent": "IntentNavn", "confidence": 0.85}`,
+        },
+        {
+          role: "user",
+          content: userMessage,
+        },
+      ],
+    });
+
+    const text = response.choices[0]?.message?.content || "";
+    const result = JSON.parse(text);
+
+    if (result.intent && typeof result.confidence === "number") {
+      if (!INTENTS.includes(result.intent)) {
+        return { intent: null, confidence: 0 };
+      }
+      return { intent: result.intent, confidence: result.confidence };
+    }
+    return { intent: null, confidence: 0 };
+  } catch (err: any) {
+    console.error("GPT intent interpretation error:", err.message);
+    return { intent: null, confidence: 0 };
+  }
+}
+
+const PARAPHRASE_BLOCKLIST = [
+  /veterinær/i, /chip.*innsett/i, /sett inn.*chip/i, /ny.*mikrobrikke/i,
+  /kontakt.*support/i, /ring.*oss/i, /ta kontakt med/i,
+  /pris.*kr|kr.*pris|\d+\s*kr|\d+\s*nok/i,
+];
+
+async function paraphrasePlaybookResponse(
+  originalText: string,
+  userMessage: string
+): Promise<string> {
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      max_completion_tokens: 512,
+      messages: [
+        {
+          role: "system",
+          content: `Du er en parafraserings-assistent for DyreID kundeservice.
+
+OPPGAVE: Omformuler teksten under til en mer naturlig, vennlig tone som svarer på kundens spørsmål.
+
+STRENGE REGLER:
+- Du skal KUN omformulere innholdet som allerede finnes i teksten
+- Du skal ALDRI legge til nye steg, prosedyrer eller instruksjoner
+- Du skal ALDRI nevne veterinær, chipinnsetting, nye priser eller kontakt support
+- Du skal ALDRI finne opp informasjon som ikke står i originalteksten
+- Behold alle fakta, tall og steg nøyaktig som de er
+- Maks 200 ord
+
+ORIGINALTEKST:
+${originalText}`,
+        },
+        {
+          role: "user",
+          content: userMessage,
+        },
+      ],
+    });
+
+    const paraphrased = response.choices[0]?.message?.content?.trim() || "";
+
+    if (!paraphrased) return originalText;
+
+    for (const pattern of PARAPHRASE_BLOCKLIST) {
+      if (pattern.test(paraphrased) && !pattern.test(originalText)) {
+        return originalText;
+      }
+    }
+
+    if (paraphrased.length > originalText.length * 2.5) {
+      return originalText;
+    }
+
+    return paraphrased;
+  } catch (err: any) {
+    console.error("Paraphrase error:", err.message);
+    return originalText;
+  }
+}
+
 async function matchUserIntent(
   message: string,
   conversationId: number,
@@ -1700,6 +1818,20 @@ async function matchUserIntent(
     session.intent = quickIntent;
     session.collectedData = {};
     return { intent: quickIntent, playbook: null, method: "quick-match-no-playbook" };
+  }
+
+  const gptResult = await gptIntentInterpretation(message);
+  if (gptResult.intent && gptResult.confidence >= 0.7) {
+    const gptPlaybook = await storage.getPlaybookByIntent(gptResult.intent);
+    if (gptPlaybook) {
+      session.intent = gptResult.intent;
+      session.playbook = gptPlaybook;
+      session.collectedData = {};
+      return { intent: gptResult.intent, playbook: gptPlaybook, method: "gpt-intent-interpretation" };
+    }
+    session.intent = gptResult.intent;
+    session.collectedData = {};
+    return { intent: gptResult.intent, playbook: null, method: "gpt-intent-no-playbook" };
   }
 
   return { intent: null, playbook: null, method: "none" };
@@ -1760,11 +1892,13 @@ async function handlePlaybookResponse(
   }
 
   if (playbook.combinedResponse || playbook.resolutionSteps) {
+    const originalInfoText = playbook.combinedResponse || playbook.resolutionSteps || "";
+    const paraphrased = await paraphrasePlaybookResponse(originalInfoText, userMessage);
     return {
-      text: playbook.combinedResponse || playbook.resolutionSteps || "",
+      text: paraphrased,
       helpCenterLink: playbook.helpCenterArticleUrl,
       suggestions: generateSuggestions(playbook),
-      model: "playbook-info",
+      model: "playbook-info-paraphrased",
     };
   }
 
@@ -2107,89 +2241,37 @@ export async function* streamChatResponse(
     }
   }
 
-  const allPlaybook = await storage.getActivePlaybookEntries();
-  const activePrices = await storage.getActiveServicePrices();
-  const activeTemplates = await storage.getActiveResponseTemplates();
-  const matchedPb = playbook || (intent ? await storage.getPlaybookByIntent(intent) : null);
-  const systemPrompt = buildSystemPrompt(allPlaybook, ownerContext, ownerContext ? null : storedUserContext, activePrices, activeTemplates, matchedPb);
+  const blockResponse = "Beklager, dette er utenfor det jeg kan hjelpe med automatisk. Du kan prøve å omformulere spørsmålet ditt, eller kontakte DyreID kundeservice på **support@dyreid.no** for videre hjelp.\n\nJeg kan hjelpe deg med blant annet:\n- Eierskifte\n- ID-merking og chipregistrering\n- QR-brikke og Smart Tag\n- Savnede og gjenfunnede dyr\n- Min Side og innlogging\n- DyreID-appen og abonnement";
 
-  const history = await storage.getMessagesByConversation(conversationId);
-  const chatMessages = history.map((m) => ({
-    role: m.role as "user" | "assistant",
-    content: m.content,
-  }));
-
-  const stream = await openai.chat.completions.create({
-    model: "gpt-4o",
-    max_completion_tokens: 8192,
-    messages: [
-      { role: "system", content: systemPrompt },
-      ...chatMessages,
+  const blockMetadata: any = {
+    model: "block-escalation",
+    method: "none",
+    blocked: true,
+    suggestions: [
+      { label: "Eierskifte", action: "SUBTOPIC", data: { query: "eierskifte" } },
+      { label: "ID-merking", action: "SUBTOPIC", data: { query: "id-merking" } },
+      { label: "QR-brikke", action: "SUBTOPIC", data: { query: "qr-brikke" } },
+      { label: "Savnet dyr", action: "SUBTOPIC", data: { query: "savnet dyr" } },
+      { label: "Min Side", action: "SUBTOPIC", data: { query: "min side" } },
+      { label: "DyreID-appen", action: "SUBTOPIC", data: { query: "dyreid-appen" } },
     ],
-    stream: true,
-  });
-
-  let fullResponse = "";
-
-  for await (const chunk of stream) {
-    const content = chunk.choices[0]?.delta?.content || "";
-    if (content) {
-      fullResponse += content;
-      yield content;
-    }
-  }
-
-  const actions = parseActions(fullResponse);
-  let actionResults: string[] = [];
-
-  for (const { action, params } of actions) {
-    if (action === "request_auth") continue;
-
-    if (ownerId) {
-      const result = performAction(ownerId, action, params);
-      actionResults.push(
-        result.success
-          ? `Handling utfort: ${result.message}`
-          : `Feil: ${result.message}`
-      );
-    }
-  }
-
-  let cleanResponse = fullResponse.replace(/\[ACTION:[^\]]*\]/g, "").trim();
-  cleanResponse = cleanResponse
-    .replace(/[Ll]ogg(?:e)? inn (?:på|med|via) Min ?[Ss]ide/g, "logge inn via OTP-knappen i chatten")
-    .replace(/[Gg]å til Min ?[Ss]ide for å logg(?:e)? inn/g, "klikke på OTP-knappen i chatten for å logge inn")
-    .replace(/innlogging (?:via|på|med) Min ?[Ss]ide/gi, "innlogging via OTP i chatten")
-    .replace(/[Vv]ennligst logg(?:e)? inn på Min ?[Ss]ide/g, "Klikk på OTP-knappen i chatten for å logge inn")
-    .replace(/(?:først )?(?:må du )?logg(?:e)? inn (?:på|med) Min ?[Ss]ide/gi, "logge inn via OTP-knappen i chatten")
-    .replace(/(?:besøk|gå til|åpne) (?:min ?side|minside\.no)/gi, "bruk OTP-knappen i chatten");
-  const finalContent = actionResults.length > 0
-    ? `${cleanResponse}\n\n${actionResults.join("\n")}`
-    : cleanResponse;
-
-  const helpCenterLink = intent ? getHelpCenterUrl(intent) : null;
-
-  const aiMetadata: any = {
-    ...(actions.length > 0 ? { actions } : {}),
-    ...(intent ? { matchedIntent: intent, method } : {}),
-    ...(helpCenterLink ? { helpCenterLink } : {}),
   };
 
   const msg = await storage.createMessage({
     conversationId,
     role: "assistant",
-    content: finalContent,
-    metadata: aiMetadata,
+    content: blockResponse,
+    metadata: blockMetadata,
   });
 
   const interaction = await storage.logChatbotInteraction({
     conversationId,
     messageId: msg.id,
     userQuestion: userMessage,
-    botResponse: finalContent,
-    responseMethod: method !== "none" ? `ai-with-${method}` : "ai",
-    matchedIntent: intent,
-    actionsExecuted: actions.length > 0 ? actions : null,
+    botResponse: blockResponse,
+    responseMethod: "block-escalation",
+    matchedIntent: null,
+    actionsExecuted: null,
     authenticated: isAuthenticated,
     responseTimeMs: Date.now() - startTime,
   });
@@ -2197,6 +2279,8 @@ export async function* streamChatResponse(
 
   await db
     .update(messages)
-    .set({ metadata: { ...aiMetadata, interactionId: interaction.id } })
+    .set({ metadata: { ...blockMetadata, interactionId: interaction.id } })
     .where(eq(messages.id, msg.id));
+
+  yield blockResponse;
 }

@@ -16,7 +16,15 @@ I expect detailed explanations for complex technical decisions.
 Do not make changes to files in the `shared/` folder without explicit approval.
 
 ## System Architecture
-The system is built on a modern web stack comprising Express, Vite, React, PostgreSQL, and Drizzle ORM. AI capabilities are powered by OpenAI, utilizing different models for training workflows (gpt-5-nano, gpt-5-mini) and the chatbot (gpt-4o). Authentication is handled via an OTP-based system integrated with the Min Side platform, with a sandbox environment for development and testing.
+The system is built on a modern web stack comprising Express, Vite, React, PostgreSQL, and Drizzle ORM. AI capabilities are powered by OpenAI, utilizing different models for training workflows (gpt-5-nano, gpt-5-mini) and runtime intent classification (gpt-4o). Authentication is handled via an OTP-based system integrated with the Min Side platform, with a sandbox environment for development and testing.
+
+**Architecture Decisions (Feb 2026):**
+*   **Closed-domain action agent**: The chatbot is NOT an open-domain reasoning chatbot. It is a stateful action agent that performs authenticated operations via OTP login to Min Side.
+*   **No runtime OpenAI fallback**: GPT is NEVER used to generate procedures, pricing, or resolution logic at runtime. The old OpenAI streaming fallback has been replaced with a BLOCK response that escalates to human support.
+*   **Runtime GPT usage restricted to**: (1) Intent interpretation — classifying user messages to allowlisted intents with confidence scoring, (2) Optional paraphrasing of existing playbook text (with guardrails).
+*   **Training agent extracts structured data**: Step 6 (Resolution Extraction) now extracts actionable/informational classification, required data fields, action endpoints, and guidance steps — NOT natural-language agent replies.
+*   **Response hierarchy**: 1. Regex match → 2. Playbook keyword → 3. GPT intent interpretation (confidence >= 0.7) → 4. Category menu → 5. BLOCK/escalation.
+*   **Paraphrase guardrails**: GPT paraphrasing rejects output containing veterinær, chip insertion, new pricing, or contact support if not in original text. Rejects if output > 2.5x original length.
 
 **UI/UX Decisions:**
 The client-side application is a React-based single-page application.

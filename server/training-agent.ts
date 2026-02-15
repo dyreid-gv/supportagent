@@ -649,9 +649,10 @@ export async function runResolutionExtraction(
 
     for (const classification of unextracted) {
       try {
-        const prompt = `Du er en ekspert på å ekstrahere løsningssteg fra support-dialog.
+        const prompt = `Du er en ekspert på å analysere DyreID support-tickets og ekstrahere STRUKTURERT OPERASJONELL DATA.
 
-OPPGAVE: Analyser dialogen og ekstraher steg-for-steg løsning.
+VIKTIG: Du skal IKKE ekstrahere agentens svar eller samtalefrasering.
+Du skal KUN ekstrahere operasjonell logikk som kan brukes av en handlingsagent.
 
 TICKET:
 Intent: ${classification.intent}
@@ -662,32 +663,52 @@ Runtime-data: ${classification.requiredRuntimeData || ""}
 Betaling: ${classification.paymentRequired ? "Ja" : "Nei"}
 Begrunnelse: ${classification.reasoning || ""}
 
-INSTRUKSJONER:
-1. Identifiser hva kunden trengte
-2. Identifiser hva agenten gjorde
-3. Ekstraher stegene i løsningen
-4. Identifiser hvilke data som ble hentet
-5. Identifiser handlinger som ble utført
+OPPGAVE:
+1. Hva var kundens OPERASJONELLE MÅL? (f.eks. overføre eierskap, melde savnet, aktivere QR)
+2. Ble saken løst ved en AUTENTISERT SYSTEMHANDLING i DyreID/Min Side?
+3. Hvis JA (actionable=true): Hvilke DATA trengs for å utføre handlingen? Hvilket ENDEPUNKT brukes?
+4. Hvis NEI (actionable=false): Skriv kun et kort informasjonstekst-sammendrag.
+
+KJENTE ENDEPUNKTER:
+- OwnershipTransferWeb → /OwnerChange/OwnerSeller/ReportOwnerChange
+- LostPetReport → /Pet/LostPet/ReportLostPet
+- FoundPetReport → /Pet/FoundPet/ReportFoundPet
+- QRTagActivation → /Pet/QR/Activate
+- SmartTagActivation → /SmartTag/Activate
+- CancelSubscription → /Subscription/Cancel
+- ForeignChipRegistration → /Pet/Foreign/Register
+- UpdateContactInfo → /Owner/UpdateContact
+- PetDeceased → /Pet/Deceased/Report
+- NewRegistration → /Pet/Register
+
+KJENTE DATAFELTER:
+PetId, NewOwnerMobile, TagId, SubscriptionId, OwnerMobile, ChipNumber, OwnerName, PetName, AnimalId
 
 SVAR I JSON:
 {
-  "customer_need": "What did customer want to achieve?",
-  "data_gathered": "from_customer: mobilnr, dyrenavn; from_system: PetId, PaymentStatus",
-  "resolution_steps": "1. Verifiser identitet via OTP; 2. Hent dyrprofil; 3. Utfør handling",
-  "success_indicators": "Betaling fullført, Dyr nå søkbart",
+  "customer_need": "Kort operasjonelt mål (f.eks. 'Overføre eierskap til ny eier')",
+  "actionable": true/false,
+  "required_data": ["PetId", "NewOwnerMobile"],
+  "action_endpoint": "/OwnerChange/OwnerSeller/ReportOwnerChange",
+  "guidance_steps": ["Verifiser eierskap via OTP", "Velg dyr", "Oppgi ny eiers mobilnummer", "Bekreft overføring"],
+  "info_text": null,
+  "success_indicators": "Eierskap overført, bekreftelse sendt",
   "follow_up_needed": false
 }`;
 
         const text = await callOpenAI(prompt);
         const result = extractJson(text);
 
+        const requiredDataStr = Array.isArray(result.required_data) ? result.required_data.join(", ") : (result.required_data || "");
+        const guidanceStepsStr = Array.isArray(result.guidance_steps) ? result.guidance_steps.join("; ") : (result.guidance_steps || "");
+
         await storage.insertResolutionPattern({
           ticketId: classification.ticketId,
           intent: classification.intent,
-          customerNeed: result.customer_need,
-          dataGathered: typeof result.data_gathered === "object" ? JSON.stringify(result.data_gathered) : result.data_gathered,
-          resolutionSteps: typeof result.resolution_steps === "object" ? JSON.stringify(result.resolution_steps) : result.resolution_steps,
-          successIndicators: typeof result.success_indicators === "object" ? JSON.stringify(result.success_indicators) : result.success_indicators,
+          customerNeed: result.customer_need || "",
+          dataGathered: requiredDataStr,
+          resolutionSteps: result.actionable ? guidanceStepsStr : (result.info_text || ""),
+          successIndicators: typeof result.success_indicators === "object" ? JSON.stringify(result.success_indicators) : (result.success_indicators || ""),
           followUpNeeded: result.follow_up_needed || false,
         });
 
@@ -960,12 +981,29 @@ export async function runPlaybookGeneration(
       const totalUses = feedback?.total || 0;
       const successRate = totalUses > 0 ? successfulResolutions / totalUses : 0;
 
+      const isActionable = !!mostCommonAction || !!mostCommonEndpoint;
+
       let combinedResponse: string | null = null;
-      const hasMeaningfulData = autoreplyData.autoreplyContent || bestArticle?.body_text || topPositive.length > 0 || topMissing.length > 0;
-      if (hasMeaningfulData) {
-        try {
-          const articleSummary = bestArticle?.body_text ? bestArticle.body_text.substring(0, 500) : null;
-          const prompt = `Generer en kombinert chatbot-respons for DyreID support.
+      let chatbotStepsArray: string[] | null = null;
+
+      if (isActionable) {
+        const guidanceFromResolutions = resolutions
+          .map((r: any) => r.resolution_steps)
+          .filter(Boolean)
+          .slice(0, 3);
+
+        if (guidanceFromResolutions.length > 0) {
+          chatbotStepsArray = guidanceFromResolutions[0]
+            .split(/;\s*|\n/)
+            .map((s: string) => s.trim())
+            .filter(Boolean);
+        }
+      } else {
+        const hasMeaningfulData = autoreplyData.autoreplyContent || bestArticle?.body_text || topPositive.length > 0;
+        if (hasMeaningfulData) {
+          try {
+            const articleSummary = bestArticle?.body_text ? bestArticle.body_text.substring(0, 500) : null;
+            const prompt = `Generer en kort, faktabasert informasjonstekst for DyreID chatbot.
 
 INTENT: ${intent}
 KATEGORI: ${mostCommonCategory || "Ukjent"}
@@ -976,27 +1014,21 @@ ${autoreplyData.autoreplyContent?.substring(0, 400) || "Ikke tilgjengelig"}
 HJELPESENTER-ARTIKKEL:
 ${articleSummary || "Ikke tilgjengelig"}
 
-HVA SOM FUNGERER (fra analyse):
-${topPositive.join(", ") || "Ingen data"}
-
-HVA SOM OFTE MANGLER:
-${topMissing.join(", ") || "Ingen data"}
-
-LAG EN KORT, DIALOGBASERT RESPONS for chatbot:
-- Maks 200 ord
-- Naturlig samtaletone
-- Inkluder konkrete steg
-- Inkluder det som ofte mangler
-- Fjern unodvendig formalitet
+REGLER:
+- Maks 150 ord
+- KUN faktainformasjon fra kildene over
+- IKKE finn opp nye prosedyrer eller priser
 - IKKE inkluder lenker
+- IKKE foreslå å kontakte support med mindre det er siste utvei
 
 Return kun teksten, ingen JSON.`;
 
-          combinedResponse = await callOpenAI(prompt, "gpt-5-nano", 1024);
-          combinedResponse = combinedResponse.trim();
-        } catch (err: any) {
-          log(`Combined response error for ${intent}: ${err.message}`, "training");
-          combinedResponse = autoreplyData.autoreplyContent || null;
+            combinedResponse = await callOpenAI(prompt, "gpt-5-nano", 1024);
+            combinedResponse = combinedResponse.trim();
+          } catch (err: any) {
+            log(`Combined response error for ${intent}: ${err.message}`, "training");
+            combinedResponse = autoreplyData.autoreplyContent || null;
+          }
         }
       }
 
@@ -1041,17 +1073,17 @@ Return kun teksten, ingen JSON.`;
         officialProcedure: null,
         helpCenterContentSummary: bestArticle?.body_text?.substring(0, 500) || null,
 
-        requiresLogin: false,
-        requiresAction: !!mostCommonAction,
-        actionType: mostCommonAction ? "API_CALL" : "INFO_ONLY",
+        requiresLogin: isActionable,
+        requiresAction: isActionable,
+        actionType: isActionable ? "API_CALL" : "INFO_ONLY",
         apiEndpoint: mostCommonEndpoint || null,
         httpMethod: mostCommonEndpoint ? "POST" : null,
         requiredRuntimeDataArray: mostCommonRuntimeData ? mostCommonRuntimeData.split(",").map((s: string) => s.trim()) : null,
         paymentRequired: paymentProbability > 0.5,
         paymentAmount: null,
 
-        chatbotSteps: null,
-        combinedResponse,
+        chatbotSteps: chatbotStepsArray,
+        combinedResponse: isActionable ? null : combinedResponse,
 
         successfulResolutions,
         failedResolutions,
@@ -1163,12 +1195,16 @@ async function saveCombinedResult(ticket: any, result: any, metrics: BatchMetric
     reasoning: result.intent_reasoning || result.reasoning || "",
   });
 
+  const requiredDataStr = Array.isArray(result.required_data) ? result.required_data.join(", ") : (result.required_runtime_data || result.required_data || "");
+  const guidanceStepsStr = Array.isArray(result.guidance_steps) ? result.guidance_steps.join("; ") : "";
+  const resolutionContent = result.actionable ? guidanceStepsStr : (result.info_text || result.resolution_steps || "");
+
   await storage.insertResolutionPattern({
     ticketId: ticket.ticketId,
     intent: result.intent || "GeneralInquiry",
     customerNeed: result.customer_need || "",
-    dataGathered: typeof result.data_gathered === "object" ? JSON.stringify(result.data_gathered) : (result.data_gathered || ""),
-    resolutionSteps: typeof result.resolution_steps === "object" ? JSON.stringify(result.resolution_steps) : (result.resolution_steps || ""),
+    dataGathered: requiredDataStr,
+    resolutionSteps: typeof resolutionContent === "object" ? JSON.stringify(resolutionContent) : (resolutionContent || ""),
     successIndicators: typeof result.success_indicators === "object" ? JSON.stringify(result.success_indicators) : (result.success_indicators || ""),
     followUpNeeded: result.follow_up_needed || false,
   });
@@ -1702,13 +1738,31 @@ AUTOSVAR-MALER: ${JSON.stringify(templateSignatures)}
 FOR HVER TICKET:
 1. KATEGORI: Map til hjelpesenter-kategori/underkategori. "Ukategorisert" hvis ingen passer.
 2. INTENT: Klassifiser kundens intent (bruk kjente intents eller foreslå ny).
-3. RESOLUSJON: Ekstraher løsningssteg.
+3. OPERASJONELL ANALYSE: Bestem om saken krever en SYSTEMHANDLING (actionable=true) eller kun er INFORMASJONELL (actionable=false).
+   - Hvis actionable=true: Ekstraher required_data (datafelter som trengs) og action_endpoint (Min Side endepunkt).
+   - Hvis actionable=false: Skriv kun et kort info_text sammendrag.
 4. AUTOSVAR-MATCH: Matcher agentsvaret et autosvar? Oppgi template_id.
 5. DIALOG-MØNSTER: "autoresponse_only", "autoresponse_then_resolution", "autoresponse_then_no_resolution", "direct_human_response", eller "no_response"
 6. RESOLUSJONS-KVALITET: "high", "medium", "low", eller "none"
 7. GENERELL-REKLASSIFISERING: Hvis "Generell e-post", angi egentlig emne.
 
-Svar med JSON: {"tickets": [{"ticket_id":12345,"hjelpesenter_category":"Min Side","hjelpesenter_subcategory":"Innlogging","category_confidence":0.9,"category_reasoning":"...","intent":"LoginIssue","intent_confidence":0.85,"is_new_intent":false,"keywords":"...","required_runtime_data":"","required_action":"","action_endpoint":"","payment_required":false,"auto_close_possible":false,"intent_reasoning":"...","customer_need":"...","resolution_steps":"...","data_gathered":"...","success_indicators":"...","follow_up_needed":false,"matched_template_id":null,"dialog_pattern":"direct_human_response","resolution_quality":"high","original_category_if_general":null}]}`;
+VIKTIG: Du skal IKKE ekstrahere agentens svar eller samtalefrasering. Ekstraher KUN strukturert operasjonell data.
+
+KJENTE ENDEPUNKTER:
+- OwnershipTransferWeb → /OwnerChange/OwnerSeller/ReportOwnerChange
+- LostPetReport → /Pet/LostPet/ReportLostPet
+- FoundPetReport → /Pet/FoundPet/ReportFoundPet
+- QRTagActivation → /Pet/QR/Activate
+- SmartTagActivation → /SmartTag/Activate
+- CancelSubscription → /Subscription/Cancel
+- ForeignChipRegistration → /Pet/Foreign/Register
+- UpdateContactInfo → /Owner/UpdateContact
+- PetDeceased → /Pet/Deceased/Report
+- NewRegistration → /Pet/Register
+
+KJENTE DATAFELTER: PetId, NewOwnerMobile, TagId, SubscriptionId, OwnerMobile, ChipNumber, OwnerName, PetName, AnimalId
+
+Svar med JSON: {"tickets": [{"ticket_id":12345,"hjelpesenter_category":"Min Side","hjelpesenter_subcategory":"Innlogging","category_confidence":0.9,"category_reasoning":"...","intent":"LoginIssue","intent_confidence":0.85,"is_new_intent":false,"keywords":"...","required_runtime_data":"","required_action":"","action_endpoint":"","payment_required":false,"auto_close_possible":false,"intent_reasoning":"...","customer_need":"...","actionable":true,"required_data":["PetId"],"guidance_steps":["Steg 1","Steg 2"],"info_text":null,"success_indicators":"...","follow_up_needed":false,"matched_template_id":null,"dialog_pattern":"direct_human_response","resolution_quality":"high","original_category_if_general":null}]}`;
   }
 
   async function processSingleBatch(batch: any[], categoryList: string, intentsStr: string, templateSignatures: any[], metrics: BatchMetrics): Promise<void> {
