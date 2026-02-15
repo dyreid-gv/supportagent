@@ -446,7 +446,7 @@ function handleChipLookupFlow(
 
       if (!isAuthenticated) {
         return {
-          text: `For å gå videre med eierskifte av ${petName}, må du logge inn først. Trykk på "Logg inn"-knappen øverst for å identifisere deg.`,
+          text: `For å gå videre med eierskifte av ${petName}, må du logge inn først. Klikk på knappen under for å logge inn med engangskode (OTP).`,
           requiresLogin: true,
           suggestions: [{ label: "Logg inn med OTP", action: "REQUEST_LOGIN" }],
           model: "chip-lookup-needs-login",
@@ -692,7 +692,7 @@ function guideDataCollection(
 ): ChatbotResponse | null {
   if (playbook.requiresLogin && !isAuthenticated) {
     return {
-      text: `For a hjelpe deg med ${playbook.primaryAction || playbook.intent}, ma du logge inn forst. Trykk pa "Logg inn (OTP)"-knappen overst for a identifisere deg.`,
+      text: `For å hjelpe deg med ${playbook.primaryAction || playbook.intent}, må du logge inn først. Klikk på knappen under for å logge inn med engangskode (OTP).`,
       requiresLogin: true,
       suggestions: [{ label: "Logg inn med OTP", action: "REQUEST_LOGIN" }],
       model: "playbook-guide-login",
@@ -783,7 +783,7 @@ function handleDirectIntent(
   if (intent === "ViewMyPets") {
     if (!isAuthenticated) {
       return {
-        text: "For å se dine registrerte dyr, må du logge inn med Min Side.",
+        text: "For å se dine registrerte dyr, må du logge inn først. Klikk på knappen under for å logge inn med engangskode (OTP).",
         requiresLogin: true,
         model: "direct-view-pets-login",
       };
@@ -842,7 +842,7 @@ function handleDirectIntent(
   if (intent === "OwnershipTransferWeb" || session.directIntentFlow === "OwnershipTransferWeb") {
     if (!isAuthenticated) {
       return {
-        text: "For å gjennomføre eierskifte må du først logge inn.\n\nEtter innlogging kan jeg hjelpe deg steg for steg med å overføre eierskapet.",
+        text: "For å gjennomføre eierskifte må du først logge inn. Klikk på knappen under for å logge inn med engangskode (OTP).\n\nEtter innlogging hjelper jeg deg steg for steg med å overføre eierskapet.",
         requiresLogin: true,
         model: "direct-transfer-login",
       };
@@ -944,7 +944,7 @@ function handleDirectIntent(
   if (intent === "ReportLostPet") {
     if (!isAuthenticated) {
       return {
-        text: "For å melde dyret ditt savnet, må du logge inn først.\n\nEtter innlogging aktiverer jeg savnet-varsling med SMS og push-notifikasjoner.",
+        text: "For å melde dyret ditt savnet, må du logge inn først. Klikk på knappen under for å logge inn med engangskode (OTP).\n\nEtter innlogging aktiverer jeg savnet-varsling med SMS og push-notifikasjoner.",
         requiresLogin: true,
         model: "direct-lost-login",
       };
@@ -1002,7 +1002,7 @@ function handleDirectIntent(
   if (intent === "ReportFoundPet") {
     if (!isAuthenticated) {
       return {
-        text: "For å melde dyret ditt funnet, må du logge inn først.",
+        text: "For å melde dyret ditt funnet, må du logge inn først. Klikk på knappen under for å logge inn med engangskode (OTP).",
         requiresLogin: true,
         model: "direct-found-login",
       };
@@ -1109,7 +1109,7 @@ function handleDirectIntent(
   if (intent === "PetDeceased" || session.directIntentFlow === "PetDeceased") {
     if (!isAuthenticated) {
       return {
-        text: "For å registrere at kjæledyret ditt er dødt, må du logge inn først.\n\nEtter innlogging kan du velge dyret og markere det som avdødt.",
+        text: "For å registrere at kjæledyret ditt er dødt, må du logge inn først. Klikk på knappen under for å logge inn med engangskode (OTP).\n\nEtter innlogging kan du velge dyret og markere det som avdødt.",
         requiresLogin: true,
         model: "direct-deceased-login",
       };
@@ -1212,6 +1212,150 @@ function handleDirectIntent(
     };
   }
 
+  if (intent === "WrongInfo" || session.directIntentFlow === "WrongInfo") {
+    if (!isAuthenticated) {
+      return {
+        text: "Jeg kan hjelpe deg med å rette opp feil informasjon på dyret ditt. Klikk på knappen under for å logge inn med engangskode (OTP), så finner vi dyret det gjelder.",
+        requiresLogin: true,
+        model: "direct-wronginfo-login",
+      };
+    }
+
+    if (session.directIntentFlow === "WrongInfo" && session.collectedData["petId"]) {
+      const petName = session.collectedData["petName"] || "Dyret";
+      if (!session.collectedData["whatToChange"]) {
+        session.collectedData["whatToChange"] = userMessage;
+        const ownerId = ownerContext?.owner?.ownerId || storedUserContext?.OwnerId;
+        if (ownerId) {
+          const result = performAction(ownerId, "update_profile", {});
+          session.directIntentFlow = undefined;
+          session.intent = undefined;
+          const data = session.collectedData;
+          session.collectedData = {};
+          return {
+            text: `Takk! Jeg har registrert ønsket endring for **${petName}**: "${data["whatToChange"]}"\n\nEndringen er sendt til oppdatering. Merk at noen endringer (som chipnummer eller rase) kan kreve bekreftelse fra veterinær.\n\nEr det noe annet jeg kan hjelpe deg med?`,
+            actionExecuted: true,
+            actionType: "UPDATE_PET_INFO",
+            actionSuccess: true,
+            requestFeedback: true,
+            model: "direct-wronginfo-executed",
+          };
+        }
+      }
+    }
+
+    const animals = ownerContext?.animals || [];
+    const minSidePets = storedUserContext?.Pets || [];
+    const activePets = animals.length > 0
+      ? animals.filter((a: any) => a.status === "active").map((a: any) => formatPetForMetadata(a, "sandbox"))
+      : minSidePets;
+
+    if (activePets.length === 0) {
+      return {
+        text: "Du har ingen registrerte dyr. Hvis du mener dette er feil, ta kontakt med DyreID kundeservice.",
+        model: "direct-wronginfo-no-pets",
+      };
+    }
+
+    session.directIntentFlow = "WrongInfo";
+
+    const msgLower = userMessage.toLowerCase().trim();
+    const matchedPet = activePets.find((p: any) => {
+      const name = (p.Name || p.name || "").toLowerCase();
+      return name && msgLower.includes(name);
+    });
+    if (matchedPet) {
+      const petId = matchedPet.AnimalId || matchedPet.animalId || matchedPet.PetId || matchedPet.petId;
+      const petName = matchedPet.Name || matchedPet.name;
+      session.collectedData = { petId, petName };
+      return {
+        text: `Hva er feil med informasjonen for **${petName}**? Beskriv hva som bør endres (f.eks. feil navn, rase, fødselsdato, chipnummer).`,
+        model: "direct-wronginfo-what",
+      };
+    }
+
+    if (activePets.length === 1) {
+      const pet = activePets[0];
+      const petId = pet.AnimalId || pet.animalId || pet.PetId || pet.petId;
+      const petName = pet.Name || pet.name;
+      session.collectedData = { petId, petName };
+      return {
+        text: `Hva er feil med informasjonen for **${petName}**? Beskriv hva som bør endres (f.eks. feil navn, rase, fødselsdato, chipnummer).`,
+        model: "direct-wronginfo-what",
+      };
+    }
+
+    session.collectedData = {};
+    const suggestions = activePets.map((a: any) => ({
+      label: `${a.Name || a.name}`,
+      action: "SELECT_PET",
+      data: { petId: a.AnimalId || a.animalId || a.PetId || a.petId, petName: a.Name || a.name },
+    }));
+
+    return {
+      text: "Hvilket dyr har feil informasjon?",
+      suggestions,
+      model: "direct-wronginfo-select-pet",
+      pets: activePets,
+    };
+  }
+
+  if (intent === "WrongOwner") {
+    return {
+      text: "Hvis dyret ditt er registrert på feil person, må dette løses via et **eierskifte**.\n\nDet finnes to måter å gjøre dette på:\n\n1. **Via DyreID-appen** - Nåværende registrert eier starter eierskifte i appen\n2. **Her i chatten** - Jeg kan hjelpe deg med eierskifte etter innlogging med OTP\n\nHvis du ikke kjenner den registrerte eieren, kan du gjøre et **ID-søk** med chipnummeret for å finne kontaktinfo.\n\nHva vil du gjøre?",
+      suggestions: [
+        { label: "Start eierskifte", action: "SELECT_PET", data: { intent: "OwnershipTransferWeb" } },
+        { label: "Søk opp chipnummer", action: "SELECT_PET", data: { intent: "ChipLookup" } },
+      ],
+      helpCenterLink: `${HJELPESENTER_BASE}/hjelp-eierskifte/41-eierskifte-av-nkk-registrert-hund`,
+      model: "direct-wrongowner-info",
+      requestFeedback: true,
+    };
+  }
+
+  if (intent === "MissingPetProfile") {
+    if (!isAuthenticated) {
+      return {
+        text: "Jeg kan sjekke om dyret ditt mangler på profilen din. Klikk på knappen under for å logge inn med engangskode (OTP), så ser vi på det sammen.",
+        requiresLogin: true,
+        model: "direct-missingpet-login",
+      };
+    }
+
+    const animals = ownerContext?.animals || [];
+    const minSidePets = storedUserContext?.Pets || [];
+    const petCount = animals.length || minSidePets.length;
+
+    return {
+      text: `Du har **${petCount} dyr** registrert på din profil.\n\nHvis et dyr mangler kan det skyldes:\n- Dyret er registrert på en annen person\n- Dyret er ikke registrert i DyreID ennå\n- Dyret har blitt overført til en annen eier\n\nHvis du vet chipnummeret til dyret som mangler, kan jeg gjøre et oppslag for å finne ut hvem det er registrert på.\n\nVil du søke opp et chipnummer?`,
+      suggestions: [
+        { label: "Søk opp chipnummer", action: "SELECT_PET", data: { intent: "ChipLookup" } },
+      ],
+      model: "direct-missingpet-info",
+      requestFeedback: true,
+      pets: animals.length > 0 ? animals.filter((a: any) => a.status === "active").map((a: any) => formatPetForMetadata(a, "sandbox")) : minSidePets,
+    };
+  }
+
+  if (intent === "InactiveRegistration") {
+    return {
+      text: "Hvis kjæledyret ditt ikke er søkbart i DyreID, kan det skyldes:\n\n1. **Registreringen er ikke betalt** - Sjekk at registreringsavgiften er betalt\n2. **Nylig registrert** - Det kan ta opptil 24 timer før dyret er søkbart\n3. **Inaktiv chip** - Chipen kan ha blitt deaktivert\n\nFor å sjekke status og aktivere registreringen, klikk på knappen under for å logge inn med engangskode (OTP).",
+      requiresLogin: true,
+      helpCenterLink: `${HJELPESENTER_BASE}/hjelp-id-sok/3-kjaledyret-er-ikke-sokbart`,
+      model: "direct-inactive-info",
+      requestFeedback: true,
+    };
+  }
+
+  if (intent === "NewRegistration") {
+    return {
+      text: "For å registrere et nytt dyr i DyreID, må du ta det med til en **veterinær**.\n\n**Slik gjør du:**\n1. Bestill time hos en veterinærklinikk\n2. Veterinæren implanterer en mikrochip (hvis dyret ikke allerede har en)\n3. Veterinæren registrerer dyret i DyreID\n4. Du får tilgang til Min Side og kan administrere dyrets profil\n\n**Pris:** Registrering koster vanligvis 590 kr (inkl. chip og registrering).\n\nHar dyret allerede en chip? Da kan du sjekke om det er registrert ved å oppgi chipnummeret.",
+      helpCenterLink: `${HJELPESENTER_BASE}/hjelp-id-sok/1-hvorfor-bor-jeg-id-merke`,
+      model: "direct-newreg-info",
+      requestFeedback: true,
+    };
+  }
+
   if (intent === "NKKOwnership") {
     return {
       text: "Eierskifte av NKK-registrert hund håndteres av **Norsk Kennelklubb (NKK)**.\n\nNKK har egne regler og prosedyrer for eierskifte av stambokførte hunder. Du må kontakte NKKs sekretariat direkte for å gjennomføre eierskiftet.\n\n**Kontakt NKK:**\nBesøk NKKs sekretariat-side for kontaktinformasjon og veiledning:\nhttps://www.nkk.no/om-nkk/sekretariatet/\n\nNår eierskiftet er registrert hos NKK, vil oppdateringen også gjelde i DyreID.",
@@ -1285,9 +1429,10 @@ REGLER:
 - Svar ALLTID pa norsk
 - Vaer hjelpsom, profesjonell og vennlig
 - Ikke avslor personlig informasjon som ikke tilhorer den innloggede brukeren
-- Nar handlinger krever autentisering, be kunden logge inn via OTP
+- Nar handlinger krever autentisering, be kunden logge inn via OTP-knappen i chatten - ALDRI be kunden logge inn eksternt pa Min Side med telefon og passord
 - Forklar tydelig hva du gjor og hvorfor
 - Bruk informasjon fra playbook-entries til a gi presise svar
+- ALDRI si "logg inn pa Min Side" eller "ga til Min Side for a logge inn" - innlogging skjer alltid via OTP i denne chatten
 
 KUNDEN ER ${isAuthenticated ? "INNLOGGET" : "IKKE INNLOGGET"}
 
@@ -1564,7 +1709,7 @@ async function handlePlaybookResponse(
 
   if (actionType === "API_CALL" && !isAuthenticated) {
     return {
-      text: `For a ${playbook.primaryAction || "utfore denne handlingen"}, ma du logge inn forst. Trykk pa "Logg inn (OTP)"-knappen overst.`,
+      text: `For å ${playbook.primaryAction || "utføre denne handlingen"}, må du logge inn først. Klikk på knappen under for å logge inn med engangskode (OTP).`,
       requiresLogin: true,
       suggestions: [{ label: "Logg inn med OTP", action: "REQUEST_LOGIN" }],
       model: "playbook-guide-login",
@@ -1799,7 +1944,7 @@ export async function* streamChatResponse(
     return;
   }
 
-  const DIRECT_INTENTS = ["ViewMyPets", "OwnershipTransferWeb", "ReportLostPet", "ReportFoundPet", "QRTagActivation", "PetDeceased", "NKKOwnership", "LoginIssue", "LoginProblem", "UnregisteredChip578", "ForeignRegistration"];
+  const DIRECT_INTENTS = ["ViewMyPets", "OwnershipTransferWeb", "ReportLostPet", "ReportFoundPet", "QRTagActivation", "PetDeceased", "NKKOwnership", "LoginIssue", "LoginProblem", "UnregisteredChip578", "ForeignRegistration", "WrongInfo", "WrongOwner", "MissingPetProfile", "InactiveRegistration", "NewRegistration"];
   if ((intent && DIRECT_INTENTS.includes(intent)) || session.directIntentFlow || session.loginHelpStep) {
     const effectiveIntent = session.directIntentFlow || intent || "";
     const directResponse = handleDirectIntent(effectiveIntent, session, isAuthenticated, ownerContext, storedUserContext || null, userMessage);
