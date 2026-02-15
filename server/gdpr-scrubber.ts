@@ -1,3 +1,5 @@
+import { SSB_NAME_SET } from "./ssb-names";
+
 const PHONE_REGEX = /\b(\+?47\s?)?[2-9]\d{7}\b/g;
 const EMAIL_REGEX = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
 const CHIP_REGEX = /\b5780\d{11}\b/g;
@@ -14,28 +16,38 @@ const BROAD_CHIP_REGEX = /\b\d{15}\b/g;
 const REQUEST_NUMBER_REGEX = /requestNumber:\s*\S+/g;
 const SENDER_ID_REGEX = /senderId:\s*\S+/g;
 
-const NORWEGIAN_NAMES = [
-  "Ola", "Kari", "Per", "Anne", "Lars", "Marit", "Erik", "Ingrid",
-  "Jan", "Liv", "Hans", "Bente", "Tor", "Hilde", "Anders", "Grete",
-  "Jon", "Solveig", "Bjørn", "Randi", "Svein", "Astrid", "Geir",
-  "Silje", "Trond", "Berit", "Morten", "Nina", "Gunnar", "Tone",
-  "Helge", "Kristin", "Arne", "Elisabeth", "Olav", "Kirsten",
-  "Terje", "Wenche", "Øyvind", "Turid", "Rune", "Eva", "Steinar",
-  "Marianne", "Kjell", "Jorunn", "Harald", "Vigdis",
-  "Hansen", "Johansen", "Olsen", "Larsen", "Andersen", "Pedersen",
-  "Nilsen", "Kristiansen", "Jensen", "Karlsen", "Johnsen", "Pettersen",
-  "Eriksen", "Berg", "Haugen", "Hagen", "Johannessen", "Andreassen",
-  "Jacobsen", "Dahl", "Jørgensen", "Henriksen", "Lund", "Halvorsen",
-  "Sørensen", "Jakobsen", "Moen", "Gundersen", "Iversen", "Strand",
-  "Solberg", "Svendsen", "Eide", "Knutsen",
-];
+const SAFE_WORDS = new Set([
+  "hei", "jeg", "det", "den", "har", "kan", "vil", "skal", "ikke",
+  "min", "din", "seg", "meg", "deg", "oss", "alle", "noen", "ingen",
+  "eller", "men", "som", "til", "fra", "med", "ved", "for", "mot",
+  "over", "under", "inn", "ute", "opp", "ned", "her", "der",
+  "bare", "enda", "selv", "slik", "noe", "alt", "mye", "vist",
+  "god", "fin", "gro", "sol", "liv", "ane", "ask", "dag", "kim",
+  "may", "ben", "dan", "lin", "siv", "tom", "mat", "tur",
+  "berg", "dal", "vik", "strand", "lund", "nes", "havn",
+  "sand", "moen", "lie", "lia", "bak", "vest", "øst", "sør",
+  "ring", "rose", "storm", "stein", "nord", "sund", "glad",
+  "borg", "brun", "mark", "sine", "hans", "post", "nest",
+  "eier", "kall", "brev", "side", "svar", "takk", "hjelp",
+  "hund", "katt", "dyr", "chip", "hilsen", "les", "mer",
+  "fant", "rett", "fort", "gang", "sent", "litt", "bort",
+  "hagen", "haugen", "bakken", "dalen", "skogen", "viken",
+  "stranden", "neset", "holmen", "berget", "sletta", "stien",
+  "plassen", "broen", "dammen", "odden", "jordet",
+  "eide", "tang", "gill", "skog", "viste",
+]);
 
-function buildNameRegex(): RegExp {
-  const escaped = NORWEGIAN_NAMES.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  return new RegExp(`\\b(${escaped.join("|")})\\b`, "gi");
+const WORD_REGEX = /\b[A-Za-zÆØÅæøåÄÖÜäöü][A-Za-zÆØÅæøåÄÖÜäöü'-]+\b/g;
+
+function scrubNames(text: string): string {
+  return text.replace(WORD_REGEX, (match) => {
+    const lower = match.toLowerCase();
+    if (lower.length < 2) return match;
+    if (SAFE_WORDS.has(lower)) return match;
+    if (SSB_NAME_SET.has(lower)) return "<PERSON>";
+    return match;
+  });
 }
-
-const NAME_REGEX = buildNameRegex();
 
 export function scrubText(text: string | null | undefined): string {
   if (!text) return "";
@@ -57,7 +69,7 @@ export function scrubText(text: string | null | undefined): string {
   scrubbed = scrubbed.replace(SENDER_ID_REGEX, "<SENDER>");
   scrubbed = scrubbed.replace(BROAD_CHIP_REGEX, "<CHIP_ID>");
   scrubbed = scrubbed.replace(BROAD_PHONE_REGEX, "<PHONE>");
-  scrubbed = scrubbed.replace(NAME_REGEX, "<PERSON>");
+  scrubbed = scrubNames(scrubbed);
 
   return scrubbed;
 }
