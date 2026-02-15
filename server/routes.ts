@@ -1168,7 +1168,7 @@ export async function registerRoutes(
 
   app.post("/api/templates/fetch", async (_req, res) => {
     try {
-      const { fetchTemplatesFromPureservice, mapTemplateToResponseTemplate } = await import("./pureservice");
+      const { fetchTemplatesFromPureservice, mapTemplateToResponseTemplate } = await import("./integrations/pureservice-v3");
 
       const templates = await fetchTemplatesFromPureservice();
       let stored = 0;

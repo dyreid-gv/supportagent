@@ -4,7 +4,7 @@ import { storage } from "./storage";
 import { db } from "./db";
 import { scrubbedTickets } from "@shared/schema";
 import { scrubTicket } from "./gdpr-scrubber";
-import { fetchTicketsFromPureservice, mapPureserviceToRawTicket } from "./pureservice";
+import { getClosedTickets, mapPureserviceToRawTicket } from "./integrations/pureservice-v3";
 import { log } from "./index";
 
 const openai = new OpenAI({
@@ -145,7 +145,7 @@ export async function runIngestion(
 
   while (hasMore) {
     try {
-      const { tickets, total } = await fetchTicketsFromPureservice(page, pageSize);
+      const { tickets, total } = await getClosedTickets(page, pageSize);
 
       if (tickets.length === 0) {
         hasMore = false;
