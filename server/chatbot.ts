@@ -66,7 +66,7 @@ const INTENT_PATTERNS: IntentQuickMatch[] = [
   { intent: "EmailError", regex: /feilmelding.*e-?post|ugyldig.*e-?post|feil.*epost/i },
   { intent: "PhoneError", regex: /feilmelding.*telefon|ugyldig.*nummer|feil.*telefon/i },
   { intent: "AddContactInfo", regex: /legge til.*telefon|legge til.*e-?post|flere.*nummer|flere.*kontakt/i },
-  { intent: "WrongInfo", regex: /feil informasjon|feil.*registrert|korrigere|endre.*opplysning/i },
+  { intent: "WrongInfo", regex: /feil informasjon|feil.*registrert|korrigere|endre.*opplysning|feil.*navn|endre.*navn|feil.*info|endre.*info|rett.*opp|feil på|feil.*profil|oppdater.*navn|oppdater.*info|feilregistrert|dyrenavn.*feil|navn.*feil|endre.*rase|feil.*rase|endre.*kjønn|feil.*kjønn|endre.*fødsel|feil.*fødsel/i },
   { intent: "MissingPetProfile", regex: /mangler.*dyr|mangler.*kjæledyr|vises ikke.*min side|dyr.*borte.*profil/i },
   { intent: "PetDeceased", regex: /dødt|avdød|avlivet|bortgang|kjæledyr.*død/i },
   { intent: "GDPRDelete", regex: /slett meg|slette.*konto|gdpr.*slett|fjerne.*profil/i },
@@ -840,6 +840,18 @@ function handleDirectIntent(
   }
 
   if (intent === "OwnershipTransferWeb" || session.directIntentFlow === "OwnershipTransferWeb") {
+    const shouldBreakOut = session.directIntentFlow === "OwnershipTransferWeb" && !userMessage.match(/^\d{8}$/) && (
+      (intent && intent !== "OwnershipTransferWeb") ||
+      /feil.*navn|endre.*navn|feil.*info|endre.*info|savnet|funnet|død|avdød|avlivet|registrere|QR|brikke|chip.*søk|id-?søk/i.test(userMessage)
+    );
+    if (shouldBreakOut) {
+      session.directIntentFlow = undefined;
+      session.collectedData = {};
+      return null;
+    }
+
+    session.directIntentFlow = "OwnershipTransferWeb";
+
     if (!isAuthenticated) {
       return {
         text: "For å gjennomføre eierskifte må du først logge inn. Klikk på knappen under for å logge inn med engangskode (OTP).\n\nEtter innlogging hjelper jeg deg steg for steg med å overføre eierskapet.",
@@ -848,7 +860,7 @@ function handleDirectIntent(
       };
     }
 
-    if (session.directIntentFlow === "OwnershipTransferWeb" && session.collectedData["petId"] && !session.collectedData["newOwnerPhone"]) {
+    if (session.collectedData["petId"] && !session.collectedData["newOwnerPhone"]) {
       const digits = userMessage.replace(/\D/g, "");
       if (digits.length === 8) {
         const petName = session.collectedData["petName"] || "Dyret";
@@ -942,6 +954,8 @@ function handleDirectIntent(
   }
 
   if (intent === "ReportLostPet") {
+    session.directIntentFlow = "ReportLostPet";
+
     if (!isAuthenticated) {
       return {
         text: "For å melde dyret ditt savnet, må du logge inn først. Klikk på knappen under for å logge inn med engangskode (OTP).\n\nEtter innlogging aktiverer jeg savnet-varsling med SMS og push-notifikasjoner.",
@@ -957,6 +971,7 @@ function handleDirectIntent(
       : minSidePets;
 
     if (activePets.length === 0) {
+      session.directIntentFlow = undefined;
       return {
         text: "Du har ingen registrerte dyr å melde savnet.",
         model: "direct-lost-no-pets",
@@ -1000,6 +1015,8 @@ function handleDirectIntent(
   }
 
   if (intent === "ReportFoundPet") {
+    session.directIntentFlow = "ReportFoundPet";
+
     if (!isAuthenticated) {
       return {
         text: "For å melde dyret ditt funnet, må du logge inn først. Klikk på knappen under for å logge inn med engangskode (OTP).",
@@ -1107,6 +1124,14 @@ function handleDirectIntent(
   }
 
   if (intent === "PetDeceased" || session.directIntentFlow === "PetDeceased") {
+    if (session.directIntentFlow === "PetDeceased" && intent && intent !== "PetDeceased" && !/^(ja|yes|bekreft|nei|no|avbryt)/i.test(userMessage.trim())) {
+      session.directIntentFlow = undefined;
+      session.collectedData = {};
+      return null;
+    }
+
+    session.directIntentFlow = "PetDeceased";
+
     if (!isAuthenticated) {
       return {
         text: "For å registrere at kjæledyret ditt er dødt, må du logge inn først. Klikk på knappen under for å logge inn med engangskode (OTP).\n\nEtter innlogging kan du velge dyret og markere det som avdødt.",
@@ -1115,7 +1140,7 @@ function handleDirectIntent(
       };
     }
 
-    if (session.directIntentFlow === "PetDeceased" && session.collectedData["petId"]) {
+    if (session.collectedData["petId"]) {
       const msgLower = userMessage.toLowerCase().trim();
       const isConfirm = /^(ja|yes|bekreft|marker|ok)/.test(msgLower);
       if (isConfirm) {
@@ -1213,6 +1238,14 @@ function handleDirectIntent(
   }
 
   if (intent === "WrongInfo" || session.directIntentFlow === "WrongInfo") {
+    if (session.directIntentFlow === "WrongInfo" && intent && intent !== "WrongInfo") {
+      session.directIntentFlow = undefined;
+      session.collectedData = {};
+      return null;
+    }
+
+    session.directIntentFlow = "WrongInfo";
+
     if (!isAuthenticated) {
       return {
         text: "Jeg kan hjelpe deg med å rette opp feil informasjon på dyret ditt. Klikk på knappen under for å logge inn med engangskode (OTP), så finner vi dyret det gjelder.",
@@ -1221,7 +1254,7 @@ function handleDirectIntent(
       };
     }
 
-    if (session.directIntentFlow === "WrongInfo" && session.collectedData["petId"]) {
+    if (session.collectedData["petId"]) {
       const petName = session.collectedData["petName"] || "Dyret";
       if (!session.collectedData["whatToChange"]) {
         session.collectedData["whatToChange"] = userMessage;
@@ -1434,9 +1467,9 @@ REGLER:
 - Bruk informasjon fra playbook-entries til a gi presise svar
 - ALDRI si "logg inn pa Min Side" eller "ga til Min Side for a logge inn" - innlogging skjer alltid via OTP i denne chatten
 
-KUNDEN ER ${isAuthenticated ? "INNLOGGET" : "IKKE INNLOGGET"}
+KUNDEN ER ${isAuthenticated ? "INNLOGGET - Du kan utfore handlinger direkte uten a be om innlogging" : "IKKE INNLOGGET - Be kunden klikke pa OTP-knappen i chatten for a logge inn. Si ALDRI at de skal logge inn pa Min Side eksternt."}
 
-HANDLINGER DU KAN UTFORE (etter autentisering via Min Side):
+HANDLINGER DU KAN UTFORE (etter OTP-innlogging i chatten):
 - Vise kundens dyr og profil
 - Melde dyr savnet/funnet
 - Starte eierskifte
@@ -1946,8 +1979,14 @@ export async function* streamChatResponse(
 
   const DIRECT_INTENTS = ["ViewMyPets", "OwnershipTransferWeb", "ReportLostPet", "ReportFoundPet", "QRTagActivation", "PetDeceased", "NKKOwnership", "LoginIssue", "LoginProblem", "UnregisteredChip578", "ForeignRegistration", "WrongInfo", "WrongOwner", "MissingPetProfile", "InactiveRegistration", "NewRegistration"];
   if ((intent && DIRECT_INTENTS.includes(intent)) || session.directIntentFlow || session.loginHelpStep) {
-    const effectiveIntent = session.directIntentFlow || intent || "";
-    const directResponse = handleDirectIntent(effectiveIntent, session, isAuthenticated, ownerContext, storedUserContext || null, userMessage);
+    let effectiveIntent = session.directIntentFlow || intent || "";
+    let directResponse = handleDirectIntent(effectiveIntent, session, isAuthenticated, ownerContext, storedUserContext || null, userMessage);
+
+    if (!directResponse && intent && DIRECT_INTENTS.includes(intent)) {
+      effectiveIntent = intent;
+      directResponse = handleDirectIntent(effectiveIntent, session, isAuthenticated, ownerContext, storedUserContext || null, userMessage);
+    }
+
     if (directResponse) {
       const metadata: any = {
         model: directResponse.model,
@@ -2116,7 +2155,14 @@ export async function* streamChatResponse(
     }
   }
 
-  const cleanResponse = fullResponse.replace(/\[ACTION:[^\]]*\]/g, "").trim();
+  let cleanResponse = fullResponse.replace(/\[ACTION:[^\]]*\]/g, "").trim();
+  cleanResponse = cleanResponse
+    .replace(/[Ll]ogg(?:e)? inn (?:på|med|via) Min ?[Ss]ide/g, "logge inn via OTP-knappen i chatten")
+    .replace(/[Gg]å til Min ?[Ss]ide for å logg(?:e)? inn/g, "klikke på OTP-knappen i chatten for å logge inn")
+    .replace(/innlogging (?:via|på|med) Min ?[Ss]ide/gi, "innlogging via OTP i chatten")
+    .replace(/[Vv]ennligst logg(?:e)? inn på Min ?[Ss]ide/g, "Klikk på OTP-knappen i chatten for å logge inn")
+    .replace(/(?:først )?(?:må du )?logg(?:e)? inn (?:på|med) Min ?[Ss]ide/gi, "logge inn via OTP-knappen i chatten")
+    .replace(/(?:besøk|gå til|åpne) (?:min ?side|minside\.no)/gi, "bruk OTP-knappen i chatten");
   const finalContent = actionResults.length > 0
     ? `${cleanResponse}\n\n${actionResults.join("\n")}`
     : cleanResponse;
