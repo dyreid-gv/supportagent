@@ -1,6 +1,6 @@
 import { log } from "./index";
 
-const PURESERVICE_BASE_URL = "https://dyreid.pureservice.com/agent/api";
+const PURESERVICE_BASE_URL = "https://api.pureservice.com/v3";
 
 interface PureserviceCommunication {
   text?: string;
@@ -39,11 +39,11 @@ export async function fetchTicketsFromPureservice(
   const offset = (page - 1) * pageSize;
 
   const response = await fetch(
-    `${PURESERVICE_BASE_URL}/ticket?limit=${pageSize}&offset=${offset}&include=communications&sort=-created`,
+    `${PURESERVICE_BASE_URL}/tickets?limit=${pageSize}&offset=${offset}&include=communications,attachments,templateId&sort=-created`,
     {
       headers: {
-        Authorization: `Bearer ${apiKey}`,
-        Accept: "application/json",
+        "x-api-key": apiKey,
+        "Accept": "application/json",
       },
     }
   );
@@ -108,11 +108,11 @@ export async function fetchTemplatesFromPureservice(): Promise<PureserviceTempla
   }
 
   const response = await fetch(
-    `${PURESERVICE_BASE_URL}/template?limit=200`,
+    `${PURESERVICE_BASE_URL}/templates?limit=200`,
     {
       headers: {
-        Authorization: `Bearer ${apiKey}`,
-        Accept: "application/json",
+        "x-api-key": apiKey,
+        "Accept": "application/json",
       },
     }
   );
