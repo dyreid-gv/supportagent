@@ -301,6 +301,77 @@ function PetListDisplay({ pets }: { pets: PetInfo[] }) {
   );
 }
 
+function renderInline(text: string): (string | JSX.Element)[] {
+  const parts: (string | JSX.Element)[] = [];
+  const regex = /\*\*(.+?)\*\*/g;
+  let lastIndex = 0;
+  let match;
+
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+    parts.push(<strong key={match.index} className="font-semibold">{match[1]}</strong>);
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+
+  return parts.length > 0 ? parts : [text];
+}
+
+function FormattedContent({ content }: { content: string }) {
+  const paragraphs = content.split(/\n\n+/);
+
+  return (
+    <div className="space-y-2 text-sm leading-relaxed">
+      {paragraphs.map((para, pi) => {
+        const lines = para.split('\n');
+        const isBulletList = lines.every(l => l.trim().startsWith('- ') || l.trim() === '');
+        const isNumberedList = lines.every(l => /^\d+\.\s/.test(l.trim()) || l.trim() === '');
+
+        if (isBulletList && lines.some(l => l.trim().startsWith('- '))) {
+          return (
+            <ul key={pi} className="space-y-1 ml-1">
+              {lines.filter(l => l.trim().startsWith('- ')).map((l, li) => (
+                <li key={li} className="flex gap-2">
+                  <span className="text-muted-foreground mt-1.5 shrink-0">&#8226;</span>
+                  <span>{renderInline(l.trim().slice(2))}</span>
+                </li>
+              ))}
+            </ul>
+          );
+        }
+
+        if (isNumberedList && lines.some(l => /^\d+\.\s/.test(l.trim()))) {
+          return (
+            <ol key={pi} className="space-y-1 ml-1">
+              {lines.filter(l => /^\d+\.\s/.test(l.trim())).map((l, li) => (
+                <li key={li} className="flex gap-2">
+                  <span className="text-muted-foreground font-medium shrink-0 w-4 text-right">{li + 1}.</span>
+                  <span>{renderInline(l.trim().replace(/^\d+\.\s*/, ''))}</span>
+                </li>
+              ))}
+            </ol>
+          );
+        }
+
+        if (para.startsWith('> ')) {
+          return (
+            <div key={pi} className="border-l-2 border-muted-foreground/30 pl-3 text-muted-foreground italic">
+              {renderInline(para.slice(2))}
+            </div>
+          );
+        }
+
+        return <p key={pi}>{renderInline(para)}</p>;
+      })}
+    </div>
+  );
+}
+
 function MessageBubble({
   message,
   onSuggestionClick,
@@ -359,7 +430,22 @@ function MessageBubble({
               <span className="text-xs text-muted-foreground">{matchedIntent}</span>
             </div>
           )}
-          <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.content}</p>
+          <FormattedContent content={message.content} />
+          {!isUser && message.metadata?.pets && Array.isArray(message.metadata.pets) && message.metadata.pets.length > 0 && (
+            <div className="mt-2 space-y-1.5">
+              {message.metadata.pets.map((pet: any, i: number) => (
+                <PetCard key={pet.PetId || pet.AnimalId || i} pet={pet} compact />
+              ))}
+            </div>
+          )}
+          {!isUser && message.metadata?.actionResult && (
+            <div className={`mt-2 p-2.5 rounded-md text-xs ${message.metadata.actionSuccess ? "bg-green-500/10 text-green-700 dark:text-green-300" : "bg-red-500/10 text-red-700 dark:text-red-300"}`} data-testid={`action-result-${message.id}`}>
+              <div className="flex items-center gap-1.5 font-medium">
+                {message.metadata.actionSuccess ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertCircle className="h-3.5 w-3.5" />}
+                {message.metadata.actionResult}
+              </div>
+            </div>
+          )}
           {helpCenterLink && (
             <a
               href={helpCenterLink}

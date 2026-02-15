@@ -21,6 +21,7 @@ interface SessionState {
   selectedPetName?: string;
   chipLookupFlow?: "awaiting_chip" | "awaiting_ownership_confirm" | "awaiting_sms_confirm";
   chipLookupResult?: ChipLookupResult;
+  directIntentFlow?: string;
 }
 
 const sessionStates = new Map<number, SessionState>();
@@ -365,6 +366,7 @@ interface ChatbotResponse {
   model: string;
   requestFeedback?: boolean;
   helpCenterLink?: string | null;
+  pets?: any[];
 }
 
 async function executePlaybookAction(
@@ -573,6 +575,363 @@ function guideDataCollection(
     return {
       text: "Hva er tag-IDen? (f.eks. TAG-001)",
       model: "playbook-guide-collect-tag",
+    };
+  }
+
+  return null;
+}
+
+function formatPetForMetadata(animal: any, source: "sandbox" | "minside"): any {
+  if (source === "sandbox") {
+    return {
+      Name: animal.name,
+      Species: animal.species === "dog" ? "Hund" : animal.species === "cat" ? "Katt" : "Annet",
+      Breed: animal.breed,
+      Gender: animal.gender === "male" ? "Hannkjønn" : "Hunnkjønn",
+      ChipNumber: animal.chipNumber,
+      DateOfBirth: animal.dateOfBirth,
+      AnimalId: animal.animalId,
+      Status: animal.status,
+    };
+  }
+  return animal;
+}
+
+function handleDirectIntent(
+  intent: string,
+  session: SessionState,
+  isAuthenticated: boolean,
+  ownerContext: any | null,
+  storedUserContext: any | null,
+  userMessage: string
+): ChatbotResponse | null {
+  if (intent === "ViewMyPets") {
+    if (!isAuthenticated) {
+      return {
+        text: "For å se dine registrerte dyr, må du logge inn med Min Side.",
+        requiresLogin: true,
+        model: "direct-view-pets-login",
+      };
+    }
+
+    const animals = ownerContext?.animals || [];
+    const minSidePets = storedUserContext?.Pets || [];
+
+    if (ownerContext && animals.length > 0) {
+      const activePets = animals.filter((a: any) => a.status === "active");
+      const deceasedPets = animals.filter((a: any) => a.status === "deceased");
+      const pets = activePets.map((a: any) => formatPetForMetadata(a, "sandbox"));
+
+      let text = `Du har **${activePets.length} registrerte dyr** på Min Side:`;
+      if (deceasedPets.length > 0) {
+        text += `\n\n${deceasedPets.length} avdøde dyr er ikke vist.`;
+      }
+
+      const lostAnimals = ownerContext.lostStatuses?.filter((l: any) => l.lost) || [];
+      if (lostAnimals.length > 0) {
+        text += `\n\n**Savnet:** ${lostAnimals.map((l: any) => l.animalName).join(", ")}`;
+      }
+
+      const pa = ownerContext.pendingActions;
+      if (pa && (pa.pendingPayments > 0 || pa.pendingTransfers > 0 || pa.inactiveTags > 0)) {
+        const notices: string[] = [];
+        if (pa.pendingPayments > 0) notices.push(`${pa.pendingPayments} ubetalt(e) registrering(er)`);
+        if (pa.pendingTransfers > 0) notices.push(`${pa.pendingTransfers} pågående eierskifte(r)`);
+        if (pa.inactiveTags > 0) notices.push(`${pa.inactiveTags} ikke-aktivert(e) tag(s)`);
+        text += `\n\n**Ventende:** ${notices.join(", ")}`;
+      }
+
+      return {
+        text,
+        model: "direct-view-pets",
+        requestFeedback: true,
+        pets,
+      };
+    }
+
+    if (minSidePets.length > 0) {
+      return {
+        text: `Du har **${minSidePets.length} registrerte dyr** på Min Side:`,
+        model: "direct-view-pets",
+        requestFeedback: true,
+        pets: minSidePets,
+      };
+    }
+
+    return {
+      text: "Jeg fant ingen registrerte dyr på din profil. Har du registrert kjæledyrene dine på dyreid.no?",
+      model: "direct-view-pets-empty",
+    };
+  }
+
+  if (intent === "OwnershipTransferWeb" || session.directIntentFlow === "OwnershipTransferWeb") {
+    if (!isAuthenticated) {
+      return {
+        text: "For å gjennomføre eierskifte må du først logge inn.\n\nEtter innlogging kan jeg hjelpe deg steg for steg med å overføre eierskapet.",
+        requiresLogin: true,
+        model: "direct-transfer-login",
+      };
+    }
+
+    if (session.directIntentFlow === "OwnershipTransferWeb" && session.collectedData["petId"] && !session.collectedData["newOwnerPhone"]) {
+      const digits = userMessage.replace(/\D/g, "");
+      if (digits.length === 8) {
+        const petName = session.collectedData["petName"] || "Dyret";
+        const ownerId = ownerContext?.owner?.ownerId || storedUserContext?.OwnerId;
+        if (ownerId) {
+          const result = performAction(ownerId, "initiate_transfer", {
+            animalId: session.collectedData["petId"],
+            newOwnerPhone: digits,
+          });
+          if (result.success) {
+            session.collectedData = {};
+            session.intent = undefined;
+            session.directIntentFlow = undefined;
+            return {
+              text: `Eierskifte startet for **${petName}**!\n\n- Ny eier (${digits}) mottar SMS med bekreftelseslenke\n- Betalingslink sendes automatisk\n- Tidslinje: 1-2 virkedager`,
+              actionExecuted: true,
+              actionType: "OWNERSHIP_TRANSFER",
+              actionSuccess: true,
+              requestFeedback: true,
+              model: "direct-transfer-executed",
+            };
+          }
+        }
+      }
+      return {
+        text: `Oppgi ny eiers mobilnummer (8 siffer):`,
+        model: "direct-transfer-collect-phone",
+      };
+    }
+
+    const animals = ownerContext?.animals || [];
+    const minSidePets = storedUserContext?.Pets || [];
+    const allPets = animals.length > 0
+      ? animals.filter((a: any) => a.status === "active").map((a: any) => formatPetForMetadata(a, "sandbox"))
+      : minSidePets;
+
+    if (allPets.length === 0) {
+      return {
+        text: "Du har ingen registrerte dyr å gjennomføre eierskifte for.",
+        model: "direct-transfer-no-pets",
+      };
+    }
+
+    session.directIntentFlow = "OwnershipTransferWeb";
+
+    if (!session.collectedData["petId"] && allPets.length > 1) {
+      const msgLower = userMessage.toLowerCase().trim();
+      const matchedPet = allPets.find((p: any) => {
+        const name = (p.Name || p.name || "").toLowerCase();
+        return name && (msgLower.includes(name) || name.includes(msgLower));
+      });
+      if (matchedPet) {
+        const petId = matchedPet.AnimalId || matchedPet.animalId || matchedPet.PetId || matchedPet.petId;
+        session.collectedData["petId"] = petId;
+        session.collectedData["petName"] = matchedPet.Name || matchedPet.name;
+      }
+    }
+
+    if (session.collectedData["petId"]) {
+      return {
+        text: `Eierskifte for **${session.collectedData["petName"] || "valgt dyr"}**.\n\nOppgi ny eiers mobilnummer (8 siffer):`,
+        model: "direct-transfer-collect-phone",
+      };
+    }
+
+    if (allPets.length === 1) {
+      const pet = allPets[0];
+      const petId = pet.AnimalId || pet.animalId || pet.PetId || pet.petId;
+      session.collectedData["petId"] = petId;
+      session.collectedData["animalId"] = petId;
+      session.collectedData["petName"] = pet.Name || pet.name;
+      return {
+        text: `Eierskifte for **${pet.Name || pet.name}**.\n\nOppgi ny eiers mobilnummer (8 siffer):`,
+        model: "direct-transfer-collect-phone",
+        pets: [pet],
+      };
+    }
+
+    const suggestions = allPets.map((a: any) => ({
+      label: `${a.Name || a.name} (${a.Species || a.species || ""})`,
+      action: "SELECT_PET",
+      data: { petId: a.AnimalId || a.animalId || a.PetId || a.petId, petName: a.Name || a.name },
+    }));
+
+    return {
+      text: "Hvilket dyr gjelder eierskiftet?",
+      suggestions,
+      model: "direct-transfer-select-pet",
+      pets: allPets,
+    };
+  }
+
+  if (intent === "ReportLostPet") {
+    if (!isAuthenticated) {
+      return {
+        text: "For å melde dyret ditt savnet, må du logge inn først.\n\nEtter innlogging aktiverer jeg savnet-varsling med SMS og push-notifikasjoner.",
+        requiresLogin: true,
+        model: "direct-lost-login",
+      };
+    }
+
+    const animals = ownerContext?.animals || [];
+    const minSidePets = storedUserContext?.Pets || [];
+    const activePets = animals.length > 0
+      ? animals.filter((a: any) => a.status === "active").map((a: any) => formatPetForMetadata(a, "sandbox"))
+      : minSidePets;
+
+    if (activePets.length === 0) {
+      return {
+        text: "Du har ingen registrerte dyr å melde savnet.",
+        model: "direct-lost-no-pets",
+      };
+    }
+
+    session.intent = "ReportLostPet";
+    session.collectedData = {};
+
+    if (activePets.length === 1) {
+      const pet = activePets[0];
+      const petId = pet.AnimalId || pet.animalId || pet.PetId || pet.petId;
+      const petName = pet.Name || pet.name;
+      const ownerId = ownerContext?.owner?.ownerId || storedUserContext?.OwnerId;
+      if (ownerId) {
+        const result = performAction(ownerId, "mark_lost", { animalId: petId });
+        if (result.success) {
+          return {
+            text: `**${petName}** er nå meldt savnet!\n\n- SMS-varsling aktivert\n- Push-notifikasjoner aktivert\n- Naboer i området blir varslet\n\nDel gjerne savnet-oppslaget på sosiale medier for ekstra rekkevidde.`,
+            actionExecuted: true,
+            actionType: "MARK_LOST",
+            actionSuccess: true,
+            requestFeedback: true,
+            model: "direct-lost-executed",
+          };
+        }
+      }
+    }
+
+    const suggestions = activePets.map((a: any) => ({
+      label: `${a.Name || a.name}`,
+      action: "SELECT_PET",
+      data: { petId: a.AnimalId || a.animalId || a.PetId || a.petId, petName: a.Name || a.name },
+    }));
+
+    return {
+      text: "Hvilket dyr vil du melde savnet?",
+      suggestions,
+      model: "direct-lost-select-pet",
+    };
+  }
+
+  if (intent === "ReportFoundPet") {
+    if (!isAuthenticated) {
+      return {
+        text: "For å melde dyret ditt funnet, må du logge inn først.",
+        requiresLogin: true,
+        model: "direct-found-login",
+      };
+    }
+
+    const lostAnimals = ownerContext?.lostStatuses?.filter((l: any) => l.lost) || [];
+    if (lostAnimals.length === 0) {
+      return {
+        text: "Ingen av dine dyr er meldt savnet. Gjelder det et dyr du har funnet? Bruk ID-søk for å slå opp chipnummeret.",
+        model: "direct-found-none-lost",
+      };
+    }
+
+    session.intent = "ReportFoundPet";
+    session.collectedData = {};
+
+    if (lostAnimals.length === 1) {
+      const lost = lostAnimals[0];
+      const ownerId = ownerContext?.owner?.ownerId;
+      if (ownerId) {
+        const result = performAction(ownerId, "mark_found", { animalId: lost.animalId });
+        if (result.success) {
+          return {
+            text: `**${lost.animalName}** er markert som funnet!\n\nSavnet-varslingen er deaktivert. Så flott at dere fant hverandre igjen!`,
+            actionExecuted: true,
+            actionType: "MARK_FOUND",
+            actionSuccess: true,
+            requestFeedback: true,
+            model: "direct-found-executed",
+          };
+        }
+      }
+    }
+
+    const suggestions = lostAnimals.map((l: any) => ({
+      label: l.animalName,
+      action: "SELECT_PET",
+      data: { petId: l.animalId, petName: l.animalName },
+    }));
+
+    return {
+      text: "Hvilket dyr er funnet?",
+      suggestions,
+      model: "direct-found-select-pet",
+    };
+  }
+
+  if (intent === "QRTagActivation") {
+    if (!isAuthenticated) {
+      return {
+        text: "For å aktivere QR-brikken din, må du logge inn først.",
+        requiresLogin: true,
+        model: "direct-qr-login",
+      };
+    }
+
+    const tags = ownerContext?.tags || [];
+    const inactiveTags = tags.filter((t: any) => !t.activated && t.type === "qr");
+
+    if (inactiveTags.length === 0 && tags.length > 0) {
+      const activeTags = tags.filter((t: any) => t.activated && t.type === "qr");
+      if (activeTags.length > 0) {
+        return {
+          text: `Dine QR-brikker er allerede aktivert:\n${activeTags.map((t: any) => `- **${t.tagId}** → ${t.assignedAnimalName || "ikke tildelt"}`).join("\n")}`,
+          model: "direct-qr-already-active",
+        };
+      }
+      return {
+        text: "Du har ingen QR-brikker registrert. Bestill en QR-brikke på dyreid.no for å komme i gang.",
+        model: "direct-qr-none",
+      };
+    }
+
+    session.intent = "QRTagActivation";
+    session.collectedData = {};
+
+    if (inactiveTags.length === 1) {
+      const tag = inactiveTags[0];
+      const ownerId = ownerContext?.owner?.ownerId;
+      if (ownerId) {
+        const result = performAction(ownerId, "activate_qr", { tagId: tag.tagId });
+        if (result.success) {
+          return {
+            text: `**${tag.tagId}** er nå aktivert!${tag.assignedAnimalName ? ` Koblet til ${tag.assignedAnimalName}.` : ""}\n\nDu kan nå skanne brikken med DyreID-appen eller et vanlig kamera.`,
+            actionExecuted: true,
+            actionType: "ACTIVATE_QR",
+            actionSuccess: true,
+            requestFeedback: true,
+            model: "direct-qr-executed",
+          };
+        }
+      }
+    }
+
+    const suggestions = inactiveTags.map((t: any) => ({
+      label: `${t.tagId}${t.assignedAnimalName ? ` (${t.assignedAnimalName})` : ""}`,
+      action: "SELECT_TAG",
+      data: { tagId: t.tagId },
+    }));
+
+    return {
+      text: "Hvilken QR-brikke vil du aktivere?",
+      suggestions,
+      model: "direct-qr-select-tag",
     };
   }
 
@@ -1069,6 +1428,57 @@ export async function* streamChatResponse(
     return;
   }
 
+  const DIRECT_INTENTS = ["ViewMyPets", "OwnershipTransferWeb", "ReportLostPet", "ReportFoundPet", "QRTagActivation"];
+  if ((intent && DIRECT_INTENTS.includes(intent)) || session.directIntentFlow) {
+    const effectiveIntent = session.directIntentFlow || intent || "";
+    const directResponse = handleDirectIntent(effectiveIntent, session, isAuthenticated, ownerContext, storedUserContext || null, userMessage);
+    if (directResponse) {
+      const metadata: any = {
+        model: directResponse.model,
+        matchedIntent: effectiveIntent,
+        directAction: true,
+      };
+      if (directResponse.actionExecuted) {
+        metadata.actionExecuted = true;
+        metadata.actionType = directResponse.actionType;
+        metadata.actionSuccess = directResponse.actionSuccess;
+      }
+      if (directResponse.requiresLogin) metadata.requiresLogin = true;
+      if (directResponse.suggestions) metadata.suggestions = directResponse.suggestions;
+      if (directResponse.pets) metadata.pets = directResponse.pets;
+
+      const msg = await storage.createMessage({
+        conversationId,
+        role: "assistant",
+        content: directResponse.text,
+        metadata,
+      });
+
+      const interaction = await storage.logChatbotInteraction({
+        conversationId,
+        messageId: msg.id,
+        userQuestion: userMessage,
+        botResponse: directResponse.text,
+        responseMethod: directResponse.model,
+        matchedIntent: intent,
+        actionsExecuted: directResponse.actionExecuted
+          ? [{ action: directResponse.actionType, success: directResponse.actionSuccess }]
+          : null,
+        authenticated: isAuthenticated,
+        responseTimeMs: Date.now() - startTime,
+      });
+      lastInteractionId = interaction.id;
+
+      await db
+        .update(messages)
+        .set({ metadata: { ...metadata, interactionId: interaction.id } })
+        .where(eq(messages.id, msg.id));
+
+      yield directResponse.text;
+      return;
+    }
+  }
+
   if (playbook) {
     const playbookResponse = await handlePlaybookResponse(
       playbook, session, conversationId, userMessage,
@@ -1106,6 +1516,9 @@ export async function* streamChatResponse(
       }
       if (playbookResponse.suggestions) {
         metadata.suggestions = playbookResponse.suggestions;
+      }
+      if (playbookResponse.pets) {
+        metadata.pets = playbookResponse.pets;
       }
 
       const msg = await storage.createMessage({
