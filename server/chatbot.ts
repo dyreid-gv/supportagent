@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import { INTENTS } from "@shared/intents";
+import { INTENTS, INTENT_DEFINITIONS, INTENT_BY_NAME } from "@shared/intents";
 import { eq } from "drizzle-orm";
 import { db } from "./db";
 import { storage } from "./storage";
@@ -38,19 +38,68 @@ interface IntentQuickMatch {
 }
 
 const INTENT_PATTERNS: IntentQuickMatch[] = [
-  { intent: "OwnershipTransfer", regex: /eierskift|selge|solgt|ny eier|overfør|kjøpt/i },
+  // Min side
   { intent: "LoginIssue", regex: /logg inn|passord|bankid|innlogg/i },
-  { intent: "QRTagActivation", regex: /qr.?tag|qr.?brikke|skann|aktivere tag/i },
-  { intent: "ReportLostPet", regex: /savnet|mistet|borte|forsvunnet/i },
-  { intent: "ReportFoundPet", regex: /funnet|funnet dyr/i },
-  { intent: "PetRegistration", regex: /registrer|chip|søkbart|id.?merk/i },
-  { intent: "SubscriptionManagement", regex: /abonnement|avslutt|forny|oppsigelse/i },
-  { intent: "AppSupport", regex: /app|laste ned|installere|mobil/i },
-  { intent: "PricingInquiry", regex: /pris|kost|betale|gratis/i },
-  { intent: "VetRegistration", regex: /veterinær|klinikk|dyrelege/i },
-  { intent: "SmartTagSupport", regex: /smart.?tag|gps|sporing/i },
-  { intent: "FamilySharing", regex: /familie|deling|del tilgang/i },
+  { intent: "LoginProblem", regex: /får ikke logget|kan ikke logge|innlogging feiler/i },
+  { intent: "SMSEmailNotification", regex: /hvorfor.*sms|hvorfor.*e-?post|fått melding|fått varsel/i },
+  { intent: "ProfileVerification", regex: /har jeg.*min side|finnes.*profil|eksisterer.*konto/i },
+  { intent: "ProfileUpdate", regex: /endre.*profil|oppdatere.*telefon|endre.*epost|oppdatere.*adresse/i },
+  { intent: "MissingPetProfile", regex: /mangler.*dyr|mangler.*kjæledyr|vises ikke.*min side|dyr.*borte.*profil/i },
+  { intent: "PetDeceased", regex: /dødt|avdød|avlivet|bortgang|kjæledyr.*død/i },
+  { intent: "GDPRDelete", regex: /slett meg|slette.*konto|gdpr.*slett|fjerne.*profil/i },
+  { intent: "GDPRExport", regex: /eksporter.*data|mine data|gdpr.*eksport|personvern.*data/i },
   { intent: "ViewMyPets", regex: /mine dyr|se dyr|dyrene mine|hvilke dyr|vis dyr|har jeg/i },
+
+  // Eierskifte
+  { intent: "OwnershipTransfer", regex: /eierskift|selge|solgt|ny eier|overfør|kjøpt/i },
+  { intent: "OwnershipTransferCost", regex: /kost.*eierskift|pris.*eierskift|eierskift.*kost/i },
+  { intent: "OwnershipTransferDead", regex: /eier.*død|dødsfall.*eier|arv.*dyr/i },
+  { intent: "NKKOwnership", regex: /nkk|norsk kennel|stambokført|rasehund.*eierskift/i },
+
+  // Registrering
+  { intent: "PetRegistration", regex: /registrer.*dyr|chip.*registrer|id.?merk/i },
+  { intent: "InactiveRegistration", regex: /ikke søkbar|søkbar|inaktiv.*registr/i },
+  { intent: "RegistrationPayment", regex: /kost.*registrer|pris.*registrer|registrer.*kost/i },
+  { intent: "ForeignChip", regex: /utenlands|importert.*dyr|utlandet.*chip|eu.?pass/i },
+  { intent: "VetRegistration", regex: /veterinær|klinikk|dyrelege/i },
+
+  // QR Tag
+  { intent: "QRTagActivation", regex: /qr.?tag|qr.?brikke|skann|aktivere.*tag|aktivere.*brikke/i },
+  { intent: "QRTagLost", regex: /mistet.*tag|mistet.*brikke|tapt.*qr|erstatte.*brikke/i },
+  { intent: "QRTagContactInfo", regex: /kontaktinfo.*qr|synlig.*kontakt|hvem ser.*info/i },
+  { intent: "TagSubscriptionExpiry", regex: /utløper.*abonnement|abonnement.*utløp|tag.*inaktiv/i },
+  { intent: "ActivationIssue", regex: /aktivere.*fungerer ikke|aktivering.*problem|kan ikke aktivere/i },
+
+  // Smart Tag
+  { intent: "SmartTagConnection", regex: /koble.*smart.?tag|smart.?tag.*kobl|bluetooth.*tag/i },
+  { intent: "SmartTagMissing", regex: /finner ikke.*smart.?tag|smart.?tag.*forsvunnet|tag.*borte/i },
+  { intent: "SmartTagPosition", regex: /posisjon.*oppdater|gps.*smart.?tag|sporing.*fungerer/i },
+  { intent: "SmartTagMultiple", regex: /flere.*tag|bare.*en.*tag|smart.?tag.*flere/i },
+
+  // Abonnement
+  { intent: "CancelSubscription", regex: /avslutte.*abonnement|si opp|oppsigelse|kansellere/i },
+  { intent: "SubscriptionComparison", regex: /basis.*plus|dyreID\+|forskjell.*abonnement|sammenlign/i },
+  { intent: "UpgradeSubscription", regex: /oppgrader|upgrade|basis til plus/i },
+  { intent: "AppCost", regex: /koster.*app|app.*gratis|pris.*app/i },
+  { intent: "BillingIssue", regex: /faktura|belastet|trekk|refusjon|betaling.*problem/i },
+
+  // Savnet/Funnet
+  { intent: "ReportLostPet", regex: /savnet|mistet.*dyr|borte|forsvunnet/i },
+  { intent: "ReportFoundPet", regex: /funnet.*dyr|kommet til rette|funnet.*kjæledyr/i },
+  { intent: "LostFoundInfo", regex: /savnet.*funnet.*fungerer|hvordan.*savnet.*funnet/i },
+
+  // Familiedeling
+  { intent: "FamilySharing", regex: /familie.*del|del.*tilgang|familiemedlem/i },
+  { intent: "FamilySharingExisting", regex: /familiedeling.*eksisterende|deling.*kjæledyr/i },
+  { intent: "FamilyAccessLost", regex: /ser ikke.*delt|mistet.*tilgang.*deling|familie.*borte/i },
+
+  // App
+  { intent: "AppAccess", regex: /laste ned.*app|installere.*app|tilgang.*app/i },
+  { intent: "AppLoginIssue", regex: /app.*logg inn|innlogging.*app|login.*app/i },
+  { intent: "AppBenefits", regex: /hvorfor.*app|fordeler.*app|app.*funksjoner/i },
+
+  // ID-søk
+  { intent: "IDSearch", regex: /id.?søk|søke.*chipnummer|finne eier|hvem eier/i },
 ];
 
 function quickIntentMatch(message: string): string | null {

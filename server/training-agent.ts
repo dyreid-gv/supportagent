@@ -5,7 +5,7 @@ import { db } from "./db";
 import { scrubbedTickets } from "@shared/schema";
 import { scrubTicket } from "./gdpr-scrubber";
 import { getClosedTickets, mapPureserviceToRawTicket } from "./integrations/pureservice-v3";
-import { INTENTS } from "@shared/intents";
+import { INTENTS, INTENT_DEFINITIONS } from "@shared/intents";
 import { log } from "./index";
 
 const openai = new OpenAI({
@@ -58,6 +58,19 @@ function chunk<T>(arr: T[], size: number): T[][] {
 }
 
 const KNOWN_INTENTS = INTENTS;
+
+function formatIntentsForPrompt(): string {
+  const byCategory: Record<string, typeof INTENT_DEFINITIONS> = {};
+  for (const d of INTENT_DEFINITIONS) {
+    if (!byCategory[d.category]) byCategory[d.category] = [];
+    byCategory[d.category].push(d);
+  }
+  return Object.entries(byCategory)
+    .map(([cat, defs]) =>
+      `${cat}:\n${defs.map(d => `  - ${d.intent} (${d.subcategory})`).join("\n")}`
+    )
+    .join("\n");
+}
 
 async function callOpenAI(prompt: string, model: string = "gpt-5-nano", maxTokens: number = 4096, jsonMode: boolean = false): Promise<string> {
   const params: any = {
@@ -376,7 +389,7 @@ export async function runIntentClassification(
 
   onProgress?.("Starter intent-klassifisering...", 0);
 
-  const intentsStr = KNOWN_INTENTS.map((i) => `- ${i}`).join("\n");
+  const intentsStr = formatIntentsForPrompt();
 
   while (true) {
     const unclassified = await storage.getUnclassifiedScrubbedTickets(batchSize);
@@ -401,7 +414,7 @@ Kundespørsmål: ${ticket.customerQuestion || "Ingen"}
 Agentsvar: ${ticket.agentAnswer || "Ingen"}
 Løsning: ${ticket.resolution || "Ingen"}
 
-KJENTE INTENTS (bruk disse hvis mulig):
+KJENTE INTENTS (gruppert etter hjelpesenter-kategori, bruk disse hvis mulig):
 ${intentsStr}
 
 INSTRUKSJONER:
@@ -474,7 +487,7 @@ OPPGAVE: Klassifiser intent for ALLE ${batch.length} tickets nedenfor.
 
 ${ticketsBlock}
 
-KJENTE INTENTS (bruk disse hvis mulig):
+KJENTE INTENTS (gruppert etter hjelpesenter-kategori, bruk disse hvis mulig):
 ${intentsStr}
 
 INSTRUKSJONER:
@@ -559,7 +572,8 @@ Emne: ${ticket.subject || "Ingen"}
 Kundespørsmål: ${ticket.customerQuestion || "Ingen"}
 Agentsvar: ${ticket.agentAnswer || "Ingen"}
 
-KJENTE INTENTS: ${intentsStr}
+KJENTE INTENTS (gruppert etter hjelpesenter-kategori):
+${intentsStr}
 
 SVAR I JSON:
 {
@@ -1650,7 +1664,7 @@ export async function runCombinedBatchAnalysis(
     .map((c) => `${c.categoryName} > ${c.subcategoryName}`)
     .join("\n");
 
-  const intentsStr = KNOWN_INTENTS.join(", ");
+  const intentsStr = formatIntentsForPrompt();
 
   const templates = await storage.getActiveResponseTemplates();
   const templateSignatures = templates.map((t) => ({
@@ -1680,7 +1694,8 @@ ${ticketsBlock}
 KATEGORIER:
 ${categoryList}
 
-INTENTS: ${intentsStr}
+INTENTS (gruppert etter hjelpesenter-kategori):
+${intentsStr}
 
 AUTOSVAR-MALER: ${JSON.stringify(templateSignatures)}
 
