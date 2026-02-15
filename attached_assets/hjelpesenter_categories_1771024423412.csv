@@ -1,37 +1,61 @@
 category_name,subcategory_name,url_slug,description
+ID-søk,Hvorfor bør jeg ID-merke?,hvorfor-id-merke,Fordeler med ID-merking av kjæledyr
+ID-søk,Hvordan kontrollere at mine kontaktdata er riktig?,kontrollere-kontaktdata,Sjekke og oppdatere kontaktdata på chipnummer
+ID-søk,Kjæledyret mitt er ikke søkbart,ikke-sokbart,Dyr ikke synlig i søk
+DyreID-appen,Hvordan får tilgang til DyreID-appen?,app-tilgang,Laste ned og logge inn i appen
+DyreID-appen,Innlogging app,app-login,Innloggingsprosess i appen
+DyreID-appen,Hvorfor app?,app-fordeler,Fordeler med DyreID-appen
+DyreID-appen,Hvem passer appen for?,app-maalgruppe,Hvem appen er laget for
+DyreID-appen,Hva er forskjellen på DyreID basis og DyreID+ abonnement?,basis-vs-plus,Forskjeller mellom abonnementsplaner
+DyreID-appen,Koster appen noe?,app-kostnad,Priser for app og abonnement
+DyreID-appen,Min side (i appen),app-min-side,Min side-funksjonalitet i appen
 Min side,Logg inn på Min side,logg-inn,Hvordan logge inn på Min side
 Min side,Hvorfor har jeg fått sms/e-post?,sms-epost,Informasjon om mottatte meldinger
 Min side,Har jeg en Min side?,har-min-side,Verifisere om profil eksisterer
 Min side,Hvorfor får jeg ikke logget meg inn?,login-problem,Feilsøke innloggingsproblemer
+Min side,Feilmelding e-postadresse,feilmelding-epost,Feilmelding ved ugyldig e-postadresse
+Min side,Feilmelding telefonnummer,feilmelding-telefon,Feilmelding ved ugyldig telefonnummer
+Min side,Legge til flere telefonnumre eller e-postadresser,flere-kontaktdata,Administrere flere kontaktpunkter
+Min side,Det er feil informasjon på min side,feil-info,Korrigere feil registrert informasjon
 Min side,Det mangler et kjæledyr på Min side,mangler-dyr,Dyr vises ikke i profil
 Min side,Kjæledyret mitt er dødt,dyr-dod,Håndtere avdøde kjæledyr
 Min side,Slett meg,gdpr-slett,GDPR sletting av profil
 Min side,Eksporter mine data,gdpr-eksport,GDPR dataeksport
+Eierskifte,Eierskifte APP,eierskifte-app,Hvordan gjøre eierskifte i appen
 Eierskifte,Hva koster eierskifte?,kostnad-eierskifte,Priser for eierskifte
-Eierskifte,Hvordan foreta eierskifte?,eierskifte-prosess,Prosess for eierskifte
+Eierskifte,Eierskifte på Web,eierskifte-web,Hvordan gjøre eierskifte via Min side web
 Eierskifte,Eierskifte når eier er død,eier-dod,Eierskifte ved dødsfall
-Eierskifte,Eierskifte av NKK-registrert hund,nkk-eierskifte,NKK-spesifikk prosess
-Registrering,Kjæledyret mitt er ikke søkbart,ikke-sokbart,Dyr ikke synlig i søk
-Registrering,Hvordan få dyret registrert i Norge?,registrering-norge,Registreringsprosess
-Registrering,Hva koster det å registrere et dyr?,kostnad-registrering,Registreringspriser
-Registrering,Utenlandsregistrering,utenlands-chip,Registrere utenlandsk chip
-Produkter - QR Tag,Hvordan aktivere QR-brikken?,aktivere-qr,Aktivering av QR-brikke
-Produkter - QR Tag,Er kontaktinformasjonen min tilgjengelig?,kontaktinfo-synlig,Synlighet av kontaktinfo
-Produkter - QR Tag,Jeg har mistet tag'en,mistet-qr,Erstatte tapt QR-brikke
-Produkter - QR Tag,Hva skjer hvis abonnementet utløper?,abonnement-utloper,Konsekvenser ved utløp
-Produkter - Smart Tag,Kan ikke koble til taggen,smarttag-kobling,Koblingsproblemer Smart Tag
-Produkter - Smart Tag,Taggen var lagt til før men jeg finner den ikke,smarttag-forsvunnet,Smart Tag ikke synlig
-Produkter - Smart Tag,Posisjonen har ikke oppdatert seg,smarttag-posisjon,Posisjonsproblemer
-Produkter - Smart Tag,Flere tagger men får bare koblet til en,smarttag-flere,Flere tagger samtidig
-Abonnement,DyreID basis vs DyreID+,basis-vs-plus,Forskjeller mellom planer
-Abonnement,Koster appen noe?,app-kostnad,Priser for app
-Abonnement,Avslutte abonnement,avslutte-abo,Oppsigelse av abonnement
+Eierskifte,Eierskifte av NKK-registrert hund,nkk-eierskifte,NKK-spesifikk eierskifteprosess
+Smart Tag,Aktivering av Smart Tag,smarttag-aktivering,Aktivere Smart Tag for iOS og Android
+Smart Tag,Aktiver QR-koden på Smart Tag,smarttag-qr-aktivering,Aktivere QR-kode på Smart Tag
+Smart Tag,Kan ikke koble til eller legge til taggen,smarttag-kobling,Koblingsproblemer med Smart Tag
+Smart Tag,Taggen var lagt til før men jeg finner den ikke,smarttag-forsvunnet,Smart Tag ikke synlig i app
+Smart Tag,Posisjonen har ikke oppdatert seg på lenge,smarttag-posisjon,Posisjonsproblemer med Smart Tag
+Smart Tag,Taggen lager lyder av seg selv,smarttag-lyd,Uønskede lyder fra Smart Tag
+Smart Tag,Jeg har flere tagger men får bare koblet til den ene,smarttag-flere,Koble flere Smart Tags samtidig
+QR-brikke,Passer DyreIDs QR-brikke for både hunder og katter?,qr-kompatibilitet,QR-brikke kompatibilitet med dyretyper
+QR-brikke,Må kjæledyret mitt være ID-merket for å bruke tag'en?,qr-krav-id-merking,Krav om ID-merking for QR-brikke
+QR-brikke,Er det abonnement eller engangskostnad?,qr-abonnement-engang,Prismodell for QR-brikke
+QR-brikke,Hvordan aktivere QR-brikken?,aktivere-qr,Aktivering av QR-brikke
+QR-brikke,Er kontaktinformasjonen min tilgjengelig for alle som skanner?,kontaktinfo-synlig,Synlighet av kontaktinfo ved skanning
+QR-brikke,Hva skjer når QR koden skannes?,qr-skanning,Hva som skjer ved skanning av QR-kode
+QR-brikke,Hvordan oppdatere kontaktinformasjon på QR-brikke?,qr-oppdater-kontakt,Oppdatere kontaktinfo knyttet til QR-brikke
+QR-brikke,Hva er fordelen med DyreIDs QR-brikke?,qr-fordeler,Fordeler med QR-brikke for ID-merkede dyr
+QR-brikke,Jeg har mistet tag'en,mistet-qr,Erstatte tapt QR-brikke
+QR-brikke,Hva skjer hvis abonnementet mitt utløper?,abonnement-utloper,Konsekvenser ved utløp av QR-abonnement
+Utenlandsregistrering,Hvordan få dyret registrert i Norge?,registrering-norge,Registreringsprosess for utenlandske dyr
+Utenlandsregistrering,Hva koster det å registrere et dyr i Norge?,kostnad-registrering,Registreringspriser og gebyrer
+Utenlandsregistrering,Utenlandsk hund med stamtavle,utenlandsk-stamtavle,Registrering av utenlandsk hund med stamtavle
 Savnet/Funnet,Hvordan melde mitt kjæledyr savnet?,melde-savnet,Prosess for savnetmelding
-Savnet/Funnet,Kjæledyret har kommet til rette,funnet-igjen,Markere som funnet
-Savnet/Funnet,Hvordan fungerer Savnet & Funnet?,savnet-funnet-info,Informasjon om tjenesten
-Familiedeling,Hvordan dele tilgang med familiemedlemmer?,dele-tilgang,Prosess for deling
-Familiedeling,Kan jeg bruke familiedeling med noen som har kjæledyr?,familiedeling-eksisterende,Deling med eksisterende brukere
-Familiedeling,Jeg ser ikke lenger kjæledyret som har blitt delt,deling-forsvunnet,Tilgang mistet
-App,Hvordan få tilgang til DyreID-appen?,app-tilgang,Laste ned og logge inn
-App,Innlogging app,app-login,Innloggingsprosess i app
-App,Hvorfor app?,app-fordeler,Fordeler med app
+Savnet/Funnet,Kjæledyret har kommet til rette,funnet-igjen,Markere kjæledyr som funnet
+Savnet/Funnet,Hvordan fungerer Savnet & Funnet?,savnet-funnet-info,Informasjon om Savnet & Funnet-tjenesten
+Savnet/Funnet,Hvordan fungerer Søkbar på 1-2-3?,sokbar-123,Informasjon om Søkbar på 1-2-3
+Savnet/Funnet,Søkbar på 1-2-3 kan den misbrukes?,sokbar-misbruk,Sikkerhet rundt Søkbar på 1-2-3
+Familiedeling,Hvorfor burde jeg ha familiedeling?,familiedeling-fordeler,Fordeler med familiedeling
+Familiedeling,Kan jeg dele tilgang med andre enn familien?,dele-ikke-familie,Deling utenfor familiekretsen
+Familiedeling,Trenger jeg DyreID+ for familiedeling?,familiedeling-krav,Abonnementskrav for familiedeling
+Familiedeling,Forespørsel ikke akseptert,familiedeling-foresporsel,Hjelp med ubesvarte forespørsler
+Familiedeling,Hvordan dele tilgang med familiemedlemmer?,dele-tilgang,Prosess for å dele tilgang
+Familiedeling,Kan de jeg deler med gjøre endringer?,familiedeling-rettigheter,Rettigheter for familiemedlemmer
+Familiedeling,Jeg ser ikke lenger kjæledyret som har blitt delt,deling-forsvunnet,Tilgang til delt kjæledyr mistet
+Familiedeling,Kan jeg bruke familiedeling med noen som har kjæledyr?,familiedeling-eksisterende,Deling med eksisterende dyreeiere

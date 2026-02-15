@@ -38,73 +38,86 @@ interface IntentQuickMatch {
 }
 
 const INTENT_PATTERNS: IntentQuickMatch[] = [
-  // Min side
+  // ── ID-søk ──────────────────────────────────────────────
+  { intent: "WhyIDMark", regex: /hvorfor.*id.?merk|bør.*merke|fordel.*chip/i },
+  { intent: "CheckContactData", regex: /kontrollere.*kontaktdata|kontaktdata.*riktig|sjekke.*chip/i },
+  { intent: "InactiveRegistration", regex: /ikke søkbar|søkbar|inaktiv.*registr/i },
+
+  // ── DyreID-appen ────────────────────────────────────────
+  { intent: "AppAccess", regex: /laste ned.*app|installere.*app|tilgang.*app/i },
+  { intent: "AppLoginIssue", regex: /app.*logg inn|innlogging.*app|login.*app/i },
+  { intent: "AppBenefits", regex: /hvorfor.*app|fordeler.*app|app.*funksjoner/i },
+  { intent: "AppTargetAudience", regex: /hvem.*passer.*app|app.*for meg|passer.*appen/i },
+  { intent: "SubscriptionComparison", regex: /basis.*plus|dyreID\+|forskjell.*abonnement|sammenlign/i },
+  { intent: "AppCost", regex: /koster.*app|app.*gratis|pris.*app/i },
+  { intent: "AppMinSide", regex: /min side.*app|app.*min side|profil.*appen/i },
+
+  // ── Min side ────────────────────────────────────────────
   { intent: "LoginIssue", regex: /logg inn|passord|bankid|innlogg/i },
-  { intent: "LoginProblem", regex: /får ikke logget|kan ikke logge|innlogging feiler/i },
   { intent: "SMSEmailNotification", regex: /hvorfor.*sms|hvorfor.*e-?post|fått melding|fått varsel/i },
   { intent: "ProfileVerification", regex: /har jeg.*min side|finnes.*profil|eksisterer.*konto/i },
-  { intent: "ProfileUpdate", regex: /endre.*profil|oppdatere.*telefon|endre.*epost|oppdatere.*adresse/i },
+  { intent: "LoginProblem", regex: /får ikke logget|kan ikke logge|innlogging feiler/i },
+  { intent: "EmailError", regex: /feilmelding.*e-?post|ugyldig.*e-?post|feil.*epost/i },
+  { intent: "PhoneError", regex: /feilmelding.*telefon|ugyldig.*nummer|feil.*telefon/i },
+  { intent: "AddContactInfo", regex: /legge til.*telefon|legge til.*e-?post|flere.*nummer|flere.*kontakt/i },
+  { intent: "WrongInfo", regex: /feil informasjon|feil.*registrert|korrigere|endre.*opplysning/i },
   { intent: "MissingPetProfile", regex: /mangler.*dyr|mangler.*kjæledyr|vises ikke.*min side|dyr.*borte.*profil/i },
   { intent: "PetDeceased", regex: /dødt|avdød|avlivet|bortgang|kjæledyr.*død/i },
   { intent: "GDPRDelete", regex: /slett meg|slette.*konto|gdpr.*slett|fjerne.*profil/i },
   { intent: "GDPRExport", regex: /eksporter.*data|mine data|gdpr.*eksport|personvern.*data/i },
-  { intent: "ViewMyPets", regex: /mine dyr|se dyr|dyrene mine|hvilke dyr|vis dyr|har jeg/i },
+  { intent: "ViewMyPets", regex: /mine dyr|se dyr|dyrene mine|hvilke dyr|vis dyr/i },
 
-  // Eierskifte
-  { intent: "OwnershipTransfer", regex: /eierskift|selge|solgt|ny eier|overfør|kjøpt/i },
+  // ── Eierskifte ──────────────────────────────────────────
+  { intent: "OwnershipTransferApp", regex: /eierskifte.*app|app.*eierskift/i },
   { intent: "OwnershipTransferCost", regex: /kost.*eierskift|pris.*eierskift|eierskift.*kost/i },
+  { intent: "OwnershipTransferWeb", regex: /eierskift|selge|solgt|ny eier|overfør|kjøpt/i },
   { intent: "OwnershipTransferDead", regex: /eier.*død|dødsfall.*eier|arv.*dyr/i },
   { intent: "NKKOwnership", regex: /nkk|norsk kennel|stambokført|rasehund.*eierskift/i },
 
-  // Registrering
-  { intent: "PetRegistration", regex: /registrer.*dyr|chip.*registrer|id.?merk/i },
-  { intent: "InactiveRegistration", regex: /ikke søkbar|søkbar|inaktiv.*registr/i },
-  { intent: "RegistrationPayment", regex: /kost.*registrer|pris.*registrer|registrer.*kost/i },
-  { intent: "ForeignChip", regex: /utenlands|importert.*dyr|utlandet.*chip|eu.?pass/i },
-  { intent: "VetRegistration", regex: /veterinær|klinikk|dyrelege/i },
-
-  // QR Tag
-  { intent: "QRTagActivation", regex: /qr.?tag|qr.?brikke|skann|aktivere.*tag|aktivere.*brikke/i },
-  { intent: "QRTagLost", regex: /mistet.*tag|mistet.*brikke|tapt.*qr|erstatte.*brikke/i },
-  { intent: "QRTagContactInfo", regex: /kontaktinfo.*qr|synlig.*kontakt|hvem ser.*info/i },
-  { intent: "TagSubscriptionExpiry", regex: /utløper.*abonnement|abonnement.*utløp|tag.*inaktiv/i },
-  { intent: "ActivationIssue", regex: /aktivere.*fungerer ikke|aktivering.*problem|kan ikke aktivere/i },
-
-  // Smart Tag
-  { intent: "SmartTagConnection", regex: /koble.*smart.?tag|smart.?tag.*kobl|bluetooth.*tag/i },
+  // ── Smart Tag ───────────────────────────────────────────
+  { intent: "SmartTagActivation", regex: /aktivere.*smart.?tag|smart.?tag.*aktivere|sette opp.*smart/i },
+  { intent: "SmartTagQRActivation", regex: /qr.*smart.?tag|smart.?tag.*qr.*aktiver/i },
+  { intent: "SmartTagConnection", regex: /koble.*smart.?tag|smart.?tag.*kobl|bluetooth.*tag|kan ikke koble/i },
   { intent: "SmartTagMissing", regex: /finner ikke.*smart.?tag|smart.?tag.*forsvunnet|tag.*borte/i },
   { intent: "SmartTagPosition", regex: /posisjon.*oppdater|gps.*smart.?tag|sporing.*fungerer/i },
+  { intent: "SmartTagSound", regex: /tag.*lyd|lyder.*tag|piper.*tag|smart.?tag.*bråk/i },
   { intent: "SmartTagMultiple", regex: /flere.*tag|bare.*en.*tag|smart.?tag.*flere/i },
 
-  // Abonnement
-  { intent: "CancelSubscription", regex: /avslutte.*abonnement|si opp|oppsigelse|kansellere/i },
-  { intent: "SubscriptionComparison", regex: /basis.*plus|dyreID\+|forskjell.*abonnement|sammenlign/i },
-  { intent: "UpgradeSubscription", regex: /oppgrader|upgrade|basis til plus/i },
-  { intent: "AppCost", regex: /koster.*app|app.*gratis|pris.*app/i },
-  { intent: "BillingIssue", regex: /faktura|belastet|trekk|refusjon|betaling.*problem/i },
+  // ── QR-brikke ───────────────────────────────────────────
+  { intent: "QRCompatibility", regex: /qr.*hund.*katt|passer.*qr.*brikke|kompatib.*qr/i },
+  { intent: "QRRequiresIDMark", regex: /må.*id.?merk.*qr|qr.*krav.*chip|id.?merket.*brikke/i },
+  { intent: "QRPricingModel", regex: /qr.*abonnement.*engang|engangskostnad.*qr|qr.*prismodell/i },
+  { intent: "QRTagActivation", regex: /aktivere.*qr|qr.?brikke.*aktiver|skann.*brikke/i },
+  { intent: "QRTagContactInfo", regex: /kontaktinfo.*qr|synlig.*kontakt.*skann|hvem ser.*qr/i },
+  { intent: "QRScanResult", regex: /hva skjer.*skann|skanne.*qr.*resultat|skann.*kode/i },
+  { intent: "QRUpdateContact", regex: /oppdatere.*kontakt.*qr|endre.*info.*brikke|qr.*kontakt.*endre/i },
+  { intent: "QRBenefits", regex: /fordel.*qr|qr.*brikke.*nytte|hvorfor.*qr/i },
+  { intent: "QRTagLost", regex: /mistet.*tag|mistet.*brikke|tapt.*qr|erstatte.*brikke/i },
+  { intent: "TagSubscriptionExpiry", regex: /utløper.*abonnement|abonnement.*utløp|tag.*inaktiv/i },
 
-  // Savnet/Funnet
-  { intent: "ReportLostPet", regex: /savnet|mistet.*dyr|borte|forsvunnet/i },
+  // ── Utenlandsregistrering ───────────────────────────────
+  { intent: "ForeignRegistration", regex: /registrere.*norge|utenlands.*registrer|importert.*dyr/i },
+  { intent: "ForeignRegistrationCost", regex: /kost.*registrer|pris.*registrer|registrer.*kost|676/i },
+  { intent: "ForeignPedigree", regex: /stamtavle.*utenlandsk|utenlandsk.*stamtavle|pedigree/i },
+
+  // ── Savnet/Funnet ───────────────────────────────────────
+  { intent: "ReportLostPet", regex: /savnet|mistet.*dyr|borte|forsvunnet|melde.*savnet/i },
   { intent: "ReportFoundPet", regex: /funnet.*dyr|kommet til rette|funnet.*kjæledyr/i },
   { intent: "LostFoundInfo", regex: /savnet.*funnet.*fungerer|hvordan.*savnet.*funnet/i },
+  { intent: "SearchableInfo", regex: /søkbar.*1-?2-?3|hvordan.*søkbar/i },
+  { intent: "SearchableMisuse", regex: /misbruk.*søkbar|søkbar.*misbruk|sikkerhet.*søkbar/i },
 
-  // Familiedeling
+  // ── Familiedeling ───────────────────────────────────────
+  { intent: "FamilySharingBenefits", regex: /hvorfor.*familiedeling|fordel.*familiedeling/i },
+  { intent: "FamilySharingNonFamily", regex: /dele.*andre.*enn.*familie|venner.*dele|ikke.*familie.*dele/i },
+  { intent: "FamilySharingRequirement", regex: /trenger.*dyreID\+.*familie|krav.*familiedeling/i },
+  { intent: "FamilySharingRequest", regex: /forespørsel.*akseptert|invitasjon.*familie|venter.*familie/i },
   { intent: "FamilySharing", regex: /familie.*del|del.*tilgang|familiemedlem/i },
-  { intent: "FamilySharingExisting", regex: /familiedeling.*eksisterende|deling.*kjæledyr/i },
+  { intent: "FamilySharingPermissions", regex: /rettigheter.*deling|kan.*deling.*endre|tillatelser.*familie/i },
   { intent: "FamilyAccessLost", regex: /ser ikke.*delt|mistet.*tilgang.*deling|familie.*borte/i },
+  { intent: "FamilySharingExisting", regex: /familiedeling.*eksisterende|deling.*allerede.*kjæledyr/i },
 
-  // App
-  { intent: "AppAccess", regex: /laste ned.*app|installere.*app|tilgang.*app/i },
-  { intent: "AppLoginIssue", regex: /app.*logg inn|innlogging.*app|login.*app/i },
-  { intent: "AppBenefits", regex: /hvorfor.*app|fordeler.*app|app.*funksjoner/i },
-
-  // ID-søk
-  { intent: "IDSearch", regex: /id.?søk|søke.*chipnummer|finne eier|hvem eier/i },
-
-  // Produkter - erstatning
-  { intent: "ProductReplace", regex: /erstatte.*brikke|ødelagt.*tag|bytte.*produkt|bestille.*ny/i },
-
-  // Generell
+  // ── Generell ────────────────────────────────────────────
   { intent: "GeneralInquiry", regex: /generell|hjelp med|lurer på|spørsmål om/i },
 ];
 

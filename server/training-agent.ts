@@ -321,7 +321,7 @@ INSTRUKSJONER:
 3. Grupper tickets etter tema
 4. Vurder om noen tickets faktisk burde vært i eksisterende kategori
 
-EKSISTERENDE KATEGORIER: Min side, Eierskifte, Registrering, Produkter - QR Tag, Produkter - Smart Tag, Abonnement, Savnet/Funnet, Familiedeling, App
+EKSISTERENDE KATEGORIER: ID-søk, DyreID-appen, Min side, Eierskifte, Smart Tag, QR-brikke, Utenlandsregistrering, Savnet/Funnet, Familiedeling
 
 SVAR I JSON:
 {
@@ -1860,15 +1860,15 @@ Kundens spørsmål: ${(ticket.customerQuestion || '').substring(0, 1500)}
 Agentens svar: ${(ticket.agentAnswer || 'Ingen svar').substring(0, 1500)}
 
 TILGJENGELIGE KATEGORIER (velg én):
-1. Min Side - Innlogging, profil, passord, tilgang, BankID
-2. Eierskifte - Overføring av eierskap mellom personer
-3. Registrering - Registrere nytt dyr, chip, søkbart register
-4. QR Tag - QR-tag bestilling, aktivering, bruk
-5. Smart Tag - GPS-tag for sporing
-6. Abonnement - Premium, fornyelse, betaling
-7. Savnet/Funnet - Melde dyr savnet eller funnet
-8. Familiedeling - Dele tilgang mellom familiemedlemmer
-9. App - DyreID+ app, nedlasting, bruk
+1. ID-søk - ID-merking, kontaktdata, søkbarhet
+2. DyreID-appen - Tilgang, innlogging, abonnement, funksjoner
+3. Min side - Innlogging, profil, kontaktdata, GDPR, kjæledyr
+4. Eierskifte - Overføring via app/web, NKK, dødsfall
+5. Smart Tag - Aktivering, kobling, posisjon, lyd, flere tagger
+6. QR-brikke - Aktivering, skanning, kontaktinfo, abonnement
+7. Utenlandsregistrering - Registrering i Norge, priser, stamtavle
+8. Savnet/Funnet - Melde savnet/funnet, Søkbar på 1-2-3
+9. Familiedeling - Dele tilgang, rettigheter, forespørsler
 
 VIKTIG:
 - Analyser både spørsmål OG svar for å finne riktig kategori
