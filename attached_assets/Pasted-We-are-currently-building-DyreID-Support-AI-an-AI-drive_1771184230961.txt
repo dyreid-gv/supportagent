@@ -1,0 +1,107 @@
+We are currently building DyreID Support AI — an AI-driven support automation system for Norway’s national pet ID register.
+
+The system consists of two parts:
+
+PART 1 — TRAINING AGENT
+Uses OpenAI to analyze historical support tickets from Pureservice and extract:
+
+Customer intent
+
+Resolution steps
+
+Required data
+
+Action endpoint
+
+This data is aggregated into a structured Support Playbook.
+
+This is correct and OpenAI must continue to be used here.
+
+PART 2 — RUNTIME SUPPORT CHATBOT
+
+The chatbot currently uses a 4-level response hierarchy:
+
+EXECUTE
+GUIDE
+INSTRUCT
+INFORM
+
+However, if no intent is matched through regex or playbook keyword lookup, the system falls back to OpenAI:
+
+if (!intent) {
+  return openAI.chat(...)
+}
+
+This causes hallucinations such as:
+
+Incorrect ownership transfer procedures
+
+Incorrect QR subscription information
+
+Suggesting new microchip insertion
+
+Incorrect registration requirements
+
+Incorrect pricing or payment instructions
+
+This is unacceptable because DyreID operates:
+
+a national ownership register
+
+payment-triggered activation
+
+subscription-based tracking products
+
+The chatbot must not improvise procedures.
+
+❗ PROBLEM
+
+OpenAI is currently used in runtime as:
+
+fallback reasoning engine
+
+This must be removed.
+
+OpenAI must only be used during training to extract resolution logic from historical tickets.
+
+🎯 REQUIRED ARCHITECTURE CHANGE
+
+We need to convert the chatbot from:
+
+Open-domain reasoning chatbot
+
+to:
+
+Closed-domain action agent
+
+Runtime responses must be limited to:
+
+Allowlisted intents derived from the DyreID Help Center
+
+Resolution steps extracted from historical tickets
+
+Explicitly mapped API endpoints
+
+If an intent is not in the allowlist, the chatbot must BLOCK and escalate.
+
+OpenAI must not generate new intents, new procedures, or new instructions at runtime.
+
+RUNTIME RULE
+
+If no allowlisted intent is matched:
+
+Return BLOCK response
+
+NOT OpenAI output.
+
+Please analyze the current architecture and propose:
+
+How to remove runtime fallback reasoning
+
+How to restrict GPT usage to paraphrasing only
+
+How to enforce allowlisted intent execution
+
+How to store resolution steps instead of generated answers
+
+We will then provide implementation instructions.
