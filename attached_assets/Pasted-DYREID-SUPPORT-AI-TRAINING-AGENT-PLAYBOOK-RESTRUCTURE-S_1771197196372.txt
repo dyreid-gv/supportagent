@@ -1,0 +1,194 @@
+DYREID SUPPORT AI — TRAINING AGENT PLAYBOOK RESTRUCTURE (STEP 1)
+
+We are preparing to import historical DyreID support tickets from the Pureservice API into our 9-step training pipeline.
+
+However, the current implementation of Step 6 (Resolution Extraction) extracts and stores natural-language resolution text from support tickets.
+
+This is incorrect for our system.
+
+DyreID Support AI is not an informational chatbot.
+
+It is a stateful action agent that performs authenticated operations via OTP login to Min Side, such as:
+
+Ownership transfer
+
+Lost pet reporting
+
+QR tag activation
+
+Smart Tag linking
+
+Subscription management
+
+Foreign chip registration
+
+Therefore:
+
+The Playbook must not store generated customer answers or agent phrasing.
+
+It must instead store structured operational data that can later be executed by the runtime chatbot after OTP authentication.
+
+🚨 CURRENT PROBLEM
+
+Step 6 of the training pipeline currently extracts:
+
+Agent reply text
+
+Natural-language instructions
+
+Resolution phrasing
+
+Example (current):
+
+"Agent asked the customer to log in and register the new owner"
+
+This is not usable by the runtime action agent.
+
+Runtime must instead know:
+
+What the customer wanted
+
+Whether the issue required system action
+
+What data was needed
+
+What Min Side endpoint should be triggered
+
+🎯 REQUIRED CHANGE
+
+Update Step 6 — Resolution Extraction
+so that the training agent builds Playbook entries using the following schema:
+
+NEW PLAYBOOK ENTRY STRUCTURE
+interface PlaybookEntry {
+  intent: string;
+  actionable: boolean;
+  requiredData: string[];
+  actionEndpoint?: string;
+  guidanceSteps?: string[];
+  infoText?: string;
+}
+🧠 OPENAI TRAINING TASK
+
+When analyzing a resolved support ticket, OpenAI must now determine:
+
+What was the customer's operational goal?
+
+Examples:
+
+Transfer ownership
+Activate QR tag
+Report lost pet
+Cancel subscription
+Register foreign chip
+Update contact info
+
+Was the issue resolved by performing an authenticated system action inside DyreID systems?
+
+IF YES (ACTION REQUIRED)
+
+Then:
+
+actionable = true
+
+Extract:
+
+requiredData needed to perform the operation
+Examples:
+
+PetId
+NewOwnerMobile
+TagId
+SubscriptionId
+OwnerMobile
+ChipNumber
+
+Then map the ticket resolution to the corresponding Min Side operation:
+
+Examples:
+
+OwnershipTransferWeb
+→ /OwnerChange/OwnerSeller/ReportOwnerChange
+
+LostPetReport
+→ /Pet/LostPet/ReportLostPet
+
+QRTagActivation
+→ /Pet/QR/Activate
+
+CancelSubscription
+→ /Subscription/Cancel
+
+ForeignChipRegistration
+→ /Pet/Foreign/Register
+
+Store:
+
+intent
+actionable
+requiredData
+actionEndpoint
+
+IF NO (INFORMATIONAL ONLY)
+
+Examples:
+
+price questions
+
+subscription explanation
+
+app features
+
+general how-to questions
+
+DyreID+ explanation
+
+Then:
+
+actionable = false
+store resolution in infoText only
+
+Do not store requiredData or endpoint.
+
+IMPORTANT RULES
+
+OpenAI must NOT:
+
+generate customer-facing answers
+
+store conversational phrasing
+
+describe procedures in free text
+
+OpenAI must ONLY extract:
+
+intent
+actionability
+requiredData
+endpoint mapping
+
+RUNTIME REQUIREMENT
+
+The runtime chatbot will later:
+
+If actionable = true
+→ collect requiredData from user
+→ execute actionEndpoint via OTP Min Side session
+
+If actionable = false
+→ INFORM using infoText
+
+IMPLEMENTATION TASK
+
+Update:
+
+Step 6 — Resolution Extraction
+Playbook storage logic
+Database schema for PlaybookEntry
+
+so that Playbook entries are now operationally structured
+instead of storing natural-language agent replies.
+
+DO NOT IMPORT SUPPORT TICKETS
+
+until this schema is implemented.
