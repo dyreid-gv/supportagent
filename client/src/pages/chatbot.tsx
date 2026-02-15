@@ -523,6 +523,23 @@ function MessageBubble({
                 </Button>
               );
             })}
+            {suggestions.filter(s => s.action === "SUBTOPIC").map((s, i) => (
+              <Button
+                key={`subtopic-${i}`}
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => {
+                  if (s.data?.query && onSuggestionClick) {
+                    onSuggestionClick(s.data.query);
+                  }
+                }}
+                data-testid={`button-subtopic-${message.id}-${i}`}
+              >
+                <ChevronRight className="h-3.5 w-3.5" />
+                {s.label}
+              </Button>
+            ))}
             {suggestions.filter(s => s.action === "OPEN_ARTICLE" && s.data?.url).map((s, i) => (
               <a
                 key={`article-${i}`}
@@ -639,10 +656,10 @@ function AuthPanel({
 }
 
 const QUICK_ACTIONS = [
-  { label: "Eierskifte", icon: ArrowRightLeft, query: "Hvordan foreta eierskifte?" },
+  { label: "Eierskifte", icon: ArrowRightLeft, query: "Eierskifte" },
   { label: "Feil/manglende registrering", icon: AlertCircle, query: "Feil eller manglende registrering av dyr" },
   { label: "Aktivere QR Tag", icon: QrCode, query: "Aktivere QR Tag" },
-  { label: "Melde savnet", icon: MapPin, query: "Melde dyr savnet" },
+  { label: "Melde savnet", icon: MapPin, query: "Savnet" },
   { label: "Mine dyr", icon: PawPrint, query: "Vis mine dyr" },
   { label: "Priser", icon: CreditCard, query: "Abonnement og priser" },
 ];
@@ -665,7 +682,7 @@ const HJELPESENTER_SUGGESTIONS = [
   { category: "Min side", text: "Slett meg / GDPR", query: "Jeg vil slette profilen min (GDPR)" },
   { category: "Eierskifte", text: "Eierskifte i appen", query: "Hvordan gjøre eierskifte i DyreID-appen?" },
   { category: "Eierskifte", text: "Hva koster eierskifte?", query: "Hva koster eierskifte?" },
-  { category: "Eierskifte", text: "Eierskifte på web", query: "Hvordan foreta eierskifte?" },
+  { category: "Eierskifte", text: "Eierskifte Min side", query: "Eierskifte via Min side" },
   { category: "Eierskifte", text: "Eierskifte når eier er død", query: "Eierskifte når eier er død" },
   { category: "Eierskifte", text: "Eierskifte NKK-hund", query: "Eierskifte av NKK-registrert hund" },
   { category: "Smart Tag", text: "Aktivering av Smart Tag", query: "Hvordan aktivere Smart Tag?" },

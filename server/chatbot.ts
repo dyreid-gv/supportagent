@@ -75,9 +75,9 @@ const INTENT_PATTERNS: IntentQuickMatch[] = [
   // ── Eierskifte ──────────────────────────────────────────
   { intent: "OwnershipTransferApp", regex: /eierskifte.*app|app.*eierskift/i },
   { intent: "OwnershipTransferCost", regex: /kost.*eierskift|pris.*eierskift|eierskift.*kost/i },
-  { intent: "OwnershipTransferWeb", regex: /eierskift|selge|solgt|ny eier|overfør|kjøpt/i },
   { intent: "OwnershipTransferDead", regex: /eier.*død|dødsfall.*eier|arv.*dyr/i },
   { intent: "NKKOwnership", regex: /nkk|norsk kennel|stambokført|rasehund.*eierskift/i },
+  { intent: "OwnershipTransferWeb", regex: /eierskift.*min side|via min side|eierskift|selge|solgt|ny eier|overfør|kjøpt/i },
 
   // ── Smart Tag ───────────────────────────────────────────
   { intent: "SmartTagActivation", regex: /aktivere.*smart.?tag|smart.?tag.*aktivere|sette opp.*smart/i },
@@ -130,6 +130,164 @@ const INTENT_PATTERNS: IntentQuickMatch[] = [
   // ── Generell ────────────────────────────────────────────
   { intent: "GeneralInquiry", regex: /generell|hjelp med|lurer på|spørsmål om/i },
 ];
+
+interface CategorySubtopic {
+  label: string;
+  query: string;
+  url?: string;
+  intent?: string;
+  description?: string;
+}
+
+interface CategoryMenu {
+  broadRegex: RegExp;
+  excludeRegex?: RegExp;
+  title: string;
+  intro: string;
+  subtopics: CategorySubtopic[];
+}
+
+const HJELPESENTER_BASE = "https://www.dyreid.no";
+
+const CATEGORY_MENUS: Record<string, CategoryMenu> = {
+  Eierskifte: {
+    broadRegex: /^(eierskifte|hvordan.*eierskift|hjelp.*eierskift|om eierskift|foreta eierskifte|gjøre eierskift|overføre eierskap)[\?\.\!]?$/i,
+    title: "Eierskifte",
+    intro: "Jeg kan hjelpe deg med eierskifte. Velg det som passer din situasjon:",
+    subtopics: [
+      { label: "Eierskifte Min side", query: "Eierskifte via Min side", intent: "OwnershipTransferWeb", description: "Gjennomfør eierskifte selv via Min side (krever innlogging)" },
+      { label: "Eierskifte APP", query: "Eierskifte i DyreID-appen", intent: "OwnershipTransferApp", url: `${HJELPESENTER_BASE}/hjelp-eierskifte/39-eierskifte-app` },
+      { label: "Hva koster eierskifte?", query: "Hva koster eierskifte?", intent: "OwnershipTransferCost", url: `${HJELPESENTER_BASE}/hjelp-eierskifte/40-hva-koster-eierskifte` },
+      { label: "Eierskifte når eier er død", query: "Eierskifte når eier er død", intent: "OwnershipTransferDead", url: `${HJELPESENTER_BASE}/hjelp-eierskifte/42-eierskifte-naar-eier-er-dod` },
+      { label: "Eierskifte av NKK-registrert hund", query: "Eierskifte av NKK-registrert hund", intent: "NKKOwnership", url: `${HJELPESENTER_BASE}/hjelp-eierskifte/41-eierskifte-av-nkk-registrert-hund` },
+    ],
+  },
+  "ID-søk": {
+    broadRegex: /^(id.?søk|id.?merk|om id.?merking|hjelp.*id)[\?\.\!]?$/i,
+    title: "ID-søk og ID-merking",
+    intro: "Her er temaene under ID-søk og ID-merking:",
+    subtopics: [
+      { label: "Hvorfor bør jeg ID-merke?", query: "Hvorfor bør jeg ID-merke kjæledyret mitt?", intent: "WhyIDMark", url: `${HJELPESENTER_BASE}/hjelp-id-sok/1-hvorfor-bor-jeg-id-merke` },
+      { label: "Kontrollere kontaktdata", query: "Hvordan kontrollere at mine kontaktdata er riktig?", intent: "CheckContactData", url: `${HJELPESENTER_BASE}/hjelp-id-sok/2-kontrollere-kontaktdata` },
+      { label: "Kjæledyret er ikke søkbart", query: "Kjæledyret mitt er ikke søkbart", intent: "InactiveRegistration", url: `${HJELPESENTER_BASE}/hjelp-id-sok/3-kjaledyret-er-ikke-sokbart` },
+    ],
+  },
+  "DyreID-appen": {
+    broadRegex: /^(dyreid.?appen|om appen|hjelp.*app|dyreID app)[\?\.\!]?$/i,
+    title: "DyreID-appen",
+    intro: "Her er temaene om DyreID-appen:",
+    subtopics: [
+      { label: "Tilgang til DyreID-appen", query: "Hvordan får jeg tilgang til DyreID-appen?", intent: "AppAccess", url: `${HJELPESENTER_BASE}/hjelp-dyreid-appen/4-tilgang-til-appen` },
+      { label: "Innlogging app", query: "Hjelp med innlogging i DyreID-appen", intent: "AppLoginIssue", url: `${HJELPESENTER_BASE}/hjelp-dyreid-appen/5-innlogging-app` },
+      { label: "Hvorfor app?", query: "Hva er fordelene med DyreID-appen?", intent: "AppBenefits", url: `${HJELPESENTER_BASE}/hjelp-dyreid-appen/6-hvorfor-app` },
+      { label: "Hvem passer appen for?", query: "Hvem passer DyreID-appen for?", intent: "AppTargetAudience", url: `${HJELPESENTER_BASE}/hjelp-dyreid-appen/7-hvem-passer-appen-for` },
+      { label: "Basis vs DyreID+", query: "Hva er forskjellen på DyreID basis og DyreID+ abonnement?", intent: "SubscriptionComparison", url: `${HJELPESENTER_BASE}/hjelp-dyreid-appen/8-basis-vs-dyreID-pluss` },
+      { label: "Koster appen noe?", query: "Koster DyreID-appen noe?", intent: "AppCost", url: `${HJELPESENTER_BASE}/hjelp-dyreid-appen/9-koster-appen-noe` },
+      { label: "Min side (i appen)", query: "Min side-funksjonalitet i DyreID-appen", intent: "AppMinSide", url: `${HJELPESENTER_BASE}/hjelp-dyreid-appen/10-min-side-i-appen` },
+    ],
+  },
+  "Min side": {
+    broadRegex: /^(min side|om min side|hjelp.*min side|min.?side)[\?\.\!]?$/i,
+    title: "Min side",
+    intro: "Her er temaene om Min side:",
+    subtopics: [
+      { label: "Logg inn på Min side", query: "Hvordan logger jeg inn på Min side?", intent: "LoginIssue", url: `${HJELPESENTER_BASE}/hjelp-min-side/11-logg-inn` },
+      { label: "Fått SMS/e-post fra DyreID", query: "Hvorfor har jeg fått SMS eller e-post fra DyreID?", intent: "SMSEmailNotification", url: `${HJELPESENTER_BASE}/hjelp-min-side/12-sms-epost` },
+      { label: "Har jeg en Min side?", query: "Har jeg en Min side?", intent: "ProfileVerification", url: `${HJELPESENTER_BASE}/hjelp-min-side/13-har-jeg-min-side` },
+      { label: "Får ikke logget inn", query: "Hvorfor får jeg ikke logget meg inn på Min side?", intent: "LoginProblem", url: `${HJELPESENTER_BASE}/hjelp-min-side/14-far-ikke-logget-inn` },
+      { label: "Feilmelding e-postadresse", query: "Feilmelding ved e-postadresse på Min side", intent: "EmailError", url: `${HJELPESENTER_BASE}/hjelp-min-side/15-feilmelding-epost` },
+      { label: "Feilmelding telefonnummer", query: "Feilmelding ved telefonnummer på Min side", intent: "PhoneError", url: `${HJELPESENTER_BASE}/hjelp-min-side/16-feilmelding-telefon` },
+      { label: "Feil informasjon på Min side", query: "Det er feil informasjon på Min side", intent: "WrongInfo", url: `${HJELPESENTER_BASE}/hjelp-min-side/18-feil-info` },
+      { label: "Mangler kjæledyr", query: "Det mangler et kjæledyr på Min side", intent: "MissingPetProfile", url: `${HJELPESENTER_BASE}/hjelp-min-side/19-mangler-kjaledyr` },
+      { label: "Kjæledyret er dødt", query: "Kjæledyret mitt er dødt, hva gjør jeg?", intent: "PetDeceased", url: `${HJELPESENTER_BASE}/hjelp-min-side/20-kjaledyret-er-dodt` },
+      { label: "Slett meg / GDPR", query: "Jeg vil slette profilen min (GDPR)", intent: "GDPRDelete", url: `${HJELPESENTER_BASE}/hjelp-min-side/21-slett-meg` },
+    ],
+  },
+  "Smart Tag": {
+    broadRegex: /^(smart.?tag|om smart.?tag|hjelp.*smart.?tag)[\?\.\!]?$/i,
+    title: "Smart Tag",
+    intro: "Her er temaene om Smart Tag:",
+    subtopics: [
+      { label: "Aktivering av Smart Tag", query: "Hvordan aktivere Smart Tag?", intent: "SmartTagActivation", url: `${HJELPESENTER_BASE}/hjelp-smart-tag/25-aktivering-smart-tag` },
+      { label: "Aktiver QR-koden på Smart Tag", query: "Aktivere QR-koden på Smart Tag", intent: "SmartTagQRActivation", url: `${HJELPESENTER_BASE}/hjelp-smart-tag/26-aktiver-qr-smart-tag` },
+      { label: "Kan ikke koble til taggen", query: "Kan ikke koble til eller legge til Smart Tag", intent: "SmartTagConnection", url: `${HJELPESENTER_BASE}/hjelp-smart-tag/27-kan-ikke-koble-smart-tag` },
+      { label: "Taggen forsvunnet fra appen", query: "Smart Tag var lagt til men finner den ikke", intent: "SmartTagMissing", url: `${HJELPESENTER_BASE}/hjelp-smart-tag/28-smart-tag-forsvunnet` },
+      { label: "Posisjon ikke oppdatert", query: "Smart Tag posisjonen har ikke oppdatert seg", intent: "SmartTagPosition", url: `${HJELPESENTER_BASE}/hjelp-smart-tag/29-smart-tag-posisjon` },
+      { label: "Taggen lager lyder", query: "Smart Tag lager lyder av seg selv", intent: "SmartTagSound", url: `${HJELPESENTER_BASE}/hjelp-smart-tag/30-smart-tag-lyd` },
+      { label: "Flere tagger - bare én kobles", query: "Har flere Smart Tags men får bare koblet til én", intent: "SmartTagMultiple", url: `${HJELPESENTER_BASE}/hjelp-smart-tag/31-smart-tag-flere` },
+    ],
+  },
+  "QR-brikke": {
+    broadRegex: /^(qr.?brikke|om qr|hjelp.*qr|qr.?tag)[\?\.\!]?$/i,
+    title: "QR-brikke",
+    intro: "Her er temaene om QR-brikke:",
+    subtopics: [
+      { label: "Passer for hund og katt?", query: "Passer DyreIDs QR-brikke for hund og katt?", intent: "QRCompatibility", url: `${HJELPESENTER_BASE}/hjelp-qr-brikke/32-qr-kompatibilitet` },
+      { label: "Krav om ID-merking?", query: "Må kjæledyret være ID-merket for QR-brikke?", intent: "QRRequiresIDMark", url: `${HJELPESENTER_BASE}/hjelp-qr-brikke/33-qr-krav-id-merking` },
+      { label: "Abonnement eller engangskostnad?", query: "Er QR-brikke abonnement eller engangskostnad?", intent: "QRPricingModel", url: `${HJELPESENTER_BASE}/hjelp-qr-brikke/34-qr-prismodell` },
+      { label: "Hvordan aktivere QR-brikken?", query: "Hvordan aktivere QR-brikken?", intent: "QRTagActivation", url: `${HJELPESENTER_BASE}/hjelp-qr-brikke/35-aktivere-qr` },
+      { label: "Hva skjer når QR skannes?", query: "Hva skjer når QR-koden skannes?", intent: "QRScanResult", url: `${HJELPESENTER_BASE}/hjelp-qr-brikke/37-qr-skanning` },
+      { label: "Fordelen med QR-brikke", query: "Hva er fordelen med DyreIDs QR-brikke?", intent: "QRBenefits", url: `${HJELPESENTER_BASE}/hjelp-qr-brikke/39-qr-fordeler` },
+      { label: "Mistet QR-brikke", query: "Jeg har mistet QR-brikken min", intent: "QRTagLost", url: `${HJELPESENTER_BASE}/hjelp-qr-brikke/40-mistet-qr` },
+    ],
+  },
+  Utenlandsregistrering: {
+    broadRegex: /^(utenlandsregistrering|utenlandsk.*dyr|registrere.*utland|hjelp.*utenlands|importert.*dyr)[\?\.\!]?$/i,
+    title: "Utenlandsregistrering",
+    intro: "Her er temaene om registrering av utenlandske dyr:",
+    subtopics: [
+      { label: "Registrere dyr i Norge", query: "Hvordan få dyret registrert i Norge?", intent: "ForeignRegistration", url: `${HJELPESENTER_BASE}/hjelp-utenlandsregistrering/43-registrering-norge` },
+      { label: "Hva koster registrering?", query: "Hva koster det å registrere et dyr i Norge?", intent: "ForeignRegistrationCost", url: `${HJELPESENTER_BASE}/hjelp-utenlandsregistrering/44-kostnad-registrering` },
+      { label: "Utenlandsk hund med stamtavle", query: "Registrering av utenlandsk hund med stamtavle", intent: "ForeignPedigree", url: `${HJELPESENTER_BASE}/hjelp-utenlandsregistrering/45-utenlandsk-stamtavle` },
+    ],
+  },
+  "Savnet/Funnet": {
+    broadRegex: /^(savnet|funnet|savnet.*funnet|melde.*savnet|melde.*funnet|hjelp.*savnet)[\?\.\!]?$/i,
+    title: "Savnet/Funnet",
+    intro: "Her er temaene om Savnet & Funnet:",
+    subtopics: [
+      { label: "Melde kjæledyr savnet", query: "Hvordan melde mitt kjæledyr savnet?", intent: "ReportLostPet", description: "Meld dyret ditt savnet direkte (krever innlogging)" },
+      { label: "Kjæledyret har kommet til rette", query: "Kjæledyret har kommet til rette", intent: "ReportFoundPet", description: "Marker dyret som funnet (krever innlogging)" },
+      { label: "Hvordan fungerer Savnet & Funnet?", query: "Hvordan fungerer Savnet og Funnet-tjenesten?", intent: "LostFoundInfo", url: `${HJELPESENTER_BASE}/hjelp-savnet-funnet/48-savnet-funnet-info` },
+      { label: "Søkbar på 1-2-3", query: "Hvordan fungerer Søkbar på 1-2-3?", intent: "SearchableInfo", url: `${HJELPESENTER_BASE}/hjelp-savnet-funnet/49-sokbar-123` },
+      { label: "Kan Søkbar misbrukes?", query: "Kan Søkbar på 1-2-3 misbrukes?", intent: "SearchableMisuse", url: `${HJELPESENTER_BASE}/hjelp-savnet-funnet/50-sokbar-misbruk` },
+    ],
+  },
+  Familiedeling: {
+    broadRegex: /^(familiedeling|om familiedeling|hjelp.*familiedeling|dele.*tilgang)[\?\.\!]?$/i,
+    title: "Familiedeling",
+    intro: "Her er temaene om Familiedeling:",
+    subtopics: [
+      { label: "Hvorfor familiedeling?", query: "Hvorfor burde jeg ha familiedeling?", intent: "FamilySharingBenefits", url: `${HJELPESENTER_BASE}/hjelp-familiedeling/51-familiedeling-fordeler` },
+      { label: "Dele med andre enn familien?", query: "Kan jeg dele tilgang med andre enn familien?", intent: "FamilySharingNonFamily", url: `${HJELPESENTER_BASE}/hjelp-familiedeling/52-dele-ikke-familie` },
+      { label: "Trenger jeg DyreID+?", query: "Trenger jeg DyreID+ for familiedeling?", intent: "FamilySharingRequirement", url: `${HJELPESENTER_BASE}/hjelp-familiedeling/53-familiedeling-krav` },
+      { label: "Forespørsel ikke akseptert", query: "Familiedeling forespørsel ikke akseptert", intent: "FamilySharingRequest", url: `${HJELPESENTER_BASE}/hjelp-familiedeling/54-familiedeling-foresporsel` },
+      { label: "Hvordan dele tilgang?", query: "Hvordan dele tilgang med familiemedlemmer?", intent: "FamilySharing", url: `${HJELPESENTER_BASE}/hjelp-familiedeling/55-dele-tilgang` },
+      { label: "Rettigheter ved deling", query: "Kan de jeg deler med gjøre endringer?", intent: "FamilySharingPermissions", url: `${HJELPESENTER_BASE}/hjelp-familiedeling/56-familiedeling-rettigheter` },
+    ],
+  },
+};
+
+function getHelpCenterUrl(intent: string): string | null {
+  for (const [, menu] of Object.entries(CATEGORY_MENUS)) {
+    for (const sub of menu.subtopics) {
+      if (sub.intent === intent && sub.url) {
+        return sub.url;
+      }
+    }
+  }
+  return null;
+}
+
+function detectCategoryMenu(message: string): CategoryMenu | null {
+  const cleaned = message.trim().replace(/[\?\.\!]+$/, "").trim();
+  for (const [, menu] of Object.entries(CATEGORY_MENUS)) {
+    if (menu.broadRegex.test(message) || menu.broadRegex.test(cleaned)) {
+      return menu;
+    }
+  }
+  return null;
+}
 
 function quickIntentMatch(message: string): string | null {
   for (const p of INTENT_PATTERNS) {
@@ -1378,6 +1536,54 @@ export async function* streamChatResponse(
 
   const chipInMessage = extractChipNumber(userMessage);
 
+  const categoryMenu = detectCategoryMenu(userMessage);
+  if (categoryMenu) {
+    const subtopicLines = categoryMenu.subtopics.map((s, i) => {
+      const desc = s.description || (s.url ? "Les mer på hjelpesenteret" : "");
+      return `${i + 1}. **${s.label}**${desc ? ` - ${desc}` : ""}`;
+    }).join("\n");
+    const responseText = `${categoryMenu.intro}\n\n${subtopicLines}`;
+
+    const suggestions = categoryMenu.subtopics.map(s => ({
+      label: s.label,
+      action: "SUBTOPIC" as string,
+      data: { query: s.query, url: s.url, intent: s.intent },
+    }));
+
+    const metadata: any = {
+      model: "category-menu",
+      matchedIntent: `CategoryMenu_${categoryMenu.title}`,
+      suggestions,
+    };
+
+    const msg = await storage.createMessage({
+      conversationId,
+      role: "assistant",
+      content: responseText,
+      metadata,
+    });
+
+    const interaction = await storage.logChatbotInteraction({
+      conversationId,
+      messageId: msg.id,
+      userQuestion: userMessage,
+      botResponse: responseText,
+      responseMethod: "category-menu",
+      matchedIntent: `CategoryMenu_${categoryMenu.title}`,
+      actionsExecuted: null,
+      authenticated: isAuthenticated,
+      responseTimeMs: Date.now() - startTime,
+    });
+
+    await db
+      .update(messages)
+      .set({ metadata: { ...metadata, interactionId: interaction.id } })
+      .where(eq(messages.id, msg.id));
+
+    yield responseText;
+    return;
+  }
+
   const { intent, playbook, method } = await matchUserIntent(
     userMessage, conversationId, isAuthenticated, ownerContext, storedUserContext
   );
@@ -1511,8 +1717,9 @@ export async function* streamChatResponse(
       if (playbookResponse.requiresLogin) {
         metadata.requiresLogin = true;
       }
-      if (playbookResponse.helpCenterLink) {
-        metadata.helpCenterLink = playbookResponse.helpCenterLink;
+      const pbHelpLink = playbookResponse.helpCenterLink || (intent ? getHelpCenterUrl(intent) : null);
+      if (pbHelpLink) {
+        metadata.helpCenterLink = pbHelpLink;
       }
       if (playbookResponse.suggestions) {
         metadata.suggestions = playbookResponse.suggestions;
@@ -1604,14 +1811,19 @@ export async function* streamChatResponse(
     ? `${cleanResponse}\n\n${actionResults.join("\n")}`
     : cleanResponse;
 
+  const helpCenterLink = intent ? getHelpCenterUrl(intent) : null;
+
+  const aiMetadata: any = {
+    ...(actions.length > 0 ? { actions } : {}),
+    ...(intent ? { matchedIntent: intent, method } : {}),
+    ...(helpCenterLink ? { helpCenterLink } : {}),
+  };
+
   const msg = await storage.createMessage({
     conversationId,
     role: "assistant",
     content: finalContent,
-    metadata: {
-      ...(actions.length > 0 ? { actions } : {}),
-      ...(intent ? { matchedIntent: intent, method } : {}),
-    },
+    metadata: aiMetadata,
   });
 
   const interaction = await storage.logChatbotInteraction({
@@ -1629,6 +1841,6 @@ export async function* streamChatResponse(
 
   await db
     .update(messages)
-    .set({ metadata: { ...(actions.length > 0 ? { actions } : {}), interactionId: interaction.id, ...(intent ? { matchedIntent: intent } : {}) } })
+    .set({ metadata: { ...aiMetadata, interactionId: interaction.id } })
     .where(eq(messages.id, msg.id));
 }
