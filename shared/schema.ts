@@ -327,6 +327,22 @@ export const resolutionQuality = pgTable("resolution_quality", {
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
+export const minsideFieldMappings = pgTable("minside_field_mappings", {
+  id: serial("id").primaryKey(),
+  minsidePage: text("minside_page").notNull(),
+  minsideField: text("minside_field").notNull(),
+  fieldDescription: text("field_description").notNull(),
+  dataType: text("data_type").notNull(),
+  actionType: text("action_type").notNull(),
+  hjelpesenterCategory: text("hjelpesenter_category"),
+  intent: text("intent"),
+  chatbotCapability: text("chatbot_capability"),
+  minsideUrl: text("minside_url"),
+  adminNotes: text("admin_notes"),
+  isActive: boolean("is_active").default(true),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
 export const trainingRuns = pgTable("training_runs", {
   id: serial("id").primaryKey(),
   workflow: text("workflow").notNull(),
@@ -356,6 +372,7 @@ export const insertUncertaintyCaseSchema = createInsertSchema(uncertaintyCases).
 export const insertReviewQueueSchema = createInsertSchema(reviewQueue).omit({ id: true });
 export const insertConversationSchema = createInsertSchema(conversations).omit({ id: true, createdAt: true });
 export const insertMessageSchema = createInsertSchema(messages).omit({ id: true, createdAt: true });
+export const insertMinsideFieldMappingSchema = createInsertSchema(minsideFieldMappings).omit({ id: true });
 export const insertTrainingRunSchema = createInsertSchema(trainingRuns).omit({ id: true });
 
 export type RawTicket = typeof rawTickets.$inferSelect;
@@ -390,4 +407,6 @@ export type ResolutionQualityRecord = typeof resolutionQuality.$inferSelect;
 export type InsertResolutionQuality = z.infer<typeof insertResolutionQualitySchema>;
 export type TicketHelpCenterMatch = typeof ticketHelpCenterMatches.$inferSelect;
 export type InsertTicketHelpCenterMatch = z.infer<typeof insertTicketHelpCenterMatchSchema>;
+export type MinsideFieldMapping = typeof minsideFieldMappings.$inferSelect;
+export type InsertMinsideFieldMapping = z.infer<typeof insertMinsideFieldMappingSchema>;
 export type TrainingRun = typeof trainingRuns.$inferSelect;

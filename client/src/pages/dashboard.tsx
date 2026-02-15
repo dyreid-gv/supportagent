@@ -46,6 +46,8 @@ import {
   BarChart3,
   TrendingDown,
   ExternalLink,
+  Globe,
+  Monitor,
 } from "lucide-react";
 import { useState, useCallback } from "react";
 import {
@@ -191,6 +193,22 @@ interface ResponseTemplate {
   keyPoints: string[] | null;
   isActive: boolean;
   fetchedAt: string | null;
+}
+
+interface MinsideFieldMapping {
+  id: number;
+  minsidePage: string;
+  minsideField: string;
+  fieldDescription: string;
+  dataType: string;
+  actionType: string;
+  hjelpesenterCategory: string | null;
+  intent: string | null;
+  chatbotCapability: string | null;
+  minsideUrl: string | null;
+  adminNotes: string | null;
+  isActive: boolean;
+  updatedAt: string | null;
 }
 
 interface UncertaintyCase {
@@ -639,6 +657,10 @@ export default function Dashboard() {
     queryKey: ["/api/templates"],
   });
 
+  const { data: minsideMappings } = useQuery<MinsideFieldMapping[]>({
+    queryKey: ["/api/minside-mappings"],
+  });
+
   interface FeedbackStats {
     total: number;
     resolved: number;
@@ -864,6 +886,9 @@ export default function Dashboard() {
           </TabsTrigger>
           <TabsTrigger value="quality" data-testid="tab-quality">
             Kvalitet ({qualityStats?.total || 0})
+          </TabsTrigger>
+          <TabsTrigger value="minside-mappings" data-testid="tab-minside-mappings">
+            Min Side-kobling ({minsideMappings?.length || 0})
           </TabsTrigger>
         </TabsList>
 
@@ -1632,6 +1657,10 @@ export default function Dashboard() {
 
         <TabsContent value="quality" className="mt-4">
           <QualityTab stats={qualityStats} />
+        </TabsContent>
+
+        <TabsContent value="minside-mappings" className="mt-4">
+          <MinsideMappingsTab mappings={minsideMappings || []} />
         </TabsContent>
       </Tabs>
     </div>
@@ -3416,6 +3445,392 @@ function PlaybookTab({ playbook }: { playbook: PlaybookEntry[] | undefined }) {
                 </div>
               );
             })}
+          </div>
+        </ScrollArea>
+      )}
+    </div>
+  );
+}
+
+const ACTION_TYPES = [
+  { value: "display", label: "Vis data", color: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200" },
+  { value: "identify", label: "Identifiser", color: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200" },
+  { value: "execute", label: "Utfør handling", color: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200" },
+  { value: "guide", label: "Veilede", color: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200" },
+];
+
+const DATA_TYPES = [
+  { value: "read", label: "Les (read-only)" },
+  { value: "write", label: "Skriv (action)" },
+];
+
+interface IntentDef {
+  intent: string;
+  category: string;
+  subcategory: string;
+  description: string;
+}
+
+function MinsideMappingsTab({ mappings }: { mappings: MinsideFieldMapping[] }) {
+  const { data: intentData } = useQuery<{ intents: IntentDef[]; categories: string[] }>({
+    queryKey: ["/api/intents"],
+  });
+  const categoriesList = intentData?.categories || [];
+  const intentsList = intentData?.intents?.map(i => i.intent) || [];
+
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editData, setEditData] = useState<Partial<MinsideFieldMapping>>({});
+  const [filterPage, setFilterPage] = useState<string>("all");
+  const [filterAction, setFilterAction] = useState<string>("all");
+  const [showAdd, setShowAdd] = useState(false);
+  const [newMapping, setNewMapping] = useState({
+    minsidePage: "", minsideField: "", fieldDescription: "", dataType: "read",
+    actionType: "display", hjelpesenterCategory: "", intent: "", chatbotCapability: "", minsideUrl: "", adminNotes: "",
+  });
+
+  const pages = Array.from(new Set(mappings.map(m => m.minsidePage))).sort();
+
+  const filtered = mappings.filter(m => {
+    if (filterPage !== "all" && m.minsidePage !== filterPage) return false;
+    if (filterAction !== "all" && m.actionType !== filterAction) return false;
+    return true;
+  });
+
+  const grouped = filtered.reduce((acc, m) => {
+    if (!acc[m.minsidePage]) acc[m.minsidePage] = [];
+    acc[m.minsidePage].push(m);
+    return acc;
+  }, {} as Record<string, MinsideFieldMapping[]>);
+
+  const stats = {
+    total: mappings.length,
+    read: mappings.filter(m => m.dataType === "read").length,
+    write: mappings.filter(m => m.dataType === "write").length,
+    execute: mappings.filter(m => m.actionType === "execute").length,
+    guide: mappings.filter(m => m.actionType === "guide").length,
+    pages: pages.length,
+    categories: Array.from(new Set(mappings.map(m => m.hjelpesenterCategory).filter(Boolean))).length,
+  };
+
+  const startEdit = (m: MinsideFieldMapping) => {
+    setEditingId(m.id);
+    setEditData({
+      hjelpesenterCategory: m.hjelpesenterCategory,
+      intent: m.intent,
+      chatbotCapability: m.chatbotCapability,
+      actionType: m.actionType,
+      dataType: m.dataType,
+      adminNotes: m.adminNotes,
+      isActive: m.isActive,
+    });
+  };
+
+  const saveEdit = async () => {
+    if (!editingId) return;
+    await apiRequest("PATCH", `/api/minside-mappings/${editingId}`, editData);
+    queryClient.invalidateQueries({ queryKey: ["/api/minside-mappings"] });
+    setEditingId(null);
+    setEditData({});
+  };
+
+  const deleteMapping = async (id: number) => {
+    await apiRequest("DELETE", `/api/minside-mappings/${id}`);
+    queryClient.invalidateQueries({ queryKey: ["/api/minside-mappings"] });
+  };
+
+  const seedMappings = async () => {
+    await apiRequest("POST", "/api/minside-mappings/seed");
+    queryClient.invalidateQueries({ queryKey: ["/api/minside-mappings"] });
+  };
+
+  const canAdd = newMapping.minsidePage.trim() !== "" && newMapping.minsideField.trim() !== "" && newMapping.fieldDescription.trim() !== "";
+
+  const addMapping = async () => {
+    if (!canAdd) return;
+    const cleaned = {
+      ...newMapping,
+      hjelpesenterCategory: newMapping.hjelpesenterCategory || null,
+      intent: newMapping.intent || null,
+      chatbotCapability: newMapping.chatbotCapability || null,
+      minsideUrl: newMapping.minsideUrl || null,
+      adminNotes: newMapping.adminNotes || null,
+    };
+    await apiRequest("POST", "/api/minside-mappings", cleaned);
+    queryClient.invalidateQueries({ queryKey: ["/api/minside-mappings"] });
+    setShowAdd(false);
+    setNewMapping({
+      minsidePage: "", minsideField: "", fieldDescription: "", dataType: "read",
+      actionType: "display", hjelpesenterCategory: "", intent: "", chatbotCapability: "", minsideUrl: "", adminNotes: "",
+    });
+  };
+
+  const getActionBadge = (actionType: string) => {
+    const at = ACTION_TYPES.find(a => a.value === actionType);
+    return at ? <Badge className={`${at.color} no-default-hover-elevate no-default-active-elevate`} data-testid={`badge-action-${actionType}`}>{at.label}</Badge> : <Badge>{actionType}</Badge>;
+  };
+
+  return (
+    <div className="space-y-4" data-testid="minside-mappings-tab">
+      <div className="grid gap-3 md:grid-cols-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Totalt felt</CardTitle>
+            <Monitor className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold" data-testid="text-total-fields">{stats.total}</div>
+            <p className="text-xs text-muted-foreground">{stats.pages} sider, {stats.categories} kategorier</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Lesbare felt</CardTitle>
+            <Eye className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold" data-testid="text-read-fields">{stats.read}</div>
+            <p className="text-xs text-muted-foreground">Data som kan vises til bruker</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Handlinger</CardTitle>
+            <Zap className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold" data-testid="text-execute-fields">{stats.execute}</div>
+            <p className="text-xs text-muted-foreground">Chatbot kan utføre direkte</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Veiledninger</CardTitle>
+            <BookOpen className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold" data-testid="text-guide-fields">{stats.guide}</div>
+            <p className="text-xs text-muted-foreground">Chatbot veileder brukeren</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Select value={filterPage} onValueChange={setFilterPage}>
+          <SelectTrigger className="w-48" data-testid="select-filter-page">
+            <SelectValue placeholder="Filtrer etter side" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Alle sider</SelectItem>
+            {pages.map(p => (
+              <SelectItem key={p} value={p}>{p}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Select value={filterAction} onValueChange={setFilterAction}>
+          <SelectTrigger className="w-48" data-testid="select-filter-action">
+            <SelectValue placeholder="Filtrer etter type" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Alle handlingstyper</SelectItem>
+            {ACTION_TYPES.map(at => (
+              <SelectItem key={at.value} value={at.value}>{at.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <div className="ml-auto flex flex-wrap gap-2">
+          {mappings.length === 0 && (
+            <Button onClick={seedMappings} data-testid="button-seed-mappings">
+              <Database className="h-4 w-4 mr-2" />
+              Last inn forslag
+            </Button>
+          )}
+          <Button variant="outline" onClick={() => setShowAdd(!showAdd)} data-testid="button-add-mapping">
+            <Plus className="h-4 w-4 mr-2" />
+            Legg til
+          </Button>
+        </div>
+      </div>
+
+      {showAdd && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Nytt felt</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-3 md:grid-cols-3">
+              <Input placeholder="Min Side-side" value={newMapping.minsidePage} onChange={e => setNewMapping({...newMapping, minsidePage: e.target.value})} data-testid="input-new-page" />
+              <Input placeholder="Feltnavn" value={newMapping.minsideField} onChange={e => setNewMapping({...newMapping, minsideField: e.target.value})} data-testid="input-new-field" />
+              <Input placeholder="Beskrivelse" value={newMapping.fieldDescription} onChange={e => setNewMapping({...newMapping, fieldDescription: e.target.value})} data-testid="input-new-description" />
+              <Select value={newMapping.dataType} onValueChange={v => setNewMapping({...newMapping, dataType: v})}>
+                <SelectTrigger data-testid="select-new-datatype"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {DATA_TYPES.map(dt => <SelectItem key={dt.value} value={dt.value}>{dt.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value={newMapping.actionType} onValueChange={v => setNewMapping({...newMapping, actionType: v})}>
+                <SelectTrigger data-testid="select-new-actiontype"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {ACTION_TYPES.map(at => <SelectItem key={at.value} value={at.value}>{at.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value={newMapping.hjelpesenterCategory || ""} onValueChange={v => setNewMapping({...newMapping, hjelpesenterCategory: v})}>
+                <SelectTrigger data-testid="select-new-category"><SelectValue placeholder="Kategori" /></SelectTrigger>
+                <SelectContent>
+                  {categoriesList.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value={newMapping.intent || ""} onValueChange={v => setNewMapping({...newMapping, intent: v})}>
+                <SelectTrigger data-testid="select-new-intent"><SelectValue placeholder="Intent" /></SelectTrigger>
+                <SelectContent>
+                  {intentsList.map(i => <SelectItem key={i} value={i}>{i}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Input placeholder="Chatbot-kapabilitet" value={newMapping.chatbotCapability} onChange={e => setNewMapping({...newMapping, chatbotCapability: e.target.value})} data-testid="input-new-capability" />
+              <Input placeholder="Min Side URL" value={newMapping.minsideUrl} onChange={e => setNewMapping({...newMapping, minsideUrl: e.target.value})} data-testid="input-new-url" />
+            </div>
+            <div className="mt-3 flex gap-2">
+              <Button onClick={addMapping} disabled={!canAdd} data-testid="button-save-new-mapping">
+                <Save className="h-4 w-4 mr-2" />
+                Lagre
+              </Button>
+              <Button variant="outline" onClick={() => setShowAdd(false)}>Avbryt</Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {mappings.length === 0 ? (
+        <Card>
+          <CardContent className="py-8 text-center">
+            <Globe className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
+            <p className="text-muted-foreground">Ingen Min Side-koblinger ennå</p>
+            <p className="text-sm text-muted-foreground mt-1">Klikk "Last inn forslag" for å starte med foreslåtte koblinger</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <ScrollArea className="h-[600px]">
+          <div className="space-y-4">
+            {Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b)).map(([page, fields]) => (
+              <Card key={page}>
+                <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+                  <CardTitle className="text-sm flex items-center gap-2">
+                    <Globe className="h-4 w-4" />
+                    {page}
+                    <Badge variant="secondary" className="no-default-hover-elevate no-default-active-elevate">{fields.length} felt</Badge>
+                  </CardTitle>
+                  {fields[0]?.minsideUrl && (
+                    <span className="text-xs text-muted-foreground">{fields[0].minsideUrl}</span>
+                  )}
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2">
+                    {fields.map(field => (
+                      <div key={field.id} className={`rounded-md border p-3 ${!field.isActive ? "opacity-50" : ""}`} data-testid={`mapping-row-${field.id}`}>
+                        {editingId === field.id ? (
+                          <div className="space-y-3">
+                            <div className="grid gap-2 md:grid-cols-3">
+                              <div>
+                                <Label className="text-xs">Kategori</Label>
+                                <Select value={editData.hjelpesenterCategory || ""} onValueChange={v => setEditData({...editData, hjelpesenterCategory: v})}>
+                                  <SelectTrigger data-testid="select-edit-category"><SelectValue /></SelectTrigger>
+                                  <SelectContent>
+                                    {categoriesList.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div>
+                                <Label className="text-xs">Intent</Label>
+                                <Select value={editData.intent || ""} onValueChange={v => setEditData({...editData, intent: v})}>
+                                  <SelectTrigger data-testid="select-edit-intent"><SelectValue /></SelectTrigger>
+                                  <SelectContent>
+                                    {intentsList.map(i => <SelectItem key={i} value={i}>{i}</SelectItem>)}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div>
+                                <Label className="text-xs">Handlingstype</Label>
+                                <Select value={editData.actionType || ""} onValueChange={v => setEditData({...editData, actionType: v})}>
+                                  <SelectTrigger data-testid="select-edit-actiontype"><SelectValue /></SelectTrigger>
+                                  <SelectContent>
+                                    {ACTION_TYPES.map(at => <SelectItem key={at.value} value={at.value}>{at.label}</SelectItem>)}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                            <div className="grid gap-2 md:grid-cols-2">
+                              <div>
+                                <Label className="text-xs">Chatbot-kapabilitet</Label>
+                                <Input value={editData.chatbotCapability || ""} onChange={e => setEditData({...editData, chatbotCapability: e.target.value})} data-testid="input-edit-capability" />
+                              </div>
+                              <div>
+                                <Label className="text-xs">Admin-notater</Label>
+                                <Input value={editData.adminNotes || ""} onChange={e => setEditData({...editData, adminNotes: e.target.value})} data-testid="input-edit-notes" />
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Switch checked={editData.isActive !== false} onCheckedChange={v => setEditData({...editData, isActive: v})} data-testid="switch-edit-active" />
+                              <Label className="text-xs">Aktiv</Label>
+                            </div>
+                            <div className="flex gap-2">
+                              <Button size="sm" onClick={saveEdit} data-testid="button-save-edit">
+                                <Save className="h-3 w-3 mr-1" /> Lagre
+                              </Button>
+                              <Button size="sm" variant="outline" onClick={() => { setEditingId(null); setEditData({}); }}>Avbryt</Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex flex-wrap items-center gap-2 mb-1">
+                                <span className="font-mono text-sm font-medium" data-testid={`text-field-name-${field.id}`}>{field.minsideField}</span>
+                                {getActionBadge(field.actionType)}
+                                <Badge variant={field.dataType === "write" ? "default" : "secondary"} className="no-default-hover-elevate no-default-active-elevate">
+                                  {field.dataType === "write" ? "Skriv" : "Les"}
+                                </Badge>
+                                {!field.isActive && <Badge variant="outline" className="no-default-hover-elevate no-default-active-elevate">Inaktiv</Badge>}
+                              </div>
+                              <p className="text-sm text-muted-foreground">{field.fieldDescription}</p>
+                              <div className="flex flex-wrap items-center gap-2 mt-1">
+                                {field.hjelpesenterCategory && (
+                                  <span className="text-xs text-muted-foreground">
+                                    Kategori: <span className="font-medium">{field.hjelpesenterCategory}</span>
+                                  </span>
+                                )}
+                                {field.intent && (
+                                  <span className="text-xs text-muted-foreground">
+                                    Intent: <span className="font-mono font-medium">{field.intent}</span>
+                                  </span>
+                                )}
+                              </div>
+                              {field.chatbotCapability && (
+                                <p className="text-xs mt-1 text-muted-foreground">
+                                  Chatbot: {field.chatbotCapability}
+                                </p>
+                              )}
+                              {field.adminNotes && (
+                                <p className="text-xs mt-1 italic text-muted-foreground">
+                                  Notat: {field.adminNotes}
+                                </p>
+                              )}
+                            </div>
+                            <div className="flex gap-1">
+                              <Button size="icon" variant="ghost" onClick={() => startEdit(field)} data-testid={`button-edit-${field.id}`}>
+                                <Pencil className="h-3 w-3" />
+                              </Button>
+                              <Button size="icon" variant="ghost" onClick={() => deleteMapping(field.id)} data-testid={`button-delete-${field.id}`}>
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
           </div>
         </ScrollArea>
       )}

@@ -1024,6 +1024,131 @@ export async function registerRoutes(
     }
   });
 
+  // ─── INTENTS & CATEGORIES (for admin UI) ─────────────────────────
+  app.get("/api/intents", async (_req, res) => {
+    try {
+      const { INTENT_DEFINITIONS } = await import("../shared/intents");
+      const categories = Array.from(new Set(INTENT_DEFINITIONS.map(d => d.category)));
+      res.json({ intents: INTENT_DEFINITIONS, categories });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ─── MIN SIDE FIELD MAPPINGS ─────────────────────────────────────
+  app.get("/api/minside-mappings", async (_req, res) => {
+    try {
+      const mappings = await storage.getMinsideFieldMappings();
+      res.json(mappings);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/minside-mappings", async (req, res) => {
+    try {
+      const result = await storage.upsertMinsideFieldMapping(req.body);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.patch("/api/minside-mappings/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.updateMinsideFieldMapping(id, req.body);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/minside-mappings/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.deleteMinsideFieldMapping(id);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/minside-mappings/seed", async (_req, res) => {
+    try {
+      const defaultMappings = [
+        // ── MyPetList - Dyreliste ──
+        { minsidePage: "MyPetList", minsideField: "petId", fieldDescription: "Unik ID for hvert dyr", dataType: "read", actionType: "identify", hjelpesenterCategory: "Min side", intent: "ViewMyPets", chatbotCapability: "Identifisere dyr for handlinger", minsideUrl: "/OwnersPets/Owner/MyPetList" },
+        { minsidePage: "MyPetList", minsideField: "name", fieldDescription: "Dyrets navn", dataType: "read", actionType: "display", hjelpesenterCategory: "Min side", intent: "ViewMyPets", chatbotCapability: "Vise dyrets navn i samtale", minsideUrl: "/OwnersPets/Owner/MyPetList" },
+        { minsidePage: "MyPetList", minsideField: "species", fieldDescription: "Dyreart (hund, katt, etc.)", dataType: "read", actionType: "display", hjelpesenterCategory: "Min side", intent: "ViewMyPets", chatbotCapability: "Vise dyreart", minsideUrl: "/OwnersPets/Owner/MyPetList" },
+        { minsidePage: "MyPetList", minsideField: "breed", fieldDescription: "Rase", dataType: "read", actionType: "display", hjelpesenterCategory: "Min side", intent: "ViewMyPets", chatbotCapability: "Vise rase i kontekst", minsideUrl: "/OwnersPets/Owner/MyPetList" },
+        { minsidePage: "MyPetList", minsideField: "chipNumber", fieldDescription: "Chipnummer for ID-merking", dataType: "read", actionType: "display", hjelpesenterCategory: "ID-søk", intent: "CheckContactData", chatbotCapability: "Vise chipnr, koble til betalinger og registreringer", minsideUrl: "/OwnersPets/Owner/MyPetList" },
+        { minsidePage: "MyPetList", minsideField: "dateOfBirth", fieldDescription: "Fødselsdato", dataType: "read", actionType: "display", hjelpesenterCategory: "Min side", intent: "ViewMyPets", chatbotCapability: "Vise alder/fødselsdato", minsideUrl: "/OwnersPets/Owner/MyPetList" },
+        { minsidePage: "MyPetList", minsideField: "gender", fieldDescription: "Kjønn (hann/hunn)", dataType: "read", actionType: "display", hjelpesenterCategory: "Min side", intent: "ViewMyPets", chatbotCapability: "Kontekstuell informasjon", minsideUrl: "/OwnersPets/Owner/MyPetList" },
+        { minsidePage: "MyPetList", minsideField: "registeredDate", fieldDescription: "Registreringsdato i DyreID", dataType: "read", actionType: "display", hjelpesenterCategory: "Min side", intent: "ViewMyPets", chatbotCapability: "Verifisere registreringsstatus", minsideUrl: "/OwnersPets/Owner/MyPetList" },
+        { minsidePage: "MyPetList", minsideField: "clinic", fieldDescription: "Registreringsklinikk", dataType: "read", actionType: "display", hjelpesenterCategory: "Min side", intent: "ViewMyPets", chatbotCapability: "Vise klinikkinfo", minsideUrl: "/OwnersPets/Owner/MyPetList" },
+
+        // ── OwnerChange - Eierskifte ──
+        { minsidePage: "OwnerChange", minsideField: "PetId", fieldDescription: "Velg dyr for eierskifte (dropdown)", dataType: "write", actionType: "execute", hjelpesenterCategory: "Eierskifte", intent: "OwnershipTransferWeb", chatbotCapability: "Starte eierskifte ved å velge dyr", minsideUrl: "/OwnerChange/OwnerSeller/ReportOwnerChange" },
+        { minsidePage: "OwnerChange", minsideField: "OwnerChangeEmail", fieldDescription: "E-post til ny eier", dataType: "write", actionType: "execute", hjelpesenterCategory: "Eierskifte", intent: "OwnershipTransferWeb", chatbotCapability: "Samle inn ny eiers e-post for eierskifte", minsideUrl: "/OwnerChange/OwnerSeller/ReportOwnerChange" },
+        { minsidePage: "OwnerChange", minsideField: "OwnerChangeContactNumber", fieldDescription: "Telefonnummer til ny eier", dataType: "write", actionType: "execute", hjelpesenterCategory: "Eierskifte", intent: "OwnershipTransferWeb", chatbotCapability: "Samle inn ny eiers telefonnr", minsideUrl: "/OwnerChange/OwnerSeller/ReportOwnerChange" },
+        { minsidePage: "OwnerChange", minsideField: "OwnerFirstName", fieldDescription: "Fornavn til ny eier", dataType: "write", actionType: "execute", hjelpesenterCategory: "Eierskifte", intent: "OwnershipTransferWeb", chatbotCapability: "Samle inn ny eiers fornavn", minsideUrl: "/OwnerChange/OwnerSeller/ReportOwnerChange" },
+        { minsidePage: "OwnerChange", minsideField: "OwnerLastName", fieldDescription: "Etternavn til ny eier", dataType: "write", actionType: "execute", hjelpesenterCategory: "Eierskifte", intent: "OwnershipTransferWeb", chatbotCapability: "Samle inn ny eiers etternavn", minsideUrl: "/OwnerChange/OwnerSeller/ReportOwnerChange" },
+        { minsidePage: "OwnerChange", minsideField: "AddressLine1", fieldDescription: "Adresse til ny eier", dataType: "write", actionType: "execute", hjelpesenterCategory: "Eierskifte", intent: "OwnershipTransferWeb", chatbotCapability: "Samle inn ny eiers adresse", minsideUrl: "/OwnerChange/OwnerSeller/ReportOwnerChange" },
+        { minsidePage: "OwnerChange", minsideField: "ZipCode", fieldDescription: "Postnummer til ny eier", dataType: "write", actionType: "execute", hjelpesenterCategory: "Eierskifte", intent: "OwnershipTransferWeb", chatbotCapability: "Samle inn postnummer", minsideUrl: "/OwnerChange/OwnerSeller/ReportOwnerChange" },
+        { minsidePage: "OwnerChange", minsideField: "City", fieldDescription: "By/sted til ny eier", dataType: "write", actionType: "execute", hjelpesenterCategory: "Eierskifte", intent: "OwnershipTransferWeb", chatbotCapability: "Samle inn by/sted", minsideUrl: "/OwnerChange/OwnerSeller/ReportOwnerChange" },
+
+        // ── PaymentHistory - Betalingshistorikk ──
+        { minsidePage: "PaymentHistory", minsideField: "chipNumber", fieldDescription: "Chipnr koblet til betaling", dataType: "read", actionType: "display", hjelpesenterCategory: "Min side", intent: "ViewMyPets", chatbotCapability: "Koble betaling til dyr", minsideUrl: "/Shared/PaymentHistory" },
+        { minsidePage: "PaymentHistory", minsideField: "amount", fieldDescription: "Betalingsbeløp", dataType: "read", actionType: "display", hjelpesenterCategory: "Min side", intent: "ViewMyPets", chatbotCapability: "Vise betalingsbeløp", minsideUrl: "/Shared/PaymentHistory" },
+        { minsidePage: "PaymentHistory", minsideField: "status", fieldDescription: "Betalingsstatus (betalt/ubetalt)", dataType: "read", actionType: "display", hjelpesenterCategory: "Min side", intent: "ViewMyPets", chatbotCapability: "Sjekke betalingsstatus", minsideUrl: "/Shared/PaymentHistory" },
+        { minsidePage: "PaymentHistory", minsideField: "type", fieldDescription: "Type tjeneste (eierskifte, registrering, etc.)", dataType: "read", actionType: "display", hjelpesenterCategory: "Min side", intent: "ViewMyPets", chatbotCapability: "Forklare hva betalingen gjelder", minsideUrl: "/Shared/PaymentHistory" },
+        { minsidePage: "PaymentHistory", minsideField: "paidDate", fieldDescription: "Dato for betaling", dataType: "read", actionType: "display", hjelpesenterCategory: "Min side", intent: "ViewMyPets", chatbotCapability: "Vise betalingsdato", minsideUrl: "/Shared/PaymentHistory" },
+
+        // ── LostFound - Savnet/Funnet ──
+        { minsidePage: "LostFound", minsideField: "markLost", fieldDescription: "Merk dyr som savnet", dataType: "write", actionType: "execute", hjelpesenterCategory: "Savnet/Funnet", intent: "ReportLostPet", chatbotCapability: "Utføre savnetmelding direkte", minsideUrl: "/OwnersPets/Owner/MyPetList" },
+        { minsidePage: "LostFound", minsideField: "markFound", fieldDescription: "Merk dyr som funnet igjen", dataType: "write", actionType: "execute", hjelpesenterCategory: "Savnet/Funnet", intent: "ReportFoundPet", chatbotCapability: "Fjerne savnetstatus", minsideUrl: "/OwnersPets/Owner/MyPetList" },
+
+        // ── QR/Tag - Aktivering ──
+        { minsidePage: "QRActivation", minsideField: "tagId", fieldDescription: "QR-brikke ID for aktivering", dataType: "write", actionType: "execute", hjelpesenterCategory: "QR-brikke", intent: "QRTagActivation", chatbotCapability: "Aktivere QR-brikke på valgt dyr", minsideUrl: "/Tag/Activate" },
+        { minsidePage: "QRActivation", minsideField: "petId", fieldDescription: "Dyr å koble QR-brikke til", dataType: "write", actionType: "execute", hjelpesenterCategory: "QR-brikke", intent: "QRTagActivation", chatbotCapability: "Koble QR-brikke til dyr", minsideUrl: "/Tag/Activate" },
+
+        // ── Owner Info - Eierinfo ──
+        { minsidePage: "OwnerProfile", minsideField: "name", fieldDescription: "Eiers fulle navn", dataType: "read", actionType: "display", hjelpesenterCategory: "Min side", intent: "LoginIssue", chatbotCapability: "Identifisere og hilse på bruker", minsideUrl: "/Account/Profile" },
+        { minsidePage: "OwnerProfile", minsideField: "numberOfPets", fieldDescription: "Antall registrerte dyr", dataType: "read", actionType: "display", hjelpesenterCategory: "Min side", intent: "ViewMyPets", chatbotCapability: "Verifisere antall dyr", minsideUrl: "/Account/Profile" },
+
+        // ── PetProfile - Dyreprofil (detaljer) ──
+        { minsidePage: "PetProfile", minsideField: "status", fieldDescription: "Dyrets status (aktiv/avdød)", dataType: "read", actionType: "display", hjelpesenterCategory: "Min side", intent: "PetDeceased", chatbotCapability: "Sjekke om dyret er registrert som avdød", minsideUrl: "/OwnersPets/Pet/PetDetails" },
+        { minsidePage: "PetProfile", minsideField: "searchable", fieldDescription: "Om dyret er søkbart i ID-søk", dataType: "read", actionType: "display", hjelpesenterCategory: "ID-søk", intent: "InactiveRegistration", chatbotCapability: "Sjekke søkbarhet-status", minsideUrl: "/OwnersPets/Pet/PetDetails" },
+
+        // ── SmartTag ──
+        { minsidePage: "SmartTag", minsideField: "tagConnection", fieldDescription: "Koble Smart Tag via Bluetooth", dataType: "write", actionType: "guide", hjelpesenterCategory: "Smart Tag", intent: "SmartTagActivation", chatbotCapability: "Veilede gjennom Smart Tag-oppsett (krever app)", minsideUrl: null },
+        { minsidePage: "SmartTag", minsideField: "tagPosition", fieldDescription: "Siste kjente posisjon", dataType: "read", actionType: "guide", hjelpesenterCategory: "Smart Tag", intent: "SmartTagPosition", chatbotCapability: "Forklare posisjonering (krever app)", minsideUrl: null },
+
+        // ── FamilySharing - Familiedeling ──
+        { minsidePage: "FamilySharing", minsideField: "inviteEmail", fieldDescription: "E-post for familiedeling-invitasjon", dataType: "write", actionType: "guide", hjelpesenterCategory: "Familiedeling", intent: "FamilySharing", chatbotCapability: "Veilede gjennom deling (krever app/web)", minsideUrl: null },
+
+        // ── PaymentHistory - Resterende felt ──
+        { minsidePage: "PaymentHistory", minsideField: "paidBy", fieldDescription: "Hvem som betalte", dataType: "read", actionType: "display", hjelpesenterCategory: "Min side", intent: "ViewMyPets", chatbotCapability: "Vise betalers navn", minsideUrl: "/Shared/PaymentHistory" },
+        { minsidePage: "PaymentHistory", minsideField: "paymentMethod", fieldDescription: "Betalingsmetode (kort, Vipps, etc.)", dataType: "read", actionType: "display", hjelpesenterCategory: "Min side", intent: "ViewMyPets", chatbotCapability: "Vise betalingsmetode", minsideUrl: "/Shared/PaymentHistory" },
+        { minsidePage: "PaymentHistory", minsideField: "orderNumber", fieldDescription: "Ordrenummer for betaling", dataType: "read", actionType: "display", hjelpesenterCategory: "Min side", intent: "ViewMyPets", chatbotCapability: "Referere til ordrenr ved henvendelser", minsideUrl: "/Shared/PaymentHistory" },
+        { minsidePage: "PaymentHistory", minsideField: "transactionDate", fieldDescription: "Transaksjonsdato", dataType: "read", actionType: "display", hjelpesenterCategory: "Min side", intent: "ViewMyPets", chatbotCapability: "Vise transaksjonsdato", minsideUrl: "/Shared/PaymentHistory" },
+
+        // ── OwnerChange - Resterende felt ──
+        { minsidePage: "OwnerChange", minsideField: "CountryId", fieldDescription: "Land for ny eier", dataType: "write", actionType: "execute", hjelpesenterCategory: "Eierskifte", intent: "OwnershipTransferWeb", chatbotCapability: "Samle inn land", minsideUrl: "/OwnerChange/OwnerSeller/ReportOwnerChange" },
+
+        // ── ForeignRegistration - Utenlandsregistrering ──
+        { minsidePage: "ForeignRegistration", minsideField: "foreignChipNumber", fieldDescription: "Utenlandsk chipnummer for registrering", dataType: "write", actionType: "guide", hjelpesenterCategory: "Utenlandsregistrering", intent: "ForeignRegistration", chatbotCapability: "Veilede gjennom registreringsprosess", minsideUrl: null },
+      ];
+
+      const count = await storage.seedMinsideFieldMappings(defaultMappings);
+      const all = await storage.getMinsideFieldMappings();
+      res.json({ success: true, inserted: count, total: all.length, mappings: all });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // ─── RESPONSE TEMPLATES (AUTOSVAR) ─────────────────────────────
   app.get("/api/templates", async (_req, res) => {
     try {

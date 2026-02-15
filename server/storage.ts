@@ -20,6 +20,7 @@ import {
   chatbotInteractions,
   ticketHelpCenterMatches,
   resolutionQuality,
+  minsideFieldMappings,
   type InsertRawTicket,
   type InsertHelpCenterArticle,
   type InsertScrubbedTicket,
@@ -34,6 +35,7 @@ import {
   type InsertChatbotInteraction,
   type InsertTicketHelpCenterMatch,
   type InsertResolutionQuality,
+  type InsertMinsideFieldMapping,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -207,6 +209,13 @@ export interface IStorage {
   getFlaggedInteractions(): Promise<typeof chatbotInteractions.$inferSelect[]>;
   getFeedbackStats(): Promise<{ total: number; resolved: number; partial: number; notResolved: number; nofeedback: number; byIntent: Record<string, { total: number; resolved: number; notResolved: number; partial: number }> }>;
   getInteractionsByIntent(intent: string): Promise<typeof chatbotInteractions.$inferSelect[]>;
+
+  getMinsideFieldMappings(): Promise<typeof minsideFieldMappings.$inferSelect[]>;
+  getActiveMinsideFieldMappings(): Promise<typeof minsideFieldMappings.$inferSelect[]>;
+  upsertMinsideFieldMapping(mapping: InsertMinsideFieldMapping): Promise<typeof minsideFieldMappings.$inferSelect>;
+  updateMinsideFieldMapping(id: number, data: Partial<InsertMinsideFieldMapping>): Promise<void>;
+  deleteMinsideFieldMapping(id: number): Promise<void>;
+  seedMinsideFieldMappings(mappings: InsertMinsideFieldMapping[]): Promise<number>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1360,6 +1369,50 @@ export class DatabaseStorage implements IStorage {
       problematic,
       examples: exampleRows,
     };
+  }
+
+  async getMinsideFieldMappings() {
+    return db.select().from(minsideFieldMappings).orderBy(minsideFieldMappings.minsidePage, minsideFieldMappings.minsideField);
+  }
+
+  async getActiveMinsideFieldMappings() {
+    return db.select().from(minsideFieldMappings).where(eq(minsideFieldMappings.isActive, true)).orderBy(minsideFieldMappings.minsidePage, minsideFieldMappings.minsideField);
+  }
+
+  async upsertMinsideFieldMapping(mapping: InsertMinsideFieldMapping) {
+    const [result] = await db
+      .insert(minsideFieldMappings)
+      .values({ ...mapping, updatedAt: new Date() })
+      .returning();
+    return result;
+  }
+
+  async updateMinsideFieldMapping(id: number, data: Partial<InsertMinsideFieldMapping>) {
+    await db
+      .update(minsideFieldMappings)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(minsideFieldMappings.id, id));
+  }
+
+  async deleteMinsideFieldMapping(id: number) {
+    await db.delete(minsideFieldMappings).where(eq(minsideFieldMappings.id, id));
+  }
+
+  async seedMinsideFieldMappings(mappings: InsertMinsideFieldMapping[]) {
+    let inserted = 0;
+    for (const m of mappings) {
+      const existing = await db.select().from(minsideFieldMappings)
+        .where(and(
+          eq(minsideFieldMappings.minsidePage, m.minsidePage),
+          eq(minsideFieldMappings.minsideField, m.minsideField),
+        ))
+        .limit(1);
+      if (existing.length === 0) {
+        await db.insert(minsideFieldMappings).values({ ...m, updatedAt: new Date() });
+        inserted++;
+      }
+    }
+    return inserted;
   }
 }
 
