@@ -3,7 +3,7 @@
 ## Overview
 AI-powered support automation system for DyreID (Norway's national pet ID registry). Two integrated parts:
 
-1. **Training Agent (DEL 1)**: 9-workflow pipeline that ingests ~40,000 historical support tickets from Pureservice API, GDPR-scrubs them, maps to 11 help center categories, analyzes uncategorized tickets, classifies intents (46 intents across 11 categories from shared/intents.ts), extracts resolution patterns, detects uncertainty, builds a Support Playbook, and provides manual review UI
+1. **Training Agent (DEL 1)**: 9-workflow pipeline that ingests ~40,000 historical support tickets from Pureservice API, GDPR-scrubs them, maps to 11 help center categories, analyzes uncategorized tickets, classifies intents (45 intents across 11 categories from shared/intents.ts), extracts resolution patterns, detects uncertainty, builds a Support Playbook, and provides manual review UI
 2. **Customer Chatbot (DEL 2)**: Uses the playbook to provide automated support, authenticates via Min Side OTP, retrieves owner/pet context, and executes actions
 
 ## Architecture
@@ -15,7 +15,7 @@ AI-powered support automation system for DyreID (Norway's national pet ID regist
 ```
 shared/
   schema.ts          - Drizzle schema: 14 tables (raw_tickets, scrubbed_tickets, hjelpesenter_categories, category_mappings, intent_classifications, resolution_patterns, playbook_entries, uncategorized_themes, uncertainty_cases, review_queue, conversations/messages, training_runs, service_prices, response_templates)
-  intents.ts         - 46 intent definitions across 11 hjelpesenter categories with keywords, descriptions, slugs. Single source of truth for training-agent.ts and chatbot.ts
+  intents.ts         - 45 intent definitions across 11 hjelpesenter categories with keywords, descriptions, slugs. Single source of truth for training-agent.ts and chatbot.ts
 server/
   routes.ts          - API routes: 9 SSE training endpoints, review queue, chat, MinSide actions
   storage.ts         - IStorage interface + DatabaseStorage with full CRUD for all 14 tables
@@ -40,7 +40,7 @@ client/src/
 2. **GDPR Scrubbing** - Remove PII (phones, emails, chips, names, addresses, postcodes, IPs, payment refs)
 3. **Hjelpesenter Category Mapping** - Map to 9 DyreID categories via Claude AI (categories loaded from CSV)
 4. **Uncategorized Ticket Analysis** - Cluster analysis of "Ukategorisert" tickets for theme identification
-5. **Intent Classification** - Classify customer intent using 46 intents across 11 categories via OpenAI
+5. **Intent Classification** - Classify customer intent using 45 intents across 11 categories via OpenAI
 6. **Resolution Extraction** - Extract step-by-step resolution patterns from ticket dialogues
 7. **Uncertainty Detector** - Identify low-confidence classifications and flag for review
 8. **Playbook Builder** - Aggregate all data into final Support Playbook
@@ -50,11 +50,11 @@ client/src/
 - **9-Step Pipeline**: SSE-streamed workflows with real-time progress monitoring
 - **GDPR Compliance**: Regex-based PII masking before AI analysis
 - **CSV-Loaded Categories**: 11 hjelpesenter categories with 36 subcategories loaded from CSV file
-- **46 Centralized Intents**: Defined in shared/intents.ts with keywords, descriptions, slugs - covers all 11 hjelpesenter categories
+- **45 Centralized Intents**: Defined in shared/intents.ts with keywords, descriptions, slugs - covers all 11 hjelpesenter categories
 - **Batch Processing**: Intent classification sends 5 tickets per OpenAI call (5x faster)
 - **Review Queue**: Manual review UI for uncertain classifications and new intents
 - **OTP Auth**: Two-step OTP login via Min Side (minside.dyreid.no) with sandbox fallback for demo phones
-- **Quick Intent Matching**: 46 regex patterns for instant responses (<1s) before falling back to OpenAI
+- **Quick Intent Matching**: 45 regex patterns for instant responses (<1s) before falling back to OpenAI
 - **Sandbox Users**: 5 demo profiles (91000001-91000005) with varied scenarios
 - **Chatbot Actions**: Mark lost/found, activate QR, initiate transfers, send payment links
 - **Streaming Responses**: SSE-based real-time AI responses

@@ -100,6 +100,12 @@ const INTENT_PATTERNS: IntentQuickMatch[] = [
 
   // ID-søk
   { intent: "IDSearch", regex: /id.?søk|søke.*chipnummer|finne eier|hvem eier/i },
+
+  // Produkter - erstatning
+  { intent: "ProductReplace", regex: /erstatte.*brikke|ødelagt.*tag|bytte.*produkt|bestille.*ny/i },
+
+  // Generell
+  { intent: "GeneralInquiry", regex: /generell|hjelp med|lurer på|spørsmål om/i },
 ];
 
 function quickIntentMatch(message: string): string | null {
