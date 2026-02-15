@@ -38,7 +38,9 @@ A light/dark mode toggle is available for user preference.
 *   **Manual Review Handler**: Provides a UI for human review of uncertain cases and new intents.
 
 **Chatbot Features:**
-*   **OTP Authentication**: Secure login via Min Side with sandbox support.
+*   **OTP Authentication**: Secure login via Min Side with sandbox support. Login dialog with phone/OTP steps and inline login prompts for Min Side-related questions.
+*   **Session Lifecycle**: When a user closes the chat ("Avslutt") or deletes a conversation, the Min Side session is automatically cleared (server-side logout via `POST /api/chat/conversations/:id/logout`), and the chatbot session state is reset.
+*   **Modern Chat UI**: Rounded message bubbles, species-specific pet icons (Dog/Cat/PawPrint), intent-specific action icons, quick action grid on welcome screen, sidebar auth panel with pet cards, and feedback widgets.
 *   **Quick Intent Matching**: 62 regex patterns for instant responses, falling back to OpenAI.
 *   **Contextual Understanding**: Utilizes user and pet context from authentication for personalized responses.
 *   **Action Execution**: Can mark lost/found pets, activate QR codes, initiate transfers, and send payment links.

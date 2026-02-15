@@ -5,10 +5,10 @@ import { count, sql } from "drizzle-orm";
 import axios from "axios";
 import { db } from "./db";
 import { storage } from "./storage";
-import { streamChatResponse, getLastInteractionId } from "./chatbot";
+import { streamChatResponse, getLastInteractionId, clearSession as clearChatSession } from "./chatbot";
 import { scrapeHjelpesenter } from "./hjelpesenter-scraper";
 import { getMinSideContext, lookupOwnerByPhone, getAllSandboxPhones, performAction } from "./minside-sandbox";
-import { authenticateWithOTP, fetchPetList, fetchPaymentHistory, storeSession, getStoredSession, type MinSidePet } from "./minside-client";
+import { authenticateWithOTP, fetchPetList, fetchPaymentHistory, storeSession, getStoredSession, clearSession as clearMinsideSession, type MinSidePet } from "./minside-client";
 import {
   runIngestion,
   runGdprScrubbing,
@@ -478,8 +478,28 @@ export async function registerRoutes(
 
   app.delete("/api/chat/conversations/:id", async (req, res) => {
     try {
+      const conv = await storage.getConversation(parseInt(req.params.id));
+      if (conv?.ownerId) {
+        clearMinsideSession(conv.ownerId);
+        clearChatSession(parseInt(req.params.id));
+      }
       await storage.deleteConversation(parseInt(req.params.id));
       res.status(204).send();
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/chat/conversations/:id/logout", async (req, res) => {
+    try {
+      const conversationId = parseInt(req.params.id);
+      const conv = await storage.getConversation(conversationId);
+      if (conv?.ownerId) {
+        clearMinsideSession(conv.ownerId);
+        clearChatSession(conversationId);
+        await storage.updateConversationAuth(conversationId, null);
+      }
+      res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

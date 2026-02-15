@@ -29,7 +29,7 @@ function getOrCreateSession(conversationId: number): SessionState {
   return sessionStates.get(conversationId)!;
 }
 
-function clearSession(conversationId: number) {
+export function clearSession(conversationId: number) {
   sessionStates.delete(conversationId);
 }
 
