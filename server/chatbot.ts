@@ -1648,6 +1648,10 @@ function parseActions(text: string): { action: string; params: Record<string, st
   return actions;
 }
 
+// RUNTIME GPT POLICY — INTENT INTERPRETATION (allowed for both transactional & informational intents)
+// GPT may: classify user message against allowlisted intents, return intent + confidence, handle fuzzy/typo input
+// GPT must NOT: explain procedures, suggest actions, infer pricing, describe ownership transfer steps
+// After classification, runtime routes to transactional flow (collectData → executeEndpoint) or informational flow (paraphrase infoText)
 async function gptIntentInterpretation(
   userMessage: string
 ): Promise<{ intent: string | null; confidence: number }> {
@@ -1712,6 +1716,10 @@ const PARAPHRASE_BLOCKLIST = [
   /pris.*kr|kr.*pris|\d+\s*kr|\d+\s*nok/i,
 ];
 
+// RUNTIME GPT POLICY — PARAPHRASING (allowed ONLY for informational intents)
+// GPT may: rephrase existing Playbook infoText, adapt tone to user's question
+// GPT must NOT: generate new procedures, infer pricing not in Playbook, suggest operational steps
+// NEVER called for transactional intents (API_CALL) — those use collectRequiredData → executeEndpoint without GPT
 async function paraphrasePlaybookResponse(
   originalText: string,
   userMessage: string
@@ -1837,6 +1845,11 @@ async function matchUserIntent(
   return { intent: null, playbook: null, method: "none" };
 }
 
+// RUNTIME FLOW ROUTER — Separates transactional vs informational intent handling
+// TRANSACTIONAL (API_CALL): OTP required, modifies register, may trigger payment
+//   → GPT is NOT involved. Collect requiredData → execute actionEndpoint.
+// INFORMATIONAL (no API_CALL): Help Center content, no register modification
+//   → GPT MAY paraphrase existing Playbook infoText. Must NOT generate new content.
 async function handlePlaybookResponse(
   playbook: PlaybookEntry,
   session: SessionState,
@@ -1852,6 +1865,8 @@ async function handlePlaybookResponse(
 
   const actionType = playbook.actionType;
 
+  // TRANSACTIONAL FLOW — No GPT involvement beyond intent classification
+  // Collect required data fields → execute action endpoint → return result
   if (actionType === "API_CALL" && isAuthenticated && ownerId) {
     const guideResult = guideDataCollection(playbook, session, ownerContext, storedUserContext, isAuthenticated);
     if (guideResult) return guideResult;
@@ -1891,6 +1906,8 @@ async function handlePlaybookResponse(
     };
   }
 
+  // INFORMATIONAL FLOW — GPT may paraphrase existing Playbook infoText, adapt tone
+  // GPT must NOT: generate new procedures, infer pricing not in Playbook, suggest operational steps
   if (playbook.combinedResponse || playbook.resolutionSteps) {
     const originalInfoText = playbook.combinedResponse || playbook.resolutionSteps || "";
     const paraphrased = await paraphrasePlaybookResponse(originalInfoText, userMessage);

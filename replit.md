@@ -21,7 +21,14 @@ The system is built on a modern web stack comprising Express, Vite, React, Postg
 **Architecture Decisions (Feb 2026):**
 *   **Closed-domain action agent**: The chatbot is NOT an open-domain reasoning chatbot. It is a stateful action agent that performs authenticated operations via OTP login to Min Side.
 *   **No runtime OpenAI fallback**: GPT is NEVER used to generate procedures, pricing, or resolution logic at runtime. The old OpenAI streaming fallback has been replaced with a BLOCK response that escalates to human support.
-*   **Runtime GPT usage restricted to**: (1) Intent interpretation — classifying user messages to allowlisted intents with confidence scoring, (2) Optional paraphrasing of existing playbook text (with guardrails).
+*   **Runtime GPT usage — what is allowed vs blocked**:
+    *   OpenAI must NOT be used for runtime resolution generation.
+    *   It MAY be used for: (1) Intent interpretation — classifying user messages to allowlisted intents with confidence scoring, (2) Fuzzy semantic understanding — tolerating typos and varied phrasing, (3) Paraphrasing of existing Playbook informational content (with guardrails).
+    *   It must NOT: explain procedures, suggest actions, infer pricing, describe ownership transfer steps.
+*   **Transactional vs Informational intent separation**:
+    *   **Transactional intents** (e.g. OwnershipTransferWeb, LostPetReport, QRTagActivation, CancelSubscription, ForeignChipRegistration): Require OTP authentication, modify register data, may trigger payment. GPT may ONLY interpret intent + return match with confidence. GPT must NOT explain procedure, suggest next steps, or describe how to perform the operation. Runtime must: collect requiredData → execute actionEndpoint — without GPT involvement.
+    *   **Informational intents** (e.g. OwnershipTransferPrice, DyreIDPlusInfo, QRSubscriptionInfo, FamilySharingExplanation): Do not modify register data, based on Help Center content. GPT MAY paraphrase existing Playbook infoText and adapt tone to user message. GPT must NOT generate new procedures, infer pricing not present in Playbook, or suggest operational steps.
+    *   **Runtime rule**: `if (playbook.actionable) → transactional flow (collectRequiredData → executeEndpoint)` else `→ informational flow (paraphrase infoText)`.
 *   **Training agent extracts structured data**: Step 6 (Resolution Extraction) now extracts actionable/informational classification, required data fields, action endpoints, and guidance steps — NOT natural-language agent replies.
 *   **Response hierarchy**: 1. Regex match → 2. Playbook keyword → 3. GPT intent interpretation (confidence >= 0.7) → 4. Category menu → 5. BLOCK/escalation.
 *   **Paraphrase guardrails**: GPT paraphrasing rejects output containing veterinær, chip insertion, new pricing, or contact support if not in original text. Rejects if output > 2.5x original length.
