@@ -1,0 +1,303 @@
+DYREID SUPPORT AI — TRAINING + RUNTIME ARCHITECTURE UPDATE
+
+We are preparing to import historical DyreID support tickets from the Pureservice API into our 9-step training pipeline.
+
+DyreID Support AI is not an informational chatbot.
+
+It is a stateful action agent that performs authenticated operations via OTP login to Min Side such as:
+
+Ownership transfer
+
+Lost pet reporting
+
+QR tag activation
+
+Smart Tag linking
+
+Subscription cancellation
+
+Foreign chip registration
+
+Contact information updates
+
+The runtime agent already supports OTP login and can perform system actions.
+
+Therefore:
+
+Support tickets must not be trained into conversational answers.
+
+They must be converted into structured operational logic.
+
+🟦 PART 1 — PLAYBOOK STRUCTURE CHANGE (TRAINING AGENT)
+
+Currently Step 6 (Resolution Extraction) stores:
+
+agent reply phrasing
+
+natural language instructions
+
+Example (incorrect):
+
+"Agent asked the customer to log in and register the new owner."
+
+This must be replaced with structured operational entries.
+
+NEW PLAYBOOK ENTRY SCHEMA (REQUIRED)
+
+Update training Step 6 so that Playbook entries are stored as:
+
+interface PlaybookEntry {
+  intent: string;
+  actionable: boolean;
+  requiredData: string[];
+  actionEndpoint?: string;
+  guidanceSteps?: string[];
+  infoText?: string;
+}
+OPENAI TRAINING TASK
+
+When analyzing a resolved ticket, OpenAI must now extract:
+
+Customer operational goal
+
+Whether system action was required
+
+What data was required
+
+What Min Side endpoint was used
+
+IF ACTION REQUIRED
+
+Examples:
+
+Transfer ownership
+Activate QR tag
+Report lost pet
+Cancel subscription
+Register foreign chip
+
+Then:
+
+actionable = true
+
+Extract requiredData:
+
+Examples:
+
+PetId
+NewOwnerMobile
+TagId
+SubscriptionId
+OwnerMobile
+ChipNumber
+
+Map to internal endpoint:
+
+OwnershipTransferWeb
+→ /OwnerChange/OwnerSeller/ReportOwnerChange
+
+LostPetReport
+→ /Pet/LostPet/ReportLostPet
+
+QRTagActivation
+→ /Pet/QR/Activate
+
+CancelSubscription
+→ /Subscription/Cancel
+
+ForeignChipRegistration
+→ /Pet/Foreign/Register
+
+Store:
+
+intent
+actionable
+requiredData
+actionEndpoint
+
+IF INFORMATIONAL ONLY
+
+Examples:
+
+price questions
+
+DyreID+ explanation
+
+subscription information
+
+how-to questions
+
+Then:
+
+actionable = false
+
+Store resolution in:
+
+infoText
+
+Do not store endpoint or requiredData.
+
+IMPORTANT
+
+OpenAI must NOT generate customer-facing answers during training.
+
+It must ONLY extract:
+
+intent
+actionability
+requiredData
+endpoint mapping
+
+🟦 PART 2 — RUNTIME INTENT INTERPRETATION ENGINE
+
+Users will not ask using DyreID terminology.
+
+Example:
+
+"jeg vil at datteren min skal være eier av Rex"
+
+Regex and keyword match will fail.
+
+But this is clearly:
+
+OwnershipTransferWeb
+
+We must allow OpenAI to interpret intent
+without allowing it to generate procedures.
+
+ADD NEW RUNTIME LAYER 3.5
+
+Insert after:
+
+Regex intent match
+Playbook keyword match
+
+Before:
+
+Category suggestion
+BLOCK
+
+GPT INTENT INTERPRETATION TASK
+
+Send ONLY:
+
+User message
+Allowlisted Playbook intents
+
+to OpenAI.
+
+OpenAI must return:
+
+{
+ intent: "OwnershipTransferWeb",
+ confidence: 0.87
+}
+RUNTIME GUARDRAIL
+
+If:
+
+confidence < 0.7
+
+Then continue to category suggestion.
+
+If:
+
+confidence >= 0.7
+
+Check:
+
+if (!ALLOWLISTED_INTENTS.includes(intent)) {
+  BLOCK
+}
+IF VALID
+
+Execute Playbook:
+
+If actionable:
+
+→ collect requiredData
+→ execute actionEndpoint via OTP Min Side session
+
+If informational:
+
+→ INFORM using infoText
+
+🟥 RUNTIME OPENAI RESTRICTIONS
+
+OpenAI must NOT be used for:
+
+fallback reasoning
+
+resolution generation
+
+procedural explanation
+
+pricing explanation
+
+subscription explanation
+
+Runtime OpenAI usage is limited to:
+
+intent interpretation
+
+optional paraphrasing of existing guidanceSteps or infoText
+
+PARAPHRASE RULE
+
+OpenAI must receive:
+
+Playbook guidanceSteps or infoText
+User message
+
+and return:
+
+Reworded version only
+
+It must NOT:
+
+add new steps
+
+suggest new procedures
+
+infer new system operations
+
+ADD GUARDRAIL
+
+If paraphrased output introduces:
+
+veterinarian
+
+chip insertion
+
+new pricing
+
+contacting support
+
+any operation not present in guidanceSteps
+
+Reject response
+Return original text
+
+🚨 DO NOT IMPORT SUPPORT TICKETS
+
+until this structure is implemented.
+
+🎯 GOAL
+
+After this change:
+
+Training:
+
+GPT learns from Pureservice tickets
+Builds structured Playbook
+
+Runtime:
+
+Agent logs in via OTP
+Collects PetId / OwnerMobile
+Executes OwnershipTransfer
+Sends payment link
+Activates QR
+Cancels subscription
+
+Without GPT ever generating procedures.
