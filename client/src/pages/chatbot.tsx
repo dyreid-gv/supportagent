@@ -640,7 +640,7 @@ function AuthPanel({
 
 const QUICK_ACTIONS = [
   { label: "Eierskifte", icon: ArrowRightLeft, query: "Hvordan foreta eierskifte?" },
-  { label: "Finn dyr (ID-søk)", icon: Search, query: "Jeg vil søke opp et dyr med chipnummer" },
+  { label: "Feil/manglende registrering", icon: AlertCircle, query: "Feil eller manglende registrering av dyr" },
   { label: "Aktivere QR Tag", icon: QrCode, query: "Aktivere QR Tag" },
   { label: "Melde savnet", icon: MapPin, query: "Melde dyr savnet" },
   { label: "Mine dyr", icon: PawPrint, query: "Vis mine dyr" },
