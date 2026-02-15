@@ -54,6 +54,7 @@ import {
   Globe,
   ChevronRight,
   Clock,
+  XCircle,
 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -419,6 +420,23 @@ function MessageBubble({
                 </Button>
               );
             })}
+            {suggestions.filter(s => s.action === "CONFIRM_OWNERSHIP" || s.action === "CANCEL_LOOKUP" || s.action === "SEND_OWNERSHIP_SMS" || s.action === "CANCEL_SMS").map((s, i) => {
+              const isConfirm = s.action === "CONFIRM_OWNERSHIP" || s.action === "SEND_OWNERSHIP_SMS";
+              const SugIcon = isConfirm ? CheckCircle2 : XCircle;
+              return (
+                <Button
+                  key={`chip-${i}`}
+                  variant={isConfirm ? "default" : "outline"}
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => onSuggestionClick(isConfirm ? "Ja" : "Nei")}
+                  data-testid={`button-chip-${s.action.toLowerCase()}-${message.id}`}
+                >
+                  <SugIcon className="h-3.5 w-3.5" />
+                  {s.label}
+                </Button>
+              );
+            })}
             {suggestions.filter(s => s.action === "OPEN_ARTICLE" && s.data?.url).map((s, i) => (
               <a
                 key={`article-${i}`}
@@ -536,11 +554,11 @@ function AuthPanel({
 
 const QUICK_ACTIONS = [
   { label: "Eierskifte", icon: ArrowRightLeft, query: "Hvordan foreta eierskifte?" },
+  { label: "Finn dyr (ID-søk)", icon: Search, query: "Jeg vil søke opp et dyr med chipnummer" },
   { label: "Aktivere QR Tag", icon: QrCode, query: "Aktivere QR Tag" },
-  { label: "Melde savnet", icon: Search, query: "Melde dyr savnet" },
+  { label: "Melde savnet", icon: MapPin, query: "Melde dyr savnet" },
   { label: "Mine dyr", icon: PawPrint, query: "Vis mine dyr" },
   { label: "Priser", icon: CreditCard, query: "Abonnement og priser" },
-  { label: "Smart Tag", icon: Tag, query: "Aktivere Smart Tag" },
 ];
 
 export default function Chatbot() {

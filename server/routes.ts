@@ -7,7 +7,7 @@ import { db } from "./db";
 import { storage } from "./storage";
 import { streamChatResponse, getLastInteractionId, clearSession as clearChatSession } from "./chatbot";
 import { scrapeHjelpesenter } from "./hjelpesenter-scraper";
-import { getMinSideContext, lookupOwnerByPhone, getAllSandboxPhones, performAction } from "./minside-sandbox";
+import { getMinSideContext, lookupOwnerByPhone, getAllSandboxPhones, performAction, lookupByChipNumber, getSmsLog } from "./minside-sandbox";
 import { authenticateWithOTP, fetchPetList, fetchPaymentHistory, storeSession, getStoredSession, clearSession as clearMinsideSession, type MinSidePet } from "./minside-client";
 import {
   runIngestion,
@@ -500,6 +500,27 @@ export async function registerRoutes(
         await storage.updateConversationAuth(conversationId, null);
       }
       res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/chip-lookup", async (req, res) => {
+    try {
+      const { chipNumber } = req.body;
+      if (!chipNumber || typeof chipNumber !== "string") {
+        return res.status(400).json({ error: "chipNumber is required" });
+      }
+      const result = lookupByChipNumber(chipNumber);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/sms-log", async (_req, res) => {
+    try {
+      res.json(getSmsLog());
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

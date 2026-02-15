@@ -3,7 +3,8 @@ import { INTENTS, INTENT_DEFINITIONS, INTENT_BY_NAME } from "@shared/intents";
 import { eq } from "drizzle-orm";
 import { db } from "./db";
 import { storage } from "./storage";
-import { getMinSideContext, performAction, lookupOwnerByPhone } from "./minside-sandbox";
+import { getMinSideContext, performAction, lookupOwnerByPhone, lookupByChipNumber, sendOwnershipTransferSms } from "./minside-sandbox";
+import type { ChipLookupResult } from "./minside-sandbox";
 import { getStoredSession } from "./minside-client";
 import { messages, type PlaybookEntry, type ServicePrice, type ResponseTemplate } from "@shared/schema";
 
@@ -18,6 +19,8 @@ interface SessionState {
   awaitingInput?: string;
   selectedPetId?: string;
   selectedPetName?: string;
+  chipLookupFlow?: "awaiting_chip" | "awaiting_ownership_confirm" | "awaiting_sms_confirm";
+  chipLookupResult?: ChipLookupResult;
 }
 
 const sessionStates = new Map<number, SessionState>();
@@ -118,6 +121,11 @@ const INTENT_PATTERNS: IntentQuickMatch[] = [
   { intent: "FamilyAccessLost", regex: /ser ikke.*delt|mistet.*tilgang.*deling|familie.*borte/i },
   { intent: "FamilySharingExisting", regex: /familiedeling.*eksisterende|deling.*allerede.*kjæledyr/i },
 
+  // ── Chip-oppslag / Feil eier ────────────────────────────
+  { intent: "ChipLookup", regex: /id.?nummer|chip.?nummer|søke.*opp.*dyr|finne.*dyr.*chip|finn.*dyr|slå.*opp|chip.*søk|id.*søk.*dyr/i },
+  { intent: "WrongOwner", regex: /feil eier|feil.*registrert.*eier|ikke.*min.*eier|registrert.*på.*feil|feil.*person.*registrert/i },
+  { intent: "PetNotInSystem", regex: /finnes ikke.*system|ikke.*registrert|dyr.*finnes ikke|finner ikke.*dyr.*register|ikke i registeret|ikke.*søkbar|mangler.*register/i },
+
   // ── Generell ────────────────────────────────────────────
   { intent: "GeneralInquiry", regex: /generell|hjelp med|lurer på|spørsmål om/i },
 ];
@@ -150,6 +158,201 @@ function extractDataFromMessage(message: string, requiredFields: string[] | null
 function hasAllRequiredData(extractedData: Record<string, any>, requiredFields: string[] | null): boolean {
   if (!requiredFields || requiredFields.length === 0) return true;
   return requiredFields.every(field => extractedData[field]);
+}
+
+function extractChipNumber(message: string): string | null {
+  const chipMatch = message.match(/\b(\d{15})\b/);
+  if (chipMatch) return chipMatch[1];
+  const chipMatch2 = message.match(/\b(\d{9,15})\b/);
+  if (chipMatch2 && chipMatch2[1].length >= 9) return chipMatch2[1];
+  return null;
+}
+
+function isChipLookupTrigger(intent: string | null): boolean {
+  return intent === "ChipLookup" || intent === "WrongOwner" || intent === "PetNotInSystem" || intent === "MissingPetProfile" || intent === "InactiveRegistration";
+}
+
+function handleChipLookupFlow(
+  session: SessionState,
+  userMessage: string,
+  isAuthenticated: boolean,
+  ownerContext: any | null,
+  storedUserContext: any | null
+): ChatbotResponse | null {
+  const lowerMsg = userMessage.toLowerCase().trim();
+
+  if (session.chipLookupFlow === "awaiting_chip") {
+    const chipNumber = extractChipNumber(userMessage);
+    if (!chipNumber) {
+      return {
+        text: "Jeg trenger et gyldig ID-nummer (chipnummer) for å gjøre et oppslag. Chipnummeret er vanligvis 15 siffer. Kan du oppgi det?",
+        model: "chip-lookup-retry",
+      };
+    }
+
+    const result = lookupByChipNumber(chipNumber);
+    if (!result.found) {
+      session.chipLookupFlow = undefined;
+      session.chipLookupResult = undefined;
+      return {
+        text: `Jeg fant ingen registrering på chipnummer ${chipNumber}.\n\nDette kan bety at:\n- Chipen ikke er registrert i DyreID ennå\n- Nummeret er feil\n- Dyret er registrert i et annet land\n\nTa kontakt med en veterinær for å få chipen skannet og registrert. Registrering koster 590 kr og kan gjøres hos enhver veterinærklinikk.`,
+        model: "chip-lookup-not-found",
+        requestFeedback: true,
+      };
+    }
+
+    session.chipLookupResult = result;
+    session.chipLookupFlow = "awaiting_ownership_confirm";
+
+    const animal = result.animal!;
+    const owner = result.owner!;
+
+    let responseText = `Jeg fant følgende informasjon:\n\n`;
+    responseText += `**Dyr:**\n`;
+    responseText += `- Navn: ${animal.name}\n`;
+    responseText += `- Art: ${animal.species}\n`;
+    responseText += `- Rase: ${animal.breed}\n`;
+    responseText += `- Kjønn: ${animal.gender}\n`;
+    responseText += `- Chipnummer: ${animal.chipNumber}\n`;
+    if (animal.dateOfBirth) responseText += `- Fødselsdato: ${animal.dateOfBirth}\n`;
+
+    responseText += `\n**Registrert eier:**\n`;
+    responseText += `- Navn: ${owner.name}\n`;
+    responseText += `- Adresse: ${owner.address}\n`;
+    responseText += `- Postnr/-sted: ${owner.postalCode} ${owner.city}\n`;
+    responseText += `- Telefon: ${owner.phone}\n`;
+
+    responseText += `\nSkal ${animal.name} være registrert på deg?`;
+
+    return {
+      text: responseText,
+      suggestions: [
+        { label: "Ja, det skal være mitt dyr", action: "CONFIRM_OWNERSHIP" },
+        { label: "Nei, bare informasjon", action: "CANCEL_LOOKUP" },
+      ],
+      model: "chip-lookup-result",
+    };
+  }
+
+  if (session.chipLookupFlow === "awaiting_ownership_confirm") {
+    const isYes = /^(ja|yes|stemmer|riktig|det stemmer|mitt dyr|skal.*mitt|bekreft)/i.test(lowerMsg);
+    const isNo = /^(nei|no|avbryt|cancel|bare info|ikke mitt)/i.test(lowerMsg);
+
+    if (isNo || lowerMsg === "nei, bare informasjon") {
+      session.chipLookupFlow = undefined;
+      session.chipLookupResult = undefined;
+      return {
+        text: "Forstått. Er det noe annet jeg kan hjelpe deg med?",
+        model: "chip-lookup-cancelled",
+      };
+    }
+
+    if (isYes || lowerMsg.includes("ja") || lowerMsg.includes("mitt dyr")) {
+      const result = session.chipLookupResult!;
+      const registeredOwner = result.owner!;
+      const petName = result.animal!.name;
+
+      if (!isAuthenticated) {
+        return {
+          text: `For å gå videre med eierskifte av ${petName}, må du logge inn først. Trykk på "Logg inn"-knappen øverst for å identifisere deg.`,
+          requiresLogin: true,
+          suggestions: [{ label: "Logg inn med OTP", action: "REQUEST_LOGIN" }],
+          model: "chip-lookup-needs-login",
+        };
+      }
+
+      session.chipLookupFlow = "awaiting_sms_confirm";
+
+      const customerName = ownerContext
+        ? `${ownerContext.owner.firstName} ${ownerContext.owner.lastName}`
+        : storedUserContext
+          ? `${storedUserContext.FirstName || ""} ${storedUserContext.LastName || ""}`.trim()
+          : "Kunden";
+
+      return {
+        text: `Jeg kan sende en SMS til ${registeredOwner.name} og be om at du blir kontaktet for eierskifte.\n\nSMS-en vil inneholde:\n> "Hei - vi er blitt kontaktet av ${customerName} vedrørende eierskifte av ${petName}. Vennligst ta direkte kontakt på [ditt mobilnummer]. Med vennlig hilsen DyreID"\n\nØnsker du at jeg sender denne SMS-en?`,
+        suggestions: [
+          { label: "Ja, send SMS", action: "SEND_OWNERSHIP_SMS" },
+          { label: "Nei, avbryt", action: "CANCEL_SMS" },
+        ],
+        model: "chip-lookup-sms-confirm",
+      };
+    }
+
+    return {
+      text: "Skal dyret være registrert på deg? Svar ja eller nei.",
+      model: "chip-lookup-clarify",
+    };
+  }
+
+  if (session.chipLookupFlow === "awaiting_sms_confirm") {
+    const isYes = /^(ja|yes|send|bekreft|ok|gjør det)/i.test(lowerMsg);
+    const isNo = /^(nei|no|avbryt|cancel|ikke send|stopp)/i.test(lowerMsg);
+
+    if (isNo || lowerMsg.includes("avbryt")) {
+      session.chipLookupFlow = undefined;
+      session.chipLookupResult = undefined;
+      return {
+        text: "SMS ble ikke sendt. Er det noe annet jeg kan hjelpe deg med?",
+        model: "chip-lookup-sms-cancelled",
+      };
+    }
+
+    if (isYes || lowerMsg.includes("ja") || lowerMsg.includes("send")) {
+      const result = session.chipLookupResult!;
+      const registeredOwner = result.owner!;
+      const petName = result.animal!.name;
+
+      const customerName = ownerContext
+        ? `${ownerContext.owner.firstName} ${ownerContext.owner.lastName}`
+        : storedUserContext
+          ? `${storedUserContext.FirstName || ""} ${storedUserContext.LastName || ""}`.trim()
+          : "Kunden";
+
+      const customerPhone = ownerContext
+        ? ownerContext.owner.phone
+        : storedUserContext
+          ? storedUserContext.Phone || ""
+          : "";
+
+      const smsResult = sendOwnershipTransferSms(
+        registeredOwner.phone,
+        registeredOwner.name,
+        customerName,
+        customerPhone,
+        petName
+      );
+
+      session.chipLookupFlow = undefined;
+      session.chipLookupResult = undefined;
+
+      if (smsResult.success) {
+        return {
+          text: `SMS er sendt til ${registeredOwner.name} (${registeredOwner.phone}).\n\nDe har blitt bedt om å ta kontakt med deg på ${customerPhone} angående eierskifte av ${petName}.\n\nNår dere har blitt enige, kan eierskiftet gjennomføres via Min Side eller DyreID-appen.`,
+          actionExecuted: true,
+          actionType: "SEND_OWNERSHIP_SMS",
+          actionSuccess: true,
+          requestFeedback: true,
+          model: "chip-lookup-sms-sent",
+        };
+      } else {
+        return {
+          text: `Kunne ikke sende SMS: ${smsResult.message}\n\nDu kan alternativt kontakte DyreID kundeservice på telefon 22 99 11 30 for hjelp med eierskiftet.`,
+          actionExecuted: true,
+          actionType: "SEND_OWNERSHIP_SMS",
+          actionSuccess: false,
+          model: "chip-lookup-sms-failed",
+        };
+      }
+    }
+
+    return {
+      text: "Ønsker du at jeg sender SMS-en til registrert eier? Svar ja eller nei.",
+      model: "chip-lookup-sms-clarify",
+    };
+  }
+
+  return null;
 }
 
 interface ChatbotResponse {
@@ -759,9 +962,112 @@ export async function* streamChatResponse(
     }
   }
 
+  if (session.chipLookupFlow) {
+    const chipResponse = handleChipLookupFlow(session, userMessage, isAuthenticated, ownerContext, storedUserContext || null);
+    if (chipResponse) {
+      let responseText = chipResponse.text;
+      if (chipResponse.suggestions && chipResponse.suggestions.length > 0) {
+        const suggestionLabels = chipResponse.suggestions
+          .filter(s => s.action !== "REQUEST_LOGIN")
+          .map(s => s.label);
+        if (suggestionLabels.length > 0) {
+          responseText += "\n\nValg:\n" + suggestionLabels.map((l, i) => `${i + 1}. ${l}`).join("\n");
+        }
+      }
+
+      const metadata: any = {
+        model: chipResponse.model,
+        chipLookup: true,
+      };
+      if (chipResponse.actionExecuted) {
+        metadata.actionExecuted = true;
+        metadata.actionType = chipResponse.actionType;
+        metadata.actionSuccess = chipResponse.actionSuccess;
+      }
+      if (chipResponse.requiresLogin) metadata.requiresLogin = true;
+      if (chipResponse.suggestions) metadata.suggestions = chipResponse.suggestions;
+
+      const msg = await storage.createMessage({
+        conversationId,
+        role: "assistant",
+        content: responseText,
+        metadata,
+      });
+
+      const interaction = await storage.logChatbotInteraction({
+        conversationId,
+        messageId: msg.id,
+        userQuestion: userMessage,
+        botResponse: responseText,
+        responseMethod: chipResponse.model,
+        matchedIntent: "ChipLookup",
+        actionsExecuted: chipResponse.actionExecuted ? [{ action: chipResponse.actionType, success: chipResponse.actionSuccess }] : null,
+        authenticated: isAuthenticated,
+        responseTimeMs: Date.now() - startTime,
+      });
+      lastInteractionId = interaction.id;
+
+      await db
+        .update(messages)
+        .set({ metadata: { ...metadata, interactionId: interaction.id } })
+        .where(eq(messages.id, msg.id));
+
+      yield responseText;
+      return;
+    }
+  }
+
+  const chipInMessage = extractChipNumber(userMessage);
+
   const { intent, playbook, method } = await matchUserIntent(
     userMessage, conversationId, isAuthenticated, ownerContext, storedUserContext
   );
+
+  if (chipInMessage && !session.chipLookupFlow) {
+    session.chipLookupFlow = "awaiting_chip";
+    const chipResponse = handleChipLookupFlow(session, userMessage, isAuthenticated, ownerContext, storedUserContext || null);
+    if (chipResponse) {
+      let responseText = chipResponse.text;
+      if (chipResponse.suggestions && chipResponse.suggestions.length > 0) {
+        const suggestionLabels = chipResponse.suggestions
+          .filter(s => s.action !== "REQUEST_LOGIN")
+          .map(s => s.label);
+        if (suggestionLabels.length > 0) {
+          responseText += "\n\nValg:\n" + suggestionLabels.map((l, i) => `${i + 1}. ${l}`).join("\n");
+        }
+      }
+      const metadata: any = { model: chipResponse.model, chipLookup: true };
+      if (chipResponse.suggestions) metadata.suggestions = chipResponse.suggestions;
+
+      const msg = await storage.createMessage({ conversationId, role: "assistant", content: responseText, metadata });
+      const interaction = await storage.logChatbotInteraction({
+        conversationId, messageId: msg.id, userQuestion: userMessage, botResponse: responseText,
+        responseMethod: chipResponse.model, matchedIntent: "ChipLookup",
+        actionsExecuted: null, authenticated: isAuthenticated, responseTimeMs: Date.now() - startTime,
+      });
+      lastInteractionId = interaction.id;
+      await db.update(messages).set({ metadata: { ...metadata, interactionId: interaction.id } }).where(eq(messages.id, msg.id));
+      yield responseText;
+      return;
+    }
+  }
+
+  if (isChipLookupTrigger(intent) && !session.chipLookupFlow && !chipInMessage) {
+    session.chipLookupFlow = "awaiting_chip";
+    session.intent = intent || undefined;
+    const responseText = "Jeg kan hjelpe deg med å slå opp dyret i registeret. Har du dyrets ID-nummer (chipnummer)? Det er vanligvis 15 siffer og står på registreringsbeviset eller kan leses av en veterinær.";
+    const metadata: any = { model: "chip-lookup-start", chipLookup: true };
+    const msg = await storage.createMessage({ conversationId, role: "assistant", content: responseText, metadata });
+    const interaction = await storage.logChatbotInteraction({
+      conversationId, messageId: msg.id, userQuestion: userMessage, botResponse: responseText,
+      responseMethod: "chip-lookup-start", matchedIntent: intent,
+      actionsExecuted: null, authenticated: isAuthenticated, responseTimeMs: Date.now() - startTime,
+    });
+    lastInteractionId = interaction.id;
+    await db.update(messages).set({ metadata: { ...metadata, interactionId: interaction.id } }).where(eq(messages.id, msg.id));
+    yield responseText;
+    return;
+  }
 
   if (playbook) {
     const playbookResponse = await handlePlaybookResponse(

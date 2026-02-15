@@ -41,6 +41,7 @@ A light/dark mode toggle is available for user preference.
 *   **OTP Authentication**: Secure login via Min Side with sandbox support. Login dialog with phone/OTP steps and inline login prompts for Min Side-related questions.
 *   **Session Lifecycle**: When a user closes the chat ("Avslutt") or deletes a conversation, the Min Side session is automatically cleared (server-side logout via `POST /api/chat/conversations/:id/logout`), and the chatbot session state is reset.
 *   **Modern Chat UI**: Rounded message bubbles, species-specific pet icons (Dog/Cat/PawPrint), intent-specific action icons, quick action grid on welcome screen, sidebar auth panel with pet cards, and feedback widgets.
+*   **Chip Lookup (ID-søk)**: Multi-turn flow for looking up pets by chip number (ID-nummer). Presents structured pet/owner info from dyreid.no registry (sandbox mode). Offers to send SMS to registered owner for ownership transfer contact. SMS template: "Hei - vi er blitt kontaktet av [kundens navn] vedrørende eierskifte av [dyrets navn]. Vennligst ta direkte kontakt på [kundens mob]. Med vennlig hilsen DyreID". Sandbox safety guard: SMS only sent to test number 91341434.
 *   **Quick Intent Matching**: 62 regex patterns for instant responses, falling back to OpenAI.
 *   **Contextual Understanding**: Utilizes user and pet context from authentication for personalized responses.
 *   **Action Execution**: Can mark lost/found pets, activate QR codes, initiate transfers, and send payment links.

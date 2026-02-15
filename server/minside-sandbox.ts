@@ -413,6 +413,172 @@ export function getAllSandboxPhones(): string[] {
     .map(([key]) => key);
 }
 
+export interface ChipLookupResult {
+  found: boolean;
+  animal?: {
+    name: string;
+    species: string;
+    breed: string;
+    gender: string;
+    chipNumber: string;
+    color?: string;
+    dateOfBirth?: string;
+  };
+  owner?: {
+    name: string;
+    address: string;
+    postalCode: string;
+    city: string;
+    phone: string;
+  };
+}
+
+const CHIP_LOOKUP_DATA: Map<string, ChipLookupResult> = new Map([
+  ["978456111111111", {
+    found: true,
+    animal: {
+      name: "Agora",
+      species: "Hund",
+      breed: "Blandingshund",
+      gender: "Hannkjønn",
+      chipNumber: "978456111111111",
+      dateOfBirth: "2019-05-10",
+    },
+    owner: {
+      name: "Gudbrand Vatn",
+      address: "Ørneveien 25",
+      postalCode: "1640",
+      city: "Råde",
+      phone: "91341434",
+    },
+  }],
+  ["578000000001", {
+    found: true,
+    animal: {
+      name: "Bella",
+      species: "Hund",
+      breed: "Labrador Retriever",
+      gender: "Hunnkjønn",
+      chipNumber: "578000000001",
+      dateOfBirth: "2020-03-15",
+    },
+    owner: {
+      name: "Demo Bruker",
+      address: "Eksempelveien 1",
+      postalCode: "0001",
+      city: "Oslo",
+      phone: "91000001",
+    },
+  }],
+  ["578000000003", {
+    found: true,
+    animal: {
+      name: "Luna",
+      species: "Katt",
+      breed: "Norsk Skogkatt",
+      gender: "Hunnkjønn",
+      chipNumber: "578000000003",
+      dateOfBirth: "2021-11-08",
+    },
+    owner: {
+      name: "Test Person",
+      address: "Testgata 5",
+      postalCode: "5003",
+      city: "Bergen",
+      phone: "91000002",
+    },
+  }],
+]);
+
+export function lookupByChipNumber(chipNumber: string): ChipLookupResult {
+  initSandbox();
+  const cleaned = chipNumber.replace(/\s+/g, "").trim();
+  const result = CHIP_LOOKUP_DATA.get(cleaned);
+  if (result) return result;
+
+  const entries = Array.from(SANDBOX_DATA.entries());
+  for (const [, ctx] of entries) {
+    if (typeof ctx === "object" && ctx.animals) {
+      for (const animal of ctx.animals) {
+        if (animal.chipNumber === cleaned) {
+          return {
+            found: true,
+            animal: {
+              name: animal.name,
+              species: animal.species === "dog" ? "Hund" : animal.species === "cat" ? "Katt" : "Annet",
+              breed: animal.breed,
+              gender: animal.gender === "male" ? "Hannkjønn" : "Hunnkjønn",
+              chipNumber: animal.chipNumber,
+              dateOfBirth: animal.dateOfBirth,
+            },
+            owner: {
+              name: `${ctx.owner.firstName} ${ctx.owner.lastName}`,
+              address: ctx.owner.address,
+              postalCode: ctx.owner.postalCode,
+              city: ctx.owner.city,
+              phone: ctx.owner.phone,
+            },
+          };
+        }
+      }
+    }
+  }
+
+  return { found: false };
+}
+
+export interface SmsSendResult {
+  success: boolean;
+  message: string;
+  simulatedSms?: {
+    to: string;
+    body: string;
+  };
+}
+
+const SMS_LOG: { timestamp: string; to: string; body: string }[] = [];
+
+export function sendOwnershipTransferSms(
+  registeredOwnerPhone: string,
+  registeredOwnerName: string,
+  customerName: string,
+  customerPhone: string,
+  petName: string
+): SmsSendResult {
+  const SAFE_TEST_PHONE = "91341434";
+
+  if (registeredOwnerPhone !== SAFE_TEST_PHONE) {
+    return {
+      success: false,
+      message: `SMS kan kun sendes til testnummeret (${SAFE_TEST_PHONE}) i sandbox-modus. Registrert eiers telefon: ${registeredOwnerPhone}`,
+    };
+  }
+
+  const smsBody = `Hei - vi er blitt kontaktet av ${customerName} vedrørende eierskifte av ${petName}. Vennligst ta direkte kontakt på ${customerPhone}. Med vennlig hilsen DyreID`;
+
+  SMS_LOG.push({
+    timestamp: new Date().toISOString(),
+    to: registeredOwnerPhone,
+    body: smsBody,
+  });
+
+  console.log(`[SMS SENDT] Til: ${registeredOwnerPhone}`);
+  console.log(`[SMS INNHOLD] ${smsBody}`);
+
+  return {
+    success: true,
+    message: `SMS sendt til ${registeredOwnerName} (${registeredOwnerPhone})`,
+    simulatedSms: {
+      to: registeredOwnerPhone,
+      body: smsBody,
+    },
+  };
+}
+
+export function getSmsLog(): typeof SMS_LOG {
+  return [...SMS_LOG];
+}
+
 export function performAction(
   ownerId: string,
   action: string,
