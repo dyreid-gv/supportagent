@@ -102,6 +102,7 @@ const INTENT_PATTERNS: IntentQuickMatch[] = [
   { intent: "TagSubscriptionExpiry", regex: /utløper.*abonnement|abonnement.*utløp|tag.*inaktiv/i },
 
   // ── Utenlandsregistrering ───────────────────────────────
+  { intent: "UnregisteredChip578", regex: /uregistrert.*brikke|uregistrert.*chip|578.*ikke.*registrert|ikke.*forhåndsbetalt/i },
   { intent: "ForeignRegistration", regex: /registrere.*norge|utenlands.*registrer|importert.*dyr/i },
   { intent: "ForeignRegistrationCost", regex: /kost.*registrer|pris.*registrer|registrer.*kost|676/i },
   { intent: "ForeignPedigree", regex: /stamtavle.*utenlandsk|utenlandsk.*stamtavle|pedigree/i },
@@ -234,11 +235,12 @@ const CATEGORY_MENUS: Record<string, CategoryMenu> = {
     ],
   },
   Utenlandsregistrering: {
-    broadRegex: /^(utenlandsregistrering|utenlandsk.*dyr|registrere.*utland|hjelp.*utenlands|importert.*dyr)[\?\.\!]?$/i,
+    broadRegex: /^(utenlandsregistrering|utenlandsk.*dyr|registrere.*utland|hjelp.*utenlands|importert.*dyr|uregistrert.*brikke|578.*ikke.*registrert)[\?\.\!]?$/i,
     title: "Utenlandsregistrering",
-    intro: "Her er temaene om registrering av utenlandske dyr:",
+    intro: "Her er temaene om registrering av utenlandske dyr og uregistrerte ID-merker:\n\n**OBS:** Noen ID-merker som begynner med 578 (Norges landskode) er ikke nødvendigvis registrert hos DyreID. Disse er såkalte uregistrerte brikker som ikke er forhåndsbetalte hos oss, og betraktes som utlandsregistrerte.",
     subtopics: [
       { label: "Registrere dyr i Norge", query: "Hvordan få dyret registrert i Norge?", intent: "ForeignRegistration", url: `${HJELPESENTER_BASE}/hjelp-utenlandsregistrering/43-registrering-norge` },
+      { label: "Uregistrert 578-brikke", query: "Chipen begynner med 578 men er ikke registrert hos DyreID", intent: "UnregisteredChip578", url: `${HJELPESENTER_BASE}/hjelp-utenlandsregistrering/43-registrering-norge` },
       { label: "Hva koster registrering?", query: "Hva koster det å registrere et dyr i Norge?", intent: "ForeignRegistrationCost", url: `${HJELPESENTER_BASE}/hjelp-utenlandsregistrering/44-kostnad-registrering` },
       { label: "Utenlandsk hund med stamtavle", query: "Registrering av utenlandsk hund med stamtavle", intent: "ForeignPedigree", url: `${HJELPESENTER_BASE}/hjelp-utenlandsregistrering/45-utenlandsk-stamtavle` },
     ],
@@ -368,8 +370,24 @@ function handleChipLookupFlow(
     if (!result.found) {
       session.chipLookupFlow = undefined;
       session.chipLookupResult = undefined;
+      const is578 = chipNumber.startsWith("578");
+      let notFoundText = `Jeg fant ingen registrering på chipnummer ${chipNumber}.\n\n`;
+      if (is578) {
+        notFoundText += `**Merk:** Selv om chipnummeret begynner med 578 (Norges landskode), betyr det ikke nødvendigvis at chipen er registrert hos DyreID. Noen ID-merker som begynner med 578 er såkalte **uregistrerte brikker** – det vil si brikker som ikke er forhåndsbetalte hos oss. Disse betraktes som utlandsregistrerte.\n\n`;
+        notFoundText += `Dette kan bety at:\n`;
+        notFoundText += `- Chipen er en uregistrert 578-brikke (ikke forhåndsbetalt hos DyreID)\n`;
+        notFoundText += `- Dyret ikke er registrert i DyreID ennå\n`;
+        notFoundText += `- Nummeret er feil\n\n`;
+        notFoundText += `For å få dyret registrert i DyreID må du ta kontakt med en veterinær. Veterinæren registrerer chipen, og det koster 676 kr. Les mer: ${HJELPESENTER_BASE}/hjelp-utenlandsregistrering/43-registrering-norge`;
+      } else {
+        notFoundText += `Dette kan bety at:\n`;
+        notFoundText += `- Chipen ikke er registrert i DyreID ennå\n`;
+        notFoundText += `- Nummeret er feil\n`;
+        notFoundText += `- Dyret er registrert i et annet land\n\n`;
+        notFoundText += `For å få dyret registrert i Norge/DyreID, ta kontakt med en veterinær. Registrering av utenlandsk chip koster 676 kr. Les mer: ${HJELPESENTER_BASE}/hjelp-utenlandsregistrering/43-registrering-norge`;
+      }
       return {
-        text: `Jeg fant ingen registrering på chipnummer ${chipNumber}.\n\nDette kan bety at:\n- Chipen ikke er registrert i DyreID ennå\n- Nummeret er feil\n- Dyret er registrert i et annet land\n\nTa kontakt med en veterinær for å få chipen skannet og registrert. Registrering koster 590 kr og kan gjøres hos enhver veterinærklinikk.`,
+        text: notFoundText,
         model: "chip-lookup-not-found",
         requestFeedback: true,
       };
@@ -1212,6 +1230,24 @@ function handleDirectIntent(
     };
   }
 
+  if (intent === "UnregisteredChip578") {
+    return {
+      text: "**Uregistrert 578-brikke**\n\nNoen ID-merker som begynner med **578** (Norges landskode) er likevel ikke registrert hos DyreID. Dette gjelder brikker som ikke er **forhåndsbetalte** hos oss – de er såkalte uregistrerte brikker og betraktes som **utlandsregistrerte**.\n\nDette betyr at selv om dyret er ID-merket hos en veterinær i Norge, er ikke chipen automatisk registrert i DyreID-registeret.\n\n**Hva må du gjøre?**\nFor å få dyret registrert i DyreID med en slik brikke, må du ta kontakt med en veterinær som kan registrere chipen hos oss. Dette koster **676 kr** og følger samme prosedyre som for utlandsregistrering.\n\nLes mer om prosessen her:\nhttps://hjelpesenter.dyreid.no/hjelp-utenlandsregistrering/43-registrering-norge",
+      helpCenterLink: `${HJELPESENTER_BASE}/hjelp-utenlandsregistrering/43-registrering-norge`,
+      model: "direct-unregistered-578",
+      requestFeedback: true,
+    };
+  }
+
+  if (intent === "ForeignRegistration") {
+    return {
+      text: "**Registrering av dyr med utenlandsk eller uregistrert chip i Norge**\n\nFor å registrere et dyr i DyreID som har en utenlandsk chip, eller en **uregistrert 578-brikke** (brikke som begynner med 578 men ikke er forhåndsbetalt hos oss), må du ta kontakt med en **veterinær**.\n\n**OBS:** Ikke alle brikker som begynner med 578 er registrert hos DyreID. Noen 578-brikker er ikke forhåndsbetalte og betraktes som utlandsregistrerte. Disse må registreres på nytt.\n\n**Slik gjør du:**\n1. Bestill time hos en veterinærklinikk\n2. Veterinæren skanner chipen og registrerer dyret i DyreID\n3. Registreringen koster **676 kr**\n4. Du får tilgang til Min Side og kan administrere dyrets profil\n\nLes mer: https://hjelpesenter.dyreid.no/hjelp-utenlandsregistrering/43-registrering-norge",
+      helpCenterLink: `${HJELPESENTER_BASE}/hjelp-utenlandsregistrering/43-registrering-norge`,
+      model: "direct-foreign-registration",
+      requestFeedback: true,
+    };
+  }
+
   return null;
 }
 
@@ -1271,6 +1307,9 @@ HANDLINGER SOM GJORES I DYREID-APPEN (IKKE Min Side):
 VIKTIG: For handlinger som gjores i appen, gi instruksjoner istedenfor a be om innlogging.
 For informasjonssporsmaal (priser, prosedyrer, hjelpesenter-info), gi svaret direkte uten a be om innlogging.
 Be KUN om innlogging nar handlingen faktisk krever tilgang til Min Side data.
+
+UREGISTRERTE 578-BRIKKER:
+Ikke alle ID-merker som begynner med 578 er registrert hos DyreID. Noen 578-brikker er ikke forhandsbetalt hos oss og betraktes som utlandsregistrerte. Disse ma registreres pa nytt via en veterinaer (koster 676 kr). Folger samme prosedyre som utenlandsregistrering.
 
 Nar du identifiserer at en handling er nodvendig, inkluder en ACTION-blokk i svaret ditt:
 [ACTION: action_name | param1=value1 | param2=value2]
@@ -1760,7 +1799,7 @@ export async function* streamChatResponse(
     return;
   }
 
-  const DIRECT_INTENTS = ["ViewMyPets", "OwnershipTransferWeb", "ReportLostPet", "ReportFoundPet", "QRTagActivation", "PetDeceased", "NKKOwnership", "LoginIssue", "LoginProblem"];
+  const DIRECT_INTENTS = ["ViewMyPets", "OwnershipTransferWeb", "ReportLostPet", "ReportFoundPet", "QRTagActivation", "PetDeceased", "NKKOwnership", "LoginIssue", "LoginProblem", "UnregisteredChip578", "ForeignRegistration"];
   if ((intent && DIRECT_INTENTS.includes(intent)) || session.directIntentFlow || session.loginHelpStep) {
     const effectiveIntent = session.directIntentFlow || intent || "";
     const directResponse = handleDirectIntent(effectiveIntent, session, isAuthenticated, ownerContext, storedUserContext || null, userMessage);
