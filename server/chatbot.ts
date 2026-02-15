@@ -122,10 +122,11 @@ const INTENT_PATTERNS: IntentQuickMatch[] = [
   { intent: "FamilyAccessLost", regex: /ser ikke.*delt|mistet.*tilgang.*deling|familie.*borte/i },
   { intent: "FamilySharingExisting", regex: /familiedeling.*eksisterende|deling.*allerede.*kjæledyr/i },
 
-  // ── Chip-oppslag / Feil eier ────────────────────────────
+  // ── Chip-oppslag / Feil eier / Registrering ──────────────
   { intent: "ChipLookup", regex: /id.?nummer|chip.?nummer|søke.*opp.*dyr|finne.*dyr.*chip|finn.*dyr|slå.*opp|chip.*søk|id.*søk.*dyr/i },
   { intent: "WrongOwner", regex: /feil eier|feil.*registrert.*eier|ikke.*min.*eier|registrert.*på.*feil|feil.*person.*registrert/i },
   { intent: "PetNotInSystem", regex: /finnes ikke.*system|ikke.*registrert|dyr.*finnes ikke|finner ikke.*dyr.*register|ikke i registeret|ikke.*søkbar|mangler.*register/i },
+  { intent: "NewRegistration", regex: /registrere.*nytt.*dyr|nytt.*dyr.*registrer|ny.*registrering|hvordan registrere/i },
 
   // ── Generell ────────────────────────────────────────────
   { intent: "GeneralInquiry", regex: /generell|hjelp med|lurer på|spørsmål om/i },
@@ -251,6 +252,19 @@ const CATEGORY_MENUS: Record<string, CategoryMenu> = {
       { label: "Hvordan fungerer Savnet & Funnet?", query: "Hvordan fungerer Savnet og Funnet-tjenesten?", intent: "LostFoundInfo", url: `${HJELPESENTER_BASE}/hjelp-savnet-funnet/48-savnet-funnet-info` },
       { label: "Søkbar på 1-2-3", query: "Hvordan fungerer Søkbar på 1-2-3?", intent: "SearchableInfo", url: `${HJELPESENTER_BASE}/hjelp-savnet-funnet/49-sokbar-123` },
       { label: "Kan Søkbar misbrukes?", query: "Kan Søkbar på 1-2-3 misbrukes?", intent: "SearchableMisuse", url: `${HJELPESENTER_BASE}/hjelp-savnet-funnet/50-sokbar-misbruk` },
+    ],
+  },
+  Registrering: {
+    broadRegex: /^(feil.*registrering|manglende.*registrering|registrering.*(?:av\s)?dyr|registrering.*feil|feil.*manglende.*registr\w*|problem.*registrering|hjelp.*registrering)(?:\s+\w+)*[\?\.\!]?$/i,
+    title: "Feil eller manglende registrering",
+    intro: "Jeg forstår at du har et problem med registrering. Hva gjelder det?",
+    subtopics: [
+      { label: "Feil informasjon på registreringen", query: "Det er feil informasjon registrert på dyret mitt", intent: "WrongInfo", description: "Feil navn, rase, chipnummer eller annet" },
+      { label: "Dyret er registrert på feil eier", query: "Dyret mitt er registrert på feil person", intent: "WrongOwner", description: "Dyret står på en annen person enn meg" },
+      { label: "Finner ikke dyret mitt / ikke registrert", query: "Jeg finner ikke dyret mitt i registeret", intent: "PetNotInSystem", description: "Dyret vises ikke i DyreID-søk" },
+      { label: "Dyret mangler på Min side", query: "Det mangler et kjæledyr på Min side", intent: "MissingPetProfile", description: "Dyret vises ikke på min profil", url: `${HJELPESENTER_BASE}/hjelp-min-side/19-mangler-kjaledyr` },
+      { label: "Dyret er ikke søkbart", query: "Kjæledyret mitt er ikke søkbart", intent: "InactiveRegistration", description: "Dyret vises ikke i offentlig søk", url: `${HJELPESENTER_BASE}/hjelp-id-sok/3-kjaledyret-er-ikke-sokbart` },
+      { label: "Registrere nytt dyr", query: "Hvordan registrere et nytt dyr i DyreID?", intent: "NewRegistration", description: "Registrere et dyr som ikke er i systemet", url: `${HJELPESENTER_BASE}/hjelp-id-sok/1-hvorfor-bor-jeg-id-merke` },
     ],
   },
   Familiedeling: {

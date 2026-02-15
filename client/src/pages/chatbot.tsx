@@ -701,8 +701,12 @@ const HJELPESENTER_SUGGESTIONS = [
   { category: "Familiedeling", text: "Fordeler med familiedeling", query: "Hvorfor burde jeg ha familiedeling?" },
   { category: "Familiedeling", text: "Dele tilgang med familiemedlemmer", query: "Hvordan dele tilgang med familiemedlemmer?" },
   { category: "Familiedeling", text: "Trenger jeg DyreID+ for familiedeling?", query: "Trenger jeg DyreID+ for familiedeling?" },
-  { category: "Feil/manglende registrering", text: "Feil registrert informasjon", query: "Det er feil i registreringen av dyret mitt" },
-  { category: "Feil/manglende registrering", text: "Mangler registrering", query: "Dyret mitt mangler registrering" },
+  { category: "Feil/manglende registrering", text: "Feil informasjon på registreringen", query: "Det er feil informasjon registrert på dyret mitt" },
+  { category: "Feil/manglende registrering", text: "Registrert på feil eier", query: "Dyret mitt er registrert på feil person" },
+  { category: "Feil/manglende registrering", text: "Finner ikke dyret mitt", query: "Jeg finner ikke dyret mitt i registeret" },
+  { category: "Feil/manglende registrering", text: "Dyret mangler på Min side", query: "Det mangler et kjæledyr på Min side" },
+  { category: "Feil/manglende registrering", text: "Dyret er ikke søkbart", query: "Kjæledyret mitt er ikke søkbart" },
+  { category: "Feil/manglende registrering", text: "Registrere nytt dyr", query: "Hvordan registrere et nytt dyr i DyreID?" },
 ];
 
 export default function Chatbot() {
