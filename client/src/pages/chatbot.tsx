@@ -647,6 +647,47 @@ const QUICK_ACTIONS = [
   { label: "Priser", icon: CreditCard, query: "Abonnement og priser" },
 ];
 
+const HJELPESENTER_SUGGESTIONS = [
+  { category: "ID-søk", text: "Hvorfor bør jeg ID-merke?", query: "Hvorfor bør jeg ID-merke kjæledyret mitt?" },
+  { category: "ID-søk", text: "Kontrollere kontaktdata", query: "Hvordan kontrollere at mine kontaktdata er riktig?" },
+  { category: "ID-søk", text: "Kjæledyret er ikke søkbart", query: "Kjæledyret mitt er ikke søkbart" },
+  { category: "DyreID-appen", text: "Tilgang til DyreID-appen", query: "Hvordan får jeg tilgang til DyreID-appen?" },
+  { category: "DyreID-appen", text: "Innlogging app", query: "Hjelp med innlogging i DyreID-appen" },
+  { category: "DyreID-appen", text: "Basis vs DyreID+ abonnement", query: "Hva er forskjellen på DyreID basis og DyreID+ abonnement?" },
+  { category: "DyreID-appen", text: "Koster appen noe?", query: "Koster DyreID-appen noe?" },
+  { category: "Min side", text: "Logg inn på Min side", query: "Hvordan logger jeg inn på Min side?" },
+  { category: "Min side", text: "Fått SMS/e-post fra DyreID", query: "Hvorfor har jeg fått SMS eller e-post fra DyreID?" },
+  { category: "Min side", text: "Har jeg en Min side?", query: "Har jeg en Min side?" },
+  { category: "Min side", text: "Får ikke logget inn", query: "Hvorfor får jeg ikke logget meg inn på Min side?" },
+  { category: "Min side", text: "Feil informasjon på Min side", query: "Det er feil informasjon på Min side" },
+  { category: "Min side", text: "Mangler kjæledyr på Min side", query: "Det mangler et kjæledyr på Min side" },
+  { category: "Min side", text: "Kjæledyret mitt er dødt", query: "Kjæledyret mitt er dødt, hva gjør jeg?" },
+  { category: "Min side", text: "Slett meg / GDPR", query: "Jeg vil slette profilen min (GDPR)" },
+  { category: "Eierskifte", text: "Eierskifte i appen", query: "Hvordan gjøre eierskifte i DyreID-appen?" },
+  { category: "Eierskifte", text: "Hva koster eierskifte?", query: "Hva koster eierskifte?" },
+  { category: "Eierskifte", text: "Eierskifte på web", query: "Hvordan foreta eierskifte?" },
+  { category: "Eierskifte", text: "Eierskifte når eier er død", query: "Eierskifte når eier er død" },
+  { category: "Eierskifte", text: "Eierskifte NKK-hund", query: "Eierskifte av NKK-registrert hund" },
+  { category: "Smart Tag", text: "Aktivering av Smart Tag", query: "Hvordan aktivere Smart Tag?" },
+  { category: "Smart Tag", text: "Aktivere QR-kode på Smart Tag", query: "Hvordan aktivere QR-koden på Smart Tag?" },
+  { category: "Smart Tag", text: "Kan ikke koble Smart Tag", query: "Jeg kan ikke koble til eller legge til Smart Tag" },
+  { category: "Smart Tag", text: "Posisjon oppdateres ikke", query: "Posisjonen på Smart Tag oppdateres ikke" },
+  { category: "QR-brikke", text: "Passer QR-brikke for hund og katt?", query: "Passer DyreIDs QR-brikke for både hunder og katter?" },
+  { category: "QR-brikke", text: "Aktivere QR-brikke", query: "Hvordan aktivere QR-brikken?" },
+  { category: "QR-brikke", text: "Abonnement eller engangskostnad?", query: "Er QR-brikke abonnement eller engangskostnad?" },
+  { category: "QR-brikke", text: "Mistet QR-brikke", query: "Jeg har mistet QR-brikken min" },
+  { category: "Utenlandsregistrering", text: "Registrere utenlandsk dyr i Norge", query: "Hvordan registrere et utenlandsk dyr i Norge?" },
+  { category: "Utenlandsregistrering", text: "Kostnad registrering", query: "Hva koster det å registrere et dyr i Norge?" },
+  { category: "Savnet/Funnet", text: "Melde kjæledyr savnet", query: "Hvordan melde kjæledyret mitt savnet?" },
+  { category: "Savnet/Funnet", text: "Kjæledyret har kommet til rette", query: "Kjæledyret mitt har kommet til rette" },
+  { category: "Savnet/Funnet", text: "Hvordan fungerer Savnet & Funnet?", query: "Hvordan fungerer Savnet og Funnet-tjenesten?" },
+  { category: "Familiedeling", text: "Fordeler med familiedeling", query: "Hvorfor burde jeg ha familiedeling?" },
+  { category: "Familiedeling", text: "Dele tilgang med familiemedlemmer", query: "Hvordan dele tilgang med familiemedlemmer?" },
+  { category: "Familiedeling", text: "Trenger jeg DyreID+ for familiedeling?", query: "Trenger jeg DyreID+ for familiedeling?" },
+  { category: "Feil/manglende registrering", text: "Feil registrert informasjon", query: "Det er feil i registreringen av dyret mitt" },
+  { category: "Feil/manglende registrering", text: "Mangler registrering", query: "Dyret mitt mangler registrering" },
+];
+
 export default function Chatbot() {
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
   const [inputValue, setInputValue] = useState("");
@@ -660,8 +701,13 @@ export default function Chatbot() {
   const [authError, setAuthError] = useState("");
   const [minsideUserId, setMinsideUserId] = useState<string | null>(null);
   const [userContext, setUserContext] = useState<UserContext | null>(null);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [filteredSuggestions, setFilteredSuggestions] = useState<typeof HJELPESENTER_SUGGESTIONS>([]);
+  const [selectedSuggestionIdx, setSelectedSuggestionIdx] = useState(-1);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const pendingMessageRef = useRef<string | null>(null);
+  const suggestionsRef = useRef<HTMLDivElement>(null);
 
   const { data: conversations = [], isLoading: loadingConversations } = useQuery<Conversation[]>({
     queryKey: ["/api/chat/conversations"],
@@ -679,6 +725,14 @@ export default function Chatbot() {
       setActiveConversationId(conv.id);
       setUserContext(null);
       queryClient.invalidateQueries({ queryKey: ["/api/chat/conversations"] });
+      if (pendingMessageRef.current) {
+        const msg = pendingMessageRef.current;
+        pendingMessageRef.current = null;
+        doSend(msg, conv.id);
+      }
+    },
+    onError: () => {
+      pendingMessageRef.current = null;
     },
   });
 
@@ -707,8 +761,9 @@ export default function Chatbot() {
     }
   }, [messages, streamingContent]);
 
-  const doSend = useCallback(async (content: string) => {
-    if (!content.trim() || !activeConversationId || isSending) return;
+  const doSend = useCallback(async (content: string, targetConversationId?: number) => {
+    const convId = targetConversationId || activeConversationId;
+    if (!content.trim() || !convId || isSending) return;
 
     setInputValue("");
     setIsSending(true);
@@ -716,7 +771,7 @@ export default function Chatbot() {
 
     try {
       const response = await fetch(
-        `/api/chat/conversations/${activeConversationId}/messages`,
+        `/api/chat/conversations/${convId}/messages`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -757,7 +812,7 @@ export default function Chatbot() {
       setIsSending(false);
       setStreamingContent("");
       queryClient.invalidateQueries({
-        queryKey: ["/api/chat/conversations", activeConversationId],
+        queryKey: ["/api/chat/conversations", convId],
       });
     }
   }, [activeConversationId, isSending]);
@@ -769,6 +824,50 @@ export default function Chatbot() {
   const sendDirectMessage = useCallback((text: string) => {
     doSend(text);
   }, [doSend]);
+
+  const createConversationAndSend = useCallback((query: string) => {
+    pendingMessageRef.current = query;
+    createConversation.mutate();
+  }, [createConversation]);
+
+  const handleInputChange = useCallback((value: string) => {
+    setInputValue(value);
+    setSelectedSuggestionIdx(-1);
+    if (value.trim().length >= 2) {
+      const lower = value.toLowerCase();
+      const matches = HJELPESENTER_SUGGESTIONS.filter((s) =>
+        s.text.toLowerCase().includes(lower) ||
+        s.category.toLowerCase().includes(lower) ||
+        s.query.toLowerCase().includes(lower)
+      ).slice(0, 6);
+      setFilteredSuggestions(matches);
+      setShowSuggestions(matches.length > 0);
+    } else {
+      setShowSuggestions(false);
+      setFilteredSuggestions([]);
+    }
+  }, []);
+
+  const selectSuggestion = useCallback((query: string) => {
+    setInputValue("");
+    setShowSuggestions(false);
+    if (activeConversationId) {
+      doSend(query);
+    } else {
+      createConversationAndSend(query);
+    }
+  }, [activeConversationId, doSend, createConversationAndSend]);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (suggestionsRef.current && !suggestionsRef.current.contains(e.target as Node) &&
+          inputRef.current && !inputRef.current.contains(e.target as Node)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const handleSendOtp = async () => {
     if (!authPhone.trim()) return;
@@ -966,9 +1065,8 @@ export default function Chatbot() {
                     key={action.label}
                     variant="outline"
                     className="flex-col gap-2 h-auto py-3"
-                    onClick={() => {
-                      createConversation.mutate();
-                    }}
+                    onClick={() => createConversationAndSend(action.query)}
+                    disabled={createConversation.isPending}
                     data-testid={`button-quick-${action.label.replace(/\s/g, "-")}`}
                   >
                     <action.icon className="h-5 w-5 text-primary" />
@@ -1089,31 +1187,81 @@ export default function Chatbot() {
             </ScrollArea>
 
             <div className="p-3 border-t bg-background">
-              <div className="flex gap-2 max-w-3xl mx-auto">
-                <Input
-                  ref={inputRef}
-                  value={inputValue}
-                  onChange={(e) => setInputValue(e.target.value)}
-                  placeholder={isAuthenticated ? "Skriv din melding..." : "Skriv din melding (logg inn for personlig hjelp)..."}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      sendMessage();
-                    }
-                  }}
-                  disabled={isSending}
-                  className="rounded-full"
-                  data-testid="input-message"
-                />
-                <Button
-                  onClick={sendMessage}
-                  disabled={!inputValue.trim() || isSending}
-                  size="icon"
-                  className="rounded-full shrink-0"
-                  data-testid="button-send"
-                >
-                  <Send className="h-4 w-4" />
-                </Button>
+              <div className="relative max-w-3xl mx-auto">
+                {showSuggestions && filteredSuggestions.length > 0 && (
+                  <div
+                    ref={suggestionsRef}
+                    className="absolute bottom-full left-0 right-0 mb-1 bg-popover border rounded-md shadow-md z-50 overflow-hidden"
+                    data-testid="suggestions-dropdown"
+                  >
+                    {filteredSuggestions.map((s, i) => (
+                      <button
+                        type="button"
+                        key={i}
+                        className={`w-full text-left px-3 py-2 text-sm hover-elevate flex items-center gap-2 cursor-pointer ${i === selectedSuggestionIdx ? "bg-accent" : ""}`}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => selectSuggestion(s.query)}
+                        onMouseEnter={() => setSelectedSuggestionIdx(i)}
+                        data-testid={`suggestion-item-${i}`}
+                      >
+                        <Badge variant="secondary" className="shrink-0 text-xs">{s.category}</Badge>
+                        <span className="truncate">{s.text}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <Input
+                    ref={inputRef}
+                    value={inputValue}
+                    onChange={(e) => handleInputChange(e.target.value)}
+                    placeholder={isAuthenticated ? "Skriv din melding..." : "Skriv din melding (logg inn for personlig hjelp)..."}
+                    onKeyDown={(e) => {
+                      if (showSuggestions && filteredSuggestions.length > 0) {
+                        if (e.key === "ArrowDown") {
+                          e.preventDefault();
+                          setSelectedSuggestionIdx((prev) => Math.min(prev + 1, filteredSuggestions.length - 1));
+                          return;
+                        }
+                        if (e.key === "ArrowUp") {
+                          e.preventDefault();
+                          setSelectedSuggestionIdx((prev) => Math.max(prev - 1, -1));
+                          return;
+                        }
+                        if (e.key === "Enter" && selectedSuggestionIdx >= 0) {
+                          e.preventDefault();
+                          selectSuggestion(filteredSuggestions[selectedSuggestionIdx].query);
+                          return;
+                        }
+                      }
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        setShowSuggestions(false);
+                        sendMessage();
+                      }
+                      if (e.key === "Escape") {
+                        setShowSuggestions(false);
+                      }
+                    }}
+                    onFocus={() => {
+                      if (inputValue.trim().length >= 2 && filteredSuggestions.length > 0) {
+                        setShowSuggestions(true);
+                      }
+                    }}
+                    disabled={isSending}
+                    className="rounded-full"
+                    data-testid="input-message"
+                  />
+                  <Button
+                    onClick={() => { setShowSuggestions(false); sendMessage(); }}
+                    disabled={!inputValue.trim() || isSending}
+                    size="icon"
+                    className="rounded-full shrink-0"
+                    data-testid="button-send"
+                  >
+                    <Send className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
             </div>
           </>
