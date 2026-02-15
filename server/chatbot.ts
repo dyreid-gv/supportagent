@@ -22,6 +22,7 @@ interface SessionState {
   chipLookupFlow?: "awaiting_chip" | "awaiting_ownership_confirm" | "awaiting_sms_confirm";
   chipLookupResult?: ChipLookupResult;
   directIntentFlow?: string;
+  loginHelpStep?: "awaiting_phone" | "awaiting_sms_confirm";
 }
 
 const sessionStates = new Map<number, SessionState>();
@@ -627,26 +628,10 @@ async function executePlaybookAction(
   }
 
   if (intent === "QRTagActivation" || intent === "ActivateQRTag") {
-    const tagId = collectedData.tagId;
-    if (!tagId) {
-      return { text: "Mangler tag-ID for aktivering.", model: "action-error" };
-    }
-    const result = performAction(ownerId, "activate_qr", { tagId });
-    if (result.success) {
-      return {
-        text: `QR Tag (${tagId}) er na aktivert! Taggen er koblet til dyret ditt og abonnementet er startet.\n\nDu kan na skanne taggen med DyreID-appen eller et vanlig kamera.`,
-        actionExecuted: true,
-        actionType: "ACTIVATE_QR",
-        actionSuccess: true,
-        requestFeedback: true,
-        model: "action-execution",
-      };
-    }
     return {
-      text: `Kunne ikke aktivere tag: ${result.message}`,
-      actionExecuted: true,
-      actionSuccess: false,
-      model: "action-execution-failed",
+      text: "QR-brikken aktiveres i **DyreID-appen**, ikke via Min Side.\n\nSlik aktiverer du brikken:\n\n1. Åpne DyreID-appen\n2. Klikk på QR-brikke-ikonet på forsiden eller under Meny\n3. Skann QR-koden på brikken\n4. Skriv inn telefonnummeret ditt\n5. Skriv inn chipnummer på kjæledyret\n6. Kryss av for kontaktdata som skal vises ved skanning\n7. Husk å aktivere pushvarsel i appen\n\nHar du problemer med å skanne koden i appen? Prøv å skanne den med kameraet på mobilen i stedet.",
+      requestFeedback: true,
+      model: "action-qr-app-redirect",
     };
   }
 
@@ -1047,63 +1032,183 @@ function handleDirectIntent(
     };
   }
 
-  if (intent === "QRTagActivation") {
-    if (!isAuthenticated) {
-      return {
-        text: "For å aktivere QR-brikken din, må du logge inn først.",
-        requiresLogin: true,
-        model: "direct-qr-login",
-      };
+  if (intent === "LoginIssue" || intent === "LoginProblem" || session.loginHelpStep) {
+    if (session.loginHelpStep === "awaiting_sms_confirm") {
+      const msgLower = userMessage.toLowerCase().trim();
+      const isYes = /^(ja|yes|fikk|mottatt|jep|japp|jepp)/.test(msgLower);
+      const isNo = /^(nei|no|ikke|fikk ikke|har ikke)/.test(msgLower);
+
+      if (isYes) {
+        session.loginHelpStep = undefined;
+        session.intent = undefined;
+        return {
+          text: "Flott! Da bruker du engangskoden fra SMS-en for å logge inn på Min Side.\n\nKlikk her for å gå til innloggingen:\nhttps://minside.dyreid.no\n\nHvis du får problemer igjen, er det bare å si ifra.",
+          helpCenterLink: `${HJELPESENTER_BASE}/hjelp-min-side/11-logg-inn`,
+          model: "direct-login-help-success",
+          requestFeedback: true,
+        };
+      } else if (isNo) {
+        session.loginHelpStep = undefined;
+        session.intent = undefined;
+        return {
+          text: "Hvis du ikke mottar SMS med engangskode, kan det skyldes:\n\n1. **Feil telefonnummer** - Sjekk at du bruker nummeret registrert i DyreID\n2. **Nummeret er ikke registrert** - Du har kanskje ikke en Min Side ennå\n3. **Teknisk feil** - Prøv igjen om noen minutter\n\nHvis problemet vedvarer, ta kontakt med DyreID kundeservice så hjelper vi deg videre.",
+          helpCenterLink: `${HJELPESENTER_BASE}/hjelp-min-side/14-far-ikke-logget-inn`,
+          model: "direct-login-help-no-sms",
+          requestFeedback: true,
+        };
+      }
     }
 
-    const tags = ownerContext?.tags || [];
-    const inactiveTags = tags.filter((t: any) => !t.activated && t.type === "qr");
-
-    if (inactiveTags.length === 0 && tags.length > 0) {
-      const activeTags = tags.filter((t: any) => t.activated && t.type === "qr");
-      if (activeTags.length > 0) {
+    if (session.loginHelpStep === "awaiting_phone") {
+      const digits = userMessage.replace(/\D/g, "");
+      if (digits.length === 8) {
+        session.collectedData["loginPhone"] = digits;
+        session.loginHelpStep = "awaiting_sms_confirm";
         return {
-          text: `Dine QR-brikker er allerede aktivert:\n${activeTags.map((t: any) => `- **${t.tagId}** → ${t.assignedAnimalName || "ikke tildelt"}`).join("\n")}`,
-          model: "direct-qr-already-active",
+          text: `Vi prøver innlogging med **${digits}**.\n\nDu skal nå motta en SMS med en engangskode (OTP) på dette nummeret.\n\nFikk du en SMS?`,
+          suggestions: [
+            { label: "Ja, fikk SMS", action: "CONFIRM_SMS" },
+            { label: "Nei, ingen SMS", action: "DENY_SMS" },
+          ],
+          model: "direct-login-help-awaiting-sms",
         };
       }
       return {
-        text: "Du har ingen QR-brikker registrert. Bestill en QR-brikke på dyreid.no for å komme i gang.",
-        model: "direct-qr-none",
+        text: "Jeg trenger et gyldig norsk mobilnummer (8 siffer). Hvilket telefonnummer bruker du for å logge inn?",
+        model: "direct-login-help-retry-phone",
       };
     }
 
-    session.intent = "QRTagActivation";
+    session.intent = intent || "LoginIssue";
+    session.loginHelpStep = "awaiting_phone";
     session.collectedData = {};
+    return {
+      text: "Jeg hjelper deg med innlogging på Min Side. Vi bruker engangskode (OTP) via SMS.\n\nHvilket telefonnummer bruker du for å logge inn?",
+      model: "direct-login-help-start",
+    };
+  }
 
-    if (inactiveTags.length === 1) {
-      const tag = inactiveTags[0];
-      const ownerId = ownerContext?.owner?.ownerId;
-      if (ownerId) {
-        const result = performAction(ownerId, "activate_qr", { tagId: tag.tagId });
-        if (result.success) {
-          return {
-            text: `**${tag.tagId}** er nå aktivert!${tag.assignedAnimalName ? ` Koblet til ${tag.assignedAnimalName}.` : ""}\n\nDu kan nå skanne brikken med DyreID-appen eller et vanlig kamera.`,
-            actionExecuted: true,
-            actionType: "ACTIVATE_QR",
-            actionSuccess: true,
-            requestFeedback: true,
-            model: "direct-qr-executed",
-          };
-        }
-      }
+  if (intent === "PetDeceased" || session.directIntentFlow === "PetDeceased") {
+    if (!isAuthenticated) {
+      return {
+        text: "For å registrere at kjæledyret ditt er dødt, må du logge inn først.\n\nEtter innlogging kan du velge dyret og markere det som avdødt.",
+        requiresLogin: true,
+        model: "direct-deceased-login",
+      };
     }
 
-    const suggestions = inactiveTags.map((t: any) => ({
-      label: `${t.tagId}${t.assignedAnimalName ? ` (${t.assignedAnimalName})` : ""}`,
-      action: "SELECT_TAG",
-      data: { tagId: t.tagId },
+    if (session.directIntentFlow === "PetDeceased" && session.collectedData["petId"]) {
+      const msgLower = userMessage.toLowerCase().trim();
+      const isConfirm = /^(ja|yes|bekreft|marker|ok)/.test(msgLower);
+      if (isConfirm) {
+        const petName = session.collectedData["petName"] || "Dyret";
+        const ownerId = ownerContext?.owner?.ownerId || storedUserContext?.OwnerId;
+        if (ownerId) {
+          const result = performAction(ownerId, "mark_deceased", { animalId: session.collectedData["petId"] });
+          if (result.success) {
+            session.directIntentFlow = undefined;
+            session.intent = undefined;
+            session.collectedData = {};
+            return {
+              text: `**${petName}** er nå markert som avdødt.\n\nVi beklager tapet ditt. Registreringen er oppdatert og dyret vil ikke lenger vises som aktivt.\n\nHvis du har spørsmål om registreringen, er det bare å si ifra.`,
+              actionExecuted: true,
+              actionType: "MARK_DECEASED",
+              actionSuccess: true,
+              requestFeedback: true,
+              model: "direct-deceased-executed",
+            };
+          }
+        }
+      }
+      session.directIntentFlow = undefined;
+      session.intent = undefined;
+      session.collectedData = {};
+      return {
+        text: "Forstått, avbryter. Er det noe annet jeg kan hjelpe deg med?",
+        model: "direct-deceased-cancelled",
+      };
+    }
+
+    const animals = ownerContext?.animals || [];
+    const minSidePets = storedUserContext?.Pets || [];
+    const activePets = animals.length > 0
+      ? animals.filter((a: any) => a.status === "active").map((a: any) => formatPetForMetadata(a, "sandbox"))
+      : minSidePets;
+
+    if (activePets.length === 0) {
+      return {
+        text: "Du har ingen aktive registrerte dyr. Hvis du mener dette er feil, ta kontakt med DyreID kundeservice.",
+        model: "direct-deceased-no-pets",
+      };
+    }
+
+    session.directIntentFlow = "PetDeceased";
+
+    const msgLower = userMessage.toLowerCase().trim();
+    const matchedPet = activePets.find((p: any) => {
+      const name = (p.Name || p.name || "").toLowerCase();
+      return name && msgLower.includes(name);
+    });
+    if (matchedPet) {
+      const petId = matchedPet.AnimalId || matchedPet.animalId || matchedPet.PetId || matchedPet.petId;
+      const petName = matchedPet.Name || matchedPet.name;
+      session.collectedData = { petId, petName };
+      return {
+        text: `Jeg beklager å høre det. Ønsker du å markere **${petName}** som avdødt?`,
+        suggestions: [
+          { label: "Ja, bekreft", action: "CONFIRM_DECEASED" },
+          { label: "Nei, avbryt", action: "CANCEL" },
+        ],
+        model: "direct-deceased-confirm",
+      };
+    }
+
+    if (activePets.length === 1) {
+      const pet = activePets[0];
+      const petId = pet.AnimalId || pet.animalId || pet.PetId || pet.petId;
+      const petName = pet.Name || pet.name;
+      session.collectedData = { petId, petName };
+      return {
+        text: `Jeg beklager å høre det. Ønsker du å markere **${petName}** som avdødt?`,
+        suggestions: [
+          { label: "Ja, bekreft", action: "CONFIRM_DECEASED" },
+          { label: "Nei, avbryt", action: "CANCEL" },
+        ],
+        pets: [pet],
+        model: "direct-deceased-confirm",
+      };
+    }
+
+    session.collectedData = {};
+    const suggestions = activePets.map((a: any) => ({
+      label: `${a.Name || a.name}`,
+      action: "SELECT_PET",
+      data: { petId: a.AnimalId || a.animalId || a.PetId || a.petId, petName: a.Name || a.name },
     }));
 
     return {
-      text: "Hvilken QR-brikke vil du aktivere?",
+      text: "Jeg beklager å høre det. Hvilket kjæledyr gjelder det?",
       suggestions,
-      model: "direct-qr-select-tag",
+      model: "direct-deceased-select-pet",
+      pets: activePets,
+    };
+  }
+
+  if (intent === "NKKOwnership") {
+    return {
+      text: "Eierskifte av NKK-registrert hund håndteres av **Norsk Kennelklubb (NKK)**.\n\nNKK har egne regler og prosedyrer for eierskifte av stambokførte hunder. Du må kontakte NKKs sekretariat direkte for å gjennomføre eierskiftet.\n\n**Kontakt NKK:**\nBesøk NKKs sekretariat-side for kontaktinformasjon og veiledning:\nhttps://www.nkk.no/om-nkk/sekretariatet/\n\nNår eierskiftet er registrert hos NKK, vil oppdateringen også gjelde i DyreID.",
+      helpCenterLink: `${HJELPESENTER_BASE}/hjelp-eierskifte/41-eierskifte-av-nkk-registrert-hund`,
+      model: "direct-nkk-info",
+      requestFeedback: true,
+    };
+  }
+
+  if (intent === "QRTagActivation") {
+    return {
+      text: "QR-brikken må aktiveres i **DyreID-appen** før du tar den i bruk. Alle som finner kjæledyret ditt kan skanne QR-brikken og ringe deg direkte.\n\nSlik aktiverer du brikken:\n\n1. Åpne DyreID-appen\n2. Klikk på QR-brikke-ikonet på forsiden eller under Meny\n3. Skann QR-koden på brikken\n4. Skriv inn telefonnummeret ditt\n5. Skriv inn chipnummer på kjæledyret\n6. Kryss av for kontaktdata som skal vises ved skanning\n7. Husk å aktivere pushvarsel i appen\n\nHar du problemer med å skanne koden i appen? Prøv å skanne den med kameraet på mobilen i stedet.",
+      helpCenterLink: `${HJELPESENTER_BASE}/hjelp-qr-brikke/35-aktivere-qr`,
+      model: "direct-qr-info",
+      requestFeedback: true,
     };
   }
 
@@ -1150,27 +1255,34 @@ REGLER:
 
 KUNDEN ER ${isAuthenticated ? "INNLOGGET" : "IKKE INNLOGGET"}
 
-HANDLINGER DU KAN UTFORE (etter autentisering):
+HANDLINGER DU KAN UTFORE (etter autentisering via Min Side):
 - Vise kundens dyr og profil
 - Melde dyr savnet/funnet
-- Aktivere QR-brikke
 - Starte eierskifte
+- Markere kjaeledyr som avdodt
 - Sende betalingslink
 - Oppdatere profilinformasjon
-- Fornye abonnement
+
+HANDLINGER SOM GJORES I DYREID-APPEN (IKKE Min Side):
+- Aktivere QR-brikke (gjores i DyreID-appen, ikke via Min Side)
+- Aktivere Smart Tag (gjores i DyreID-appen)
+- Eierskifte i appen (gjores i DyreID-appen)
+
+VIKTIG: For handlinger som gjores i appen, gi instruksjoner istedenfor a be om innlogging.
+For informasjonssporsmaal (priser, prosedyrer, hjelpesenter-info), gi svaret direkte uten a be om innlogging.
+Be KUN om innlogging nar handlingen faktisk krever tilgang til Min Side data.
 
 Nar du identifiserer at en handling er nodvendig, inkluder en ACTION-blokk i svaret ditt:
 [ACTION: action_name | param1=value1 | param2=value2]
 
 Gyldige actions:
-- [ACTION: request_auth] - Be kunden logge inn
+- [ACTION: request_auth] - Be kunden logge inn (KUN for Min Side-handlinger)
 - [ACTION: mark_lost | animalId=X]
 - [ACTION: mark_found | animalId=X]
-- [ACTION: activate_qr | tagId=X]
+- [ACTION: mark_deceased | animalId=X]
 - [ACTION: initiate_transfer | animalId=X | newOwnerPhone=X]
 - [ACTION: send_payment_link | paymentType=X]
 - [ACTION: update_profile | field=value]
-- [ACTION: renew_subscription | tagId=X]
 `;
 
   if (matchedPlaybook) {
@@ -1648,8 +1760,8 @@ export async function* streamChatResponse(
     return;
   }
 
-  const DIRECT_INTENTS = ["ViewMyPets", "OwnershipTransferWeb", "ReportLostPet", "ReportFoundPet", "QRTagActivation"];
-  if ((intent && DIRECT_INTENTS.includes(intent)) || session.directIntentFlow) {
+  const DIRECT_INTENTS = ["ViewMyPets", "OwnershipTransferWeb", "ReportLostPet", "ReportFoundPet", "QRTagActivation", "PetDeceased", "NKKOwnership", "LoginIssue", "LoginProblem"];
+  if ((intent && DIRECT_INTENTS.includes(intent)) || session.directIntentFlow || session.loginHelpStep) {
     const effectiveIntent = session.directIntentFlow || intent || "";
     const directResponse = handleDirectIntent(effectiveIntent, session, isAuthenticated, ownerContext, storedUserContext || null, userMessage);
     if (directResponse) {

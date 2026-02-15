@@ -651,6 +651,19 @@ export function performAction(
       return { success: true, message: "Profil oppdatert", data: ctx.owner };
     }
 
+    case "mark_deceased": {
+      const animal = ctx.animals.find((a) => a.animalId === params.animalId);
+      if (animal) {
+        animal.status = "deceased";
+        return {
+          success: true,
+          message: `${animal.name} er nå registrert som avdød i DyreID-registeret. Vi kondolerer tapet.`,
+          data: { animalId: animal.animalId, animalName: animal.name, status: "deceased" },
+        };
+      }
+      return { success: false, message: "Dyr ikke funnet" };
+    }
+
     case "renew_subscription": {
       const tag = ctx.tags.find((t) => t.tagId === params.tagId);
       if (tag) {
