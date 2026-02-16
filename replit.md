@@ -1,5 +1,40 @@
 # DyreID Support AI
 
+## Aktiv utviklingstråd — Discovery + Continuous Learning (feb 2026)
+
+> **Status**: Pågående implementering — Steg 0–11
+> **Sist oppdatert**: 16. februar 2026
+> **Tråd-ID**: DISCOVERY-CL-001
+
+### Tråd-historikk (kronologisk)
+1. **Intent Normalization Layer (ferdig)** — Implementerte semantisk sammenligning av oppdagede intents mot Help Center + Playbook. Auto-map > 0.75, new candidate < 0.75. Dashboard med 4 stat-kort, auto-mapped seksjon med promote-knapper.
+2. **Pureservice-struktur gjennomgang** — Kartla ticket-feltene (category1Id, communications[], etc.) og TEMPLATE_CATEGORY_MAPPING (21 hardkodede template-IDer → kategori/intent).
+3. **9-stegs implementasjonsplan (diskutert)** — Bruker ga detaljert steg-for-steg for ukategoriserte saker: identifiser → cluster-tekst → HDBSCAN → oppsummering → GPT intent-forslag → normalisering → review → promote → test.
+4. **Full implementasjonsprompt (diskutert, ikke startet)** — Utvidet til 12 steg (0–11) med: Canonical Intent Registry, embedding-basert clustering, continuous learning, pilot batch test, runtime safety. Kjerneprinsipp: trening = AI-assistert, runtime = deterministisk + voktet.
+
+### Hva gjenstår å implementere
+- **Steg 0**: `canonical_intents`-tabell med embedding-vektor + migrering av alle eksisterende intents
+- **Steg 1**: `isUncategorized(ticket)` predikat-funksjon
+- **Steg 2**: Deterministisk `cluster_text`-konstruksjon
+- **Steg 3**: Embeddings + HDBSCAN clustering (erstatte GPT-basert)
+- **Steg 4**: `discovered_clusters`-tabell med oppsummeringskort
+- **Steg 5**: GPT intent-forslag per cluster (kun label/type, ingen prosedyrer)
+- **Steg 6**: Normalisering mot `canonical_intents` (embedding similarity)
+- **Steg 7**: Utvidet review-UI (subcategory, infoText, endpoint-blokkering, provenance)
+- **Steg 8**: Promote + continuous learning (refresh embedding index)
+- **Steg 9**: Pilot batch test (1000 tickets, rapport)
+- **Steg 10**: Runtime safety verification (30 testspørsmål)
+- **Steg 11**: Continuous learning regler (aldri auto-promote)
+
+### Viktige designbeslutninger (denne tråden)
+- `canonical_intents` erstatter spredte intent-kilder (TEMPLATE_CATEGORY_MAPPING, INTENT_DEFINITIONS, Playbook)
+- Runtime bruker KUN `canonical_intents WHERE approved=true`
+- GPT i trening: kun label/type-forslag, aldri prosedyrer/endpoints/prising
+- Embedding-basert clustering (HDBSCAN) som default, GPT-clustering som fallback via env toggle
+- All læring må gjennom menneskelig godkjenning
+
+---
+
 ## Overview
 This project is an AI-powered support automation system for DyreID, Norway's national pet ID registry. It consists of two main components:
 
