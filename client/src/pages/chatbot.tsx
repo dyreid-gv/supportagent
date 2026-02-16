@@ -523,23 +523,33 @@ function MessageBubble({
                 </Button>
               );
             })}
-            {suggestions.filter(s => s.action === "SUBTOPIC").map((s, i) => (
-              <Button
-                key={`subtopic-${i}`}
-                variant="outline"
-                size="sm"
-                className="gap-1.5"
-                onClick={() => {
-                  if (s.data?.query && onSuggestionClick) {
-                    onSuggestionClick(s.data.query);
-                  }
-                }}
-                data-testid={`button-subtopic-${message.id}-${i}`}
-              >
-                <ChevronRight className="h-3.5 w-3.5" />
-                {s.label}
-              </Button>
-            ))}
+            {suggestions.filter(s => s.action === "SUBTOPIC").length > 0 && (
+              <div className="w-full grid gap-1.5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))" }}>
+                {suggestions.filter(s => s.action === "SUBTOPIC").map((s, i) => (
+                  <button
+                    key={`subtopic-${i}`}
+                    type="button"
+                    className="text-left border rounded-md px-3 py-2.5 hover-elevate active-elevate-2 cursor-pointer transition-colors group"
+                    onClick={() => {
+                      if (s.data?.query && onSuggestionClick) {
+                        onSuggestionClick(s.data.query);
+                      }
+                    }}
+                    data-testid={`button-subtopic-${message.id}-${i}`}
+                  >
+                    <div className="flex items-start gap-2">
+                      <ChevronRight className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground group-hover:text-foreground transition-colors" />
+                      <div className="min-w-0">
+                        <span className="text-sm font-medium leading-tight">{s.label}</span>
+                        {s.data?.description && (
+                          <p className="text-xs text-muted-foreground mt-0.5 leading-snug">{s.data.description}</p>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
             {suggestions.filter(s => s.action === "OPEN_ARTICLE" && s.data?.url).map((s, i) => (
               <a
                 key={`article-${i}`}
