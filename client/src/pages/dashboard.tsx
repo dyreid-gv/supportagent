@@ -232,6 +232,10 @@ interface DiscoveredIntent {
   keywords: string | null;
   requiredFields: string | null;
   actionEndpoint: string | null;
+  normalizedIntent: string | null;
+  isNewIntentCandidate: boolean;
+  similarityScore: number;
+  matchedExistingIntent: string | null;
   status: string;
   approvedBy: string | null;
   approvedAt: string | null;
@@ -3917,7 +3921,8 @@ function DiscoveryTab({ discoveredIntents }: { discoveredIntents: DiscoveredInte
 
   const discovery = useSSEWorkflow("/api/training/domain-discovery");
 
-  const pending = discoveredIntents.filter(i => i.status === "pending");
+  const pending = discoveredIntents.filter(i => i.status === "pending" && i.isNewIntentCandidate);
+  const autoMapped = discoveredIntents.filter(i => i.status === "auto_mapped");
   const approved = discoveredIntents.filter(i => i.status === "approved");
   const rejected = discoveredIntents.filter(i => i.status === "rejected");
 
@@ -3999,11 +4004,17 @@ function DiscoveryTab({ discoveredIntents }: { discoveredIntents: DiscoveredInte
         )}
       </Card>
 
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-4 gap-2">
         <Card>
           <CardContent className="p-4 text-center">
             <p className="text-2xl font-bold">{pending.length}</p>
-            <p className="text-xs text-muted-foreground">Venter godkjenning</p>
+            <p className="text-xs text-muted-foreground">Nye kandidater</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4 text-center">
+            <p className="text-2xl font-bold text-blue-600">{autoMapped.length}</p>
+            <p className="text-xs text-muted-foreground">Auto-mappet</p>
           </CardContent>
         </Card>
         <Card>
@@ -4048,6 +4059,20 @@ function DiscoveryTab({ discoveredIntents }: { discoveredIntents: DiscoveredInte
                           </Badge>
                         </div>
                         <p className="text-sm text-muted-foreground">{intent.description}</p>
+                        {intent.normalizedIntent && intent.normalizedIntent !== intent.suggestedIntent && (
+                          <div className="flex flex-wrap items-center gap-1 mt-1">
+                            <span className="text-xs text-muted-foreground">Normalisert:</span>
+                            <span className="text-xs font-mono font-medium">{intent.normalizedIntent}</span>
+                            {intent.matchedExistingIntent && (
+                              <Badge variant="outline" className="text-xs no-default-hover-elevate no-default-active-elevate">
+                                {Math.round(intent.similarityScore * 100)}% lik {intent.matchedExistingIntent}
+                              </Badge>
+                            )}
+                          </div>
+                        )}
+                        <Badge variant="destructive" className="text-xs mt-1 no-default-hover-elevate no-default-active-elevate">
+                          Ny intent-kandidat — krever godkjenning
+                        </Badge>
                         {intent.category && (
                           <p className="text-xs text-muted-foreground mt-1">Kategori: {intent.category}</p>
                         )}
@@ -4163,6 +4188,56 @@ function DiscoveryTab({ discoveredIntents }: { discoveredIntents: DiscoveredInte
                     )}
                   </CardContent>
                 </Card>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {autoMapped.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex flex-wrap items-center gap-2">
+              <Link2 className="h-4 w-4 text-blue-600" />
+              Auto-mappet til eksisterende intents ({autoMapped.length})
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">Disse klyngene ble automatisk koblet til eksisterende intents (likhet &gt; 75%). Ingen manuell godkjenning nødvendig.</p>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {autoMapped.map((intent) => (
+                <div key={intent.id} className="flex flex-wrap items-center justify-between gap-2 p-2 rounded-md border">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-mono text-sm text-muted-foreground line-through" data-testid={`text-suggested-${intent.id}`}>{intent.suggestedIntent}</span>
+                      <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                      <span className="font-mono text-sm font-medium" data-testid={`text-normalized-${intent.id}`}>{intent.normalizedIntent || intent.suggestedIntent}</span>
+                      <Badge variant="outline" className="text-blue-600 no-default-hover-elevate no-default-active-elevate">
+                        {Math.round(intent.similarityScore * 100)}% likhet
+                      </Badge>
+                      <Badge variant={intent.actionable ? "default" : "secondary"} className="no-default-hover-elevate no-default-active-elevate">
+                        {intent.actionable ? "Transaksjonell" : "Informasjonell"}
+                      </Badge>
+                      <Badge variant="outline" className="no-default-hover-elevate no-default-active-elevate">
+                        {intent.ticketCount} tickets
+                      </Badge>
+                    </div>
+                    {intent.matchedExistingIntent && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Arvet fra: <span className="font-mono font-medium">{intent.matchedExistingIntent}</span>
+                        {intent.category && <span> | Kategori: {intent.category}</span>}
+                      </p>
+                    )}
+                  </div>
+                  {!intent.promotedToPlaybook && (
+                    <Button variant="outline" onClick={() => promoteIntent(intent.id)} data-testid={`button-promote-mapped-${intent.id}`}>
+                      <ArrowRight className="h-3 w-3 mr-1" /> Promoter
+                    </Button>
+                  )}
+                  {intent.promotedToPlaybook && (
+                    <Badge variant="outline" className="text-green-600 no-default-hover-elevate no-default-active-elevate">I Playbook</Badge>
+                  )}
+                </div>
               ))}
             </div>
           </CardContent>

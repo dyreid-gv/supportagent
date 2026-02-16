@@ -1477,14 +1477,15 @@ export class DatabaseStorage implements IStorage {
 
   async promoteDiscoveredIntentToPlaybook(id: number): Promise<void> {
     const [intent] = await db.select().from(discoveredIntents).where(eq(discoveredIntents.id, id));
-    if (!intent || intent.status !== "approved") {
-      throw new Error("Intent must be approved before promoting to playbook");
+    if (!intent || (intent.status !== "approved" && intent.status !== "auto_mapped")) {
+      throw new Error("Intent must be approved or auto-mapped before promoting to playbook");
     }
 
     const actionType = intent.actionable ? "TRANSACTIONAL" : "INFO_ONLY";
+    const intentName = intent.normalizedIntent || intent.suggestedIntent;
 
     await this.upsertPlaybookEntry({
-      intent: intent.suggestedIntent,
+      intent: intentName,
       hjelpesenterCategory: intent.category || null,
       keywords: intent.keywords || null,
       avgConfidence: intent.confidence || 0.8,

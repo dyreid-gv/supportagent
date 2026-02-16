@@ -45,7 +45,7 @@ A light/dark mode toggle is available for user preference.
 *   **Pureservice Ticket Ingestion**: Fetches closed tickets with pagination.
 *   **GDPR Scrubbing**: Regex-based PII masking for compliance.
 *   **Hjelpesenter Category Mapping**: AI-driven categorization using 9 DyreID categories and 60 subcategories loaded from CSV.
-*   **Uncategorized Ticket Analysis**: Cluster analysis for theme identification.
+*   **Uncategorized Ticket Analysis / Domain Discovery**: Cluster analysis for theme identification. Includes Intent Normalization Layer (Step 2B) that uses GPT-4o to compare discovered intent clusters against both Help Center intents (INTENT_DEFINITIONS) and existing Playbook entries. Auto-maps when semantic similarity > 0.75 (inheriting operational properties from matched intents) or flags as new candidates requiring human review when < 0.75. Auto-mapped intents inherit actionable, requiredFields, endpoint, category from matched Playbook entries, or category from Help Center intents. Dashboard shows 4 stat cards (New Candidates, Auto-mapped, Approved, Rejected) and auto-mapped section with original→normalized mapping, similarity scores, and promote buttons.
 *   **Intent Classification**: Classifies customer intent using 62 predefined intents across 10 categories.
 *   **Resolution Extraction**: Extracts step-by-step resolution patterns from dialogues.
 *   **Uncertainty Detector**: Flags low-confidence classifications for manual review.
