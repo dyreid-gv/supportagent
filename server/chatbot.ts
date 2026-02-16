@@ -1842,20 +1842,27 @@ async function matchUserIntent(
     }
   }
 
-  if (isIndexReady()) {
-    const semanticResult = await findSemanticMatch(message, 0.78);
-    if (semanticResult) {
-      const semanticPlaybook = await storage.getPlaybookByIntent(semanticResult.intentId);
-      if (semanticPlaybook) {
-        session.intent = semanticResult.intentId;
-        session.playbook = semanticPlaybook;
-        session.collectedData = {};
-        return { intent: semanticResult.intentId, playbook: semanticPlaybook, method: `semantic-match (${semanticResult.similarity.toFixed(2)})` };
-      }
-      session.intent = semanticResult.intentId;
-      session.collectedData = {};
-      return { intent: semanticResult.intentId, playbook: null, method: `semantic-match-no-playbook (${semanticResult.similarity.toFixed(2)})` };
+  try {
+    if (!isIndexReady()) {
+      await refreshIntentIndex();
     }
+    if (isIndexReady()) {
+      const semanticResult = await findSemanticMatch(message, 0.78);
+      if (semanticResult) {
+        const semanticPlaybook = await storage.getPlaybookByIntent(semanticResult.intentId);
+        if (semanticPlaybook) {
+          session.intent = semanticResult.intentId;
+          session.playbook = semanticPlaybook;
+          session.collectedData = {};
+          return { intent: semanticResult.intentId, playbook: semanticPlaybook, method: `semantic-match (${semanticResult.similarity.toFixed(2)})` };
+        }
+        session.intent = semanticResult.intentId;
+        session.collectedData = {};
+        return { intent: semanticResult.intentId, playbook: null, method: `semantic-match-no-playbook (${semanticResult.similarity.toFixed(2)})` };
+      }
+    }
+  } catch (err: any) {
+    console.warn("[SemanticMatch] Skipped due to error:", err.message);
   }
 
   const keywordMatch = await storage.searchPlaybookByKeywords(message);
