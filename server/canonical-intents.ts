@@ -1,5 +1,7 @@
 import { storage } from "./storage";
 import { INTENT_DEFINITIONS } from "@shared/intents";
+import { generateIntentEmbedding } from "./embeddings";
+import { refreshIntentIndex } from "./intent-index";
 
 const TEMPLATE_CATEGORY_MAPPING: Record<number, { category: string; subcategory: string; ticketType: string; intent: string }> = {
   50: { category: "ID-søk", subcategory: "Generelt om ID-søk", ticketType: "Generell henvendelse", intent: "IDSearchHelp" },
@@ -35,10 +37,30 @@ export function isUncategorized(ticket: { categoryId?: number | null; category?:
   return false;
 }
 
-export async function seedCanonicalIntents(): Promise<{ seeded: number; skipped: number }> {
+export async function generateAndStoreEmbedding(intentId: string): Promise<void> {
+  const intent = await storage.getCanonicalIntentById(intentId);
+  if (!intent) return;
+  try {
+    const embedding = await generateIntentEmbedding({
+      intentId: intent.intentId,
+      category: intent.category,
+      subcategory: intent.subcategory,
+      description: intent.description,
+      keywords: intent.keywords,
+      infoText: intent.infoText,
+    });
+    await storage.updateCanonicalIntent(intent.id, { embedding } as any);
+  } catch (err: any) {
+    console.error(`[Embedding] Failed for ${intentId}:`, err.message);
+  }
+}
+
+export async function seedCanonicalIntents(): Promise<{ seeded: number; skipped: number; embedded: number }> {
   let seeded = 0;
   let skipped = 0;
+  let embedded = 0;
   const seen = new Set<string>();
+  const allIntentIds: string[] = [];
 
   for (const def of INTENT_DEFINITIONS) {
     if (seen.has(def.intent)) { skipped++; continue; }
@@ -53,6 +75,7 @@ export async function seedCanonicalIntents(): Promise<{ seeded: number; skipped:
       keywords: def.keywords.join(", "),
       description: def.description,
     });
+    allIntentIds.push(def.intent);
     seeded++;
   }
 
@@ -78,6 +101,7 @@ export async function seedCanonicalIntents(): Promise<{ seeded: number; skipped:
       approved: true,
       description: mapping.ticketType,
     });
+    allIntentIds.push(mapping.intent);
     seeded++;
   }
 
@@ -110,10 +134,24 @@ export async function seedCanonicalIntents(): Promise<{ seeded: number; skipped:
       keywords: entry.keywords || undefined,
       description: entry.combinedResponse?.substring(0, 200) || undefined,
     });
+    allIntentIds.push(entry.intent);
     seeded++;
   }
 
-  return { seeded, skipped };
+  console.log(`[Seed] Generating embeddings for ${allIntentIds.length} intents...`);
+  for (const intentId of allIntentIds) {
+    try {
+      await generateAndStoreEmbedding(intentId);
+      embedded++;
+    } catch (err: any) {
+      console.error(`[Seed] Embedding failed for ${intentId}:`, err.message);
+    }
+  }
+
+  await refreshIntentIndex();
+  console.log(`[Seed] Complete: ${seeded} seeded, ${embedded} embedded, ${skipped} skipped`);
+
+  return { seeded, skipped, embedded };
 }
 
 export function getTemplateCategoryMapping() {

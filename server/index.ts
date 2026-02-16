@@ -2,6 +2,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import { refreshIntentIndex } from "./intent-index";
 
 const app = express();
 const httpServer = createServer(app);
@@ -98,6 +99,11 @@ app.use((req, res, next) => {
     },
     () => {
       log(`serving on port ${port}`);
+      refreshIntentIndex().then(count => {
+        log(`[IntentIndex] Loaded ${count} approved intents with embeddings at startup`);
+      }).catch(err => {
+        console.error("[IntentIndex] Failed to load at startup:", err.message);
+      });
     },
   );
 })();

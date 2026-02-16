@@ -1,5 +1,4 @@
 import OpenAI from "openai";
-import { INTENTS, INTENT_DEFINITIONS, INTENT_BY_NAME } from "@shared/intents";
 import { eq } from "drizzle-orm";
 import { db } from "./db";
 import { storage } from "./storage";
@@ -7,6 +6,7 @@ import { getMinSideContext, performAction, lookupOwnerByPhone, lookupByChipNumbe
 import type { ChipLookupResult } from "./minside-sandbox";
 import { getStoredSession } from "./minside-client";
 import { messages, type PlaybookEntry, type ServicePrice, type ResponseTemplate } from "@shared/schema";
+import { findSemanticMatch, getApprovedIntentIds, isIndexReady, refreshIntentIndex } from "./intent-index";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -1679,7 +1679,12 @@ async function gptIntentInterpretation(
   userMessage: string
 ): Promise<{ intent: string | null; confidence: number }> {
   try {
-    const allowlistedIntents = INTENTS.join(", ");
+    const approvedIntents = getApprovedIntentIds();
+    if (approvedIntents.length === 0) {
+      console.warn("[GPT Intent] No approved canonical intents available — skipping");
+      return { intent: null, confidence: 0 };
+    }
+    const allowlistedIntents = approvedIntents.join(", ");
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       max_completion_tokens: 256,
@@ -1721,7 +1726,7 @@ Svar KUN med JSON: {"intent": "IntentNavn", "confidence": 0.85}`,
     const result = JSON.parse(text);
 
     if (result.intent && typeof result.confidence === "number") {
-      if (!INTENTS.includes(result.intent)) {
+      if (!approvedIntents.includes(result.intent)) {
         return { intent: null, confidence: 0 };
       }
       return { intent: result.intent, confidence: result.confidence };
@@ -1834,6 +1839,22 @@ async function matchUserIntent(
       session.playbook = playbook;
       session.collectedData = {};
       return { intent: quickIntent, playbook, method: "quick-match" };
+    }
+  }
+
+  if (isIndexReady()) {
+    const semanticResult = await findSemanticMatch(message, 0.78);
+    if (semanticResult) {
+      const semanticPlaybook = await storage.getPlaybookByIntent(semanticResult.intentId);
+      if (semanticPlaybook) {
+        session.intent = semanticResult.intentId;
+        session.playbook = semanticPlaybook;
+        session.collectedData = {};
+        return { intent: semanticResult.intentId, playbook: semanticPlaybook, method: `semantic-match (${semanticResult.similarity.toFixed(2)})` };
+      }
+      session.intent = semanticResult.intentId;
+      session.collectedData = {};
+      return { intent: semanticResult.intentId, playbook: null, method: `semantic-match-no-playbook (${semanticResult.similarity.toFixed(2)})` };
     }
   }
 

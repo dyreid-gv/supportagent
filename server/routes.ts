@@ -31,6 +31,8 @@ import {
   runDomainDiscovery,
   type BatchMetrics,
 } from "./training-agent";
+import { generateAndStoreEmbedding } from "./canonical-intents";
+import { refreshIntentIndex } from "./intent-index";
 import {
   rawTickets,
   scrubbedTickets,
@@ -1737,6 +1739,18 @@ export async function registerRoutes(
         if (req.body[key] !== undefined) update[key] = req.body[key];
       }
       await storage.updateCanonicalIntent(id, update);
+
+      const embeddingRelevantFields = ["category", "subcategory", "description", "keywords", "infoText"];
+      const needsReEmbed = embeddingRelevantFields.some(f => update[f] !== undefined);
+      if (needsReEmbed || update.approved !== undefined) {
+        const allIntents = await storage.getCanonicalIntents();
+        const intent = allIntents.find(i => i.id === id);
+        if (intent) {
+          await generateAndStoreEmbedding(intent.intentId);
+        }
+        await refreshIntentIndex();
+      }
+
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -1747,6 +1761,7 @@ export async function registerRoutes(
     try {
       const id = parseInt(req.params.id);
       await storage.deleteCanonicalIntent(id);
+      await refreshIntentIndex();
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -1799,6 +1814,9 @@ export async function registerRoutes(
       await db.update(discoveredClusters)
         .set({ status: "promoted" })
         .where(eq(discoveredClusters.id, id));
+
+      await generateAndStoreEmbedding(intentId);
+      await refreshIntentIndex();
 
       res.json({ success: true, intentId, message: "Cluster promotert til canonical intent (venter på godkjenning)" });
     } catch (error: any) {
