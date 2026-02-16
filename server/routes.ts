@@ -26,6 +26,7 @@ import {
   runDialogPatternAnalysis,
   runReclassification,
   runQualityAssessment,
+  runInfoTextPopulation,
   type BatchMetrics,
 } from "./training-agent";
 import {
@@ -1462,6 +1463,32 @@ export async function registerRoutes(
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
+  });
+
+  // ─── INFORMATIONAL PLAYBOOK POPULATION ──────────────────────────────
+  app.post("/api/training/populate-infotext", async (_req, res) => {
+    sseHeaders(res);
+    const runId = await storage.createTrainingRun("infotext_population", 0);
+
+    try {
+      const result = await runInfoTextPopulation((msg, pct) => {
+        res.write(`data: ${JSON.stringify({ message: msg, progress: pct })}\n\n`);
+      });
+
+      await storage.completeTrainingRun(runId, result.errors);
+
+      res.write(`data: ${JSON.stringify({
+        done: true,
+        populated: result.populated,
+        skipped: result.skipped,
+        noArticle: result.noArticle,
+        errors: result.errors,
+      })}\n\n`);
+    } catch (error: any) {
+      await storage.completeTrainingRun(runId, 1, error.message);
+      res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+    }
+    res.end();
   });
 
   app.post("/api/training/generate-keywords", async (_req, res) => {

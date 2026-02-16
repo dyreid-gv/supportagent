@@ -3120,6 +3120,7 @@ function QualityTab({ stats }: {
 function PlaybookTab({ playbook }: { playbook: PlaybookEntry[] | undefined }) {
   const [expandedEntry, setExpandedEntry] = useState<number | null>(null);
   const [filter, setFilter] = useState<string>("");
+  const infoTextWorkflow = useSSEWorkflow("/api/training/populate-infotext");
 
   const qualityColor: Record<string, string> = {
     high: "text-green-600 dark:text-green-400",
@@ -3164,10 +3165,36 @@ function PlaybookTab({ playbook }: { playbook: PlaybookEntry[] | undefined }) {
           className="max-w-sm"
           data-testid="input-playbook-filter"
         />
+        <Button
+          data-testid="button-populate-infotext"
+          onClick={() => {
+            infoTextWorkflow.run();
+            setTimeout(() => {
+              queryClient.invalidateQueries({ queryKey: ["/api/playbook"] });
+            }, 3000);
+          }}
+          disabled={infoTextWorkflow.isRunning}
+          size="sm"
+        >
+          {infoTextWorkflow.isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+          {infoTextWorkflow.isRunning ? "Genererer..." : "Populer InfoText"}
+        </Button>
         <Badge variant="outline">{filtered.length} entries</Badge>
         {withQuality.length > 0 && <Badge variant="secondary">{withQuality.length} kvalitetsvurdert</Badge>}
         {needsImprovementCount > 0 && <Badge variant="destructive">{needsImprovementCount} trenger forbedring</Badge>}
+        {infoTextWorkflow.isRunning && <Progress value={infoTextWorkflow.progress} className="flex-1 min-w-[200px]" />}
       </div>
+      {infoTextWorkflow.error && (
+        <div className="flex items-center gap-1 text-xs text-destructive">
+          <AlertCircle className="h-3 w-3 shrink-0" />
+          <span>{infoTextWorkflow.error}</span>
+        </div>
+      )}
+      {infoTextWorkflow.logs.length > 0 && (
+        <div className="text-xs text-muted-foreground max-h-20 overflow-y-auto border rounded-md p-2">
+          {infoTextWorkflow.logs.slice(-5).map((l, i) => <div key={i}>{l}</div>)}
+        </div>
+      )}
 
       <div className="grid gap-3 md:grid-cols-4">
         <Card>

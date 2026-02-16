@@ -59,6 +59,18 @@ function chunk<T>(arr: T[], size: number): T[][] {
 
 const KNOWN_INTENTS = INTENTS;
 
+const INTENT_TO_HELPCENTER_CATEGORY: Record<string, string> = {
+  "DyreID-appen": "App",
+  "QR-brikke": "Produkter - QR Tag",
+  "Smart Tag": "Produkter - Smart Tag",
+  "Utenlandsregistrering": "Registrering",
+  "Eierskifte": "Eierskifte",
+  "Min side": "Min side",
+  "Familiedeling": "Familiedeling",
+  "Savnet/Funnet": "Savnet/Funnet",
+  "ID-søk": "ID-søk",
+};
+
 function formatIntentsForPrompt(): string {
   const byCategory: Record<string, typeof INTENT_DEFINITIONS> = {};
   for (const d of INTENT_DEFINITIONS) {
@@ -2109,4 +2121,220 @@ Return JSON:
   onProgress?.(`Ferdig! ${total} vurdert. HIGH: ${qualityCounts.high} (${highPct}%), MEDIUM: ${qualityCounts.medium}, LOW: ${qualityCounts.low}, NONE: ${qualityCounts.none} (${nonePct}%). ${metrics.apiCalls} API-kall.`, 100);
 
   return { metrics };
+}
+
+// ─── INFORMATIONAL PLAYBOOK POPULATION ──────────────────────────────────────
+// Matches each informational intent to Help Center articles and generates
+// conversational infoText (combinedResponse) from article content.
+// This ensures informational responses answer directly instead of linking.
+export async function runInfoTextPopulation(
+  onProgress?: (msg: string, pct: number) => void
+): Promise<{ populated: number; skipped: number; noArticle: number; errors: number }> {
+  let populated = 0;
+  let skipped = 0;
+  let noArticle = 0;
+  let errors = 0;
+
+  onProgress?.("Starter informasjonstekst-populering fra Hjelpesenter-artikler...", 0);
+
+  const articles = await storage.getHelpCenterArticles();
+  if (articles.length === 0) {
+    onProgress?.("Ingen hjelpesenter-artikler funnet. Kjør scraping først.", 100);
+    return { populated: 0, skipped: 0, noArticle: 0, errors: 0 };
+  }
+  onProgress?.(`Lastet ${articles.length} hjelpesenter-artikler`, 5);
+
+  const informationalIntents = INTENT_DEFINITIONS.filter(d => {
+    const isTransactional = [
+      "OwnershipTransferWeb", "OwnershipTransferApp",
+      "ReportLostPet", "ReportFoundPet",
+      "SmartTagActivation", "SmartTagQRActivation",
+      "QRTagActivation", "QRUpdateContact",
+      "ForeignRegistration",
+      "GDPRDelete", "GDPRExport",
+      "LoginIssue", "LoginProblem",
+      "PetDeceased", "MissingPetProfile",
+      "WrongInfo", "AddContactInfo",
+      "FamilySharing", "FamilySharingRequest",
+      "ViewMyPets",
+    ].includes(d.intent);
+    return !isTransactional;
+  });
+
+  onProgress?.(`${informationalIntents.length} informasjons-intents å behandle`, 10);
+
+  for (let i = 0; i < informationalIntents.length; i++) {
+    const intentDef = informationalIntents[i];
+    const pct = Math.round(10 + ((i / informationalIntents.length) * 80));
+    onProgress?.(`Behandler ${i + 1}/${informationalIntents.length}: ${intentDef.intent}`, pct);
+
+    try {
+      const hcCategory = INTENT_TO_HELPCENTER_CATEGORY[intentDef.category] || intentDef.category;
+
+      const matchingArticles = articles.filter(a => {
+        if (!a.hjelpesenterCategory) return false;
+        const catMatch = a.hjelpesenterCategory === hcCategory;
+        if (!catMatch) return false;
+
+        if (a.hjelpesenterSubcategory) {
+          const subNorm = a.hjelpesenterSubcategory.toLowerCase().trim();
+          const intentSubNorm = intentDef.subcategory.toLowerCase().trim();
+          if (subNorm === intentSubNorm) return true;
+          if (subNorm.includes(intentSubNorm) || intentSubNorm.includes(subNorm)) return true;
+          const intentKeywords = intentDef.keywords || [];
+          const keywordMatch = intentKeywords.some(kw => subNorm.includes(kw.toLowerCase()));
+          if (keywordMatch) return true;
+        }
+        return false;
+      });
+
+      if (matchingArticles.length === 0) {
+        const fallbackArticles = articles.filter(a =>
+          a.hjelpesenterCategory === hcCategory && a.bodyText && a.bodyText.length > 50
+        );
+        const bestFallback = fallbackArticles.find(a => {
+          const titleLower = (a.title || "").toLowerCase();
+          return intentDef.keywords.some(kw => titleLower.includes(kw.toLowerCase()));
+        });
+
+        if (!bestFallback) {
+          log(`InfoText: Ingen artikkel funnet for ${intentDef.intent} (kategori: ${hcCategory})`, "training");
+          noArticle++;
+          continue;
+        }
+        matchingArticles.push(bestFallback);
+      }
+
+      const combinedBodyText = matchingArticles
+        .map(a => a.bodyText || "")
+        .filter(t => t.length > 20)
+        .join("\n\n---\n\n")
+        .substring(0, 3000);
+
+      if (!combinedBodyText || combinedBodyText.length < 20) {
+        log(`InfoText: Tom artikkeltekst for ${intentDef.intent}`, "training");
+        noArticle++;
+        continue;
+      }
+
+      const prompt = `Du er en informasjonsassistent for DyreID (Norges nasjonale kjæledyrregister).
+
+OPPGAVE: Generer en klar, faktabasert informasjonstekst som svarer direkte på spørsmål om "${intentDef.subcategory}".
+
+INTENT: ${intentDef.intent}
+KATEGORI: ${intentDef.category}
+BESKRIVELSE: ${intentDef.description}
+
+KILDE (Hjelpesenter-artikkeltekst):
+${combinedBodyText}
+
+STRENGE REGLER:
+- Skriv en konsis, vennlig tekst som forklarer temaet DIREKTE
+- Bruk KUN informasjon fra kildeteksten over
+- IKKE inkluder lenker eller URL-er
+- IKKE foreslå å kontakte support
+- IKKE beskriv register-endrende prosedyrer (som å logge inn og trykke knapper steg-for-steg)
+- IKKE nevn veterinær eller chipinnsetting
+- IKKE finn opp priser som ikke står i kilden
+- Teksten skal kunne omformuleres av en chatbot basert på brukerens spørsmål
+- Maks 150 ord
+- Skriv på norsk bokmål
+
+Returner KUN teksten, ingen JSON eller formatering.`;
+
+      const rawResponse = await callOpenAI(prompt, "gpt-4o", 512);
+      const infoText = rawResponse.replace(/^["'\s]+|["'\s]+$/g, "").trim();
+
+      if (!infoText || infoText.length < 15) {
+        log(`InfoText: For kort GPT-respons for ${intentDef.intent} (${infoText?.length || 0} tegn): "${(infoText || '').substring(0, 80)}"`, "training");
+        errors++;
+        continue;
+      }
+
+      if (infoText.includes("http") || infoText.includes("www.")) {
+        log(`InfoText: GPT inkluderte URL for ${intentDef.intent}, filtrerer bort`, "training");
+        errors++;
+        continue;
+      }
+
+      const existingEntries = await db.execute(sql`
+        SELECT intent, combined_response FROM playbook_entries WHERE intent = ${intentDef.intent}
+      `);
+      const existing = existingEntries.rows[0] as any;
+
+      if (existing) {
+        await db.execute(sql`
+          UPDATE playbook_entries
+          SET combined_response = ${infoText},
+              action_type = 'INFO_ONLY',
+              help_center_article_url = ${matchingArticles[0]?.url || null},
+              help_center_article_title = ${matchingArticles[0]?.title || null},
+              help_center_content_summary = ${combinedBodyText.substring(0, 500)},
+              last_updated = CURRENT_TIMESTAMP
+          WHERE intent = ${intentDef.intent}
+        `);
+      } else {
+        await storage.upsertPlaybookEntry({
+          intent: intentDef.intent,
+          hjelpesenterCategory: intentDef.category,
+          hjelpesenterSubcategory: intentDef.subcategory,
+          keywords: intentDef.keywords.join(", "),
+          requiredRuntimeData: null,
+          primaryAction: null,
+          primaryEndpoint: null,
+          resolutionSteps: null,
+          successIndicators: null,
+          avgConfidence: 0.9,
+          ticketCount: 0,
+          paymentRequiredProbability: 0,
+          autoCloseProbability: 0,
+          isActive: true,
+          hasAutoreplyAvailable: false,
+          autoreplyTemplateId: null,
+          autoreplyTemplateName: null,
+          autoreplyContent: null,
+          typicalDialogPattern: null,
+          avgMessagesAfterAutoreply: null,
+          dialogPatternDistribution: null,
+          wasReclassified: false,
+          originalCategories: null,
+          reclassifiedFrom: null,
+          avgResolutionQuality: null,
+          qualityDistribution: null,
+          commonMissingElements: null,
+          commonPositiveElements: null,
+          needsImprovement: false,
+          helpCenterArticleId: matchingArticles[0]?.articleId || null,
+          helpCenterArticleUrl: matchingArticles[0]?.url || null,
+          helpCenterArticleTitle: matchingArticles[0]?.title || null,
+          officialProcedure: null,
+          helpCenterContentSummary: combinedBodyText.substring(0, 500),
+          requiresLogin: false,
+          requiresAction: false,
+          actionType: "INFO_ONLY",
+          apiEndpoint: null,
+          httpMethod: null,
+          requiredRuntimeDataArray: null,
+          paymentRequired: false,
+          paymentAmount: null,
+          chatbotSteps: null,
+          combinedResponse: infoText,
+          successfulResolutions: 0,
+          failedResolutions: 0,
+          totalUses: 0,
+          successRate: 0,
+        });
+      }
+
+      populated++;
+      log(`InfoText: Generert for ${intentDef.intent} (${infoText.length} tegn, ${matchingArticles.length} artikler)`, "training");
+
+    } catch (err: any) {
+      log(`InfoText error for ${intentDef.intent}: ${err.message}`, "training");
+      errors++;
+    }
+  }
+
+  onProgress?.(`Ferdig! ${populated} populert, ${skipped} hoppet over, ${noArticle} uten artikkel, ${errors} feil`, 100);
+  return { populated, skipped, noArticle, errors };
 }
