@@ -77,6 +77,7 @@ interface TrainingStats {
     uncertaintyCases: number;
     uncategorizedThemes: number;
     reviewQueuePending: number;
+    discoveredIntentsPending: number;
   };
   runs: {
     id: number;
@@ -211,6 +212,34 @@ interface MinsideFieldMapping {
   updatedAt: string | null;
 }
 
+interface DiscoveredIntent {
+  id: number;
+  clusterName: string;
+  suggestedIntent: string;
+  description: string | null;
+  category: string | null;
+  ticketCount: number;
+  ticketIds: string | null;
+  sampleMessages: string[] | null;
+  resolutionSteps: string | null;
+  agentActions: string | null;
+  actionable: boolean;
+  requiresOtp: boolean;
+  affectsRegister: boolean;
+  affectsOwnership: boolean;
+  affectsPayment: boolean;
+  confidence: number;
+  keywords: string | null;
+  requiredFields: string | null;
+  actionEndpoint: string | null;
+  status: string;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  rejectionReason: string | null;
+  promotedToPlaybook: boolean;
+  discoveredAt: string;
+}
+
 interface UncertaintyCase {
   id: number;
   ticketId: number;
@@ -283,6 +312,7 @@ function useSSEWorkflow(endpoint: string) {
       queryClient.invalidateQueries({ queryKey: ["/api/training/help-center-matches"] });
       queryClient.invalidateQueries({ queryKey: ["/api/training/autoreply-stats"] });
       queryClient.invalidateQueries({ queryKey: ["/api/training/dialog-pattern-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/discovered-intents"] });
     }
   }, [endpoint]);
 
@@ -661,6 +691,10 @@ export default function Dashboard() {
     queryKey: ["/api/minside-mappings"],
   });
 
+  const { data: discoveredIntents } = useQuery<DiscoveredIntent[]>({
+    queryKey: ["/api/discovered-intents"],
+  });
+
   interface FeedbackStats {
     total: number;
     resolved: number;
@@ -889,6 +923,9 @@ export default function Dashboard() {
           </TabsTrigger>
           <TabsTrigger value="minside-mappings" data-testid="tab-minside-mappings">
             Min Side-kobling ({minsideMappings?.length || 0})
+          </TabsTrigger>
+          <TabsTrigger value="discovery" data-testid="tab-discovery">
+            Discovery ({stats?.discoveredIntentsPending || 0})
           </TabsTrigger>
         </TabsList>
 
@@ -1661,6 +1698,10 @@ export default function Dashboard() {
 
         <TabsContent value="minside-mappings" className="mt-4">
           <MinsideMappingsTab mappings={minsideMappings || []} />
+        </TabsContent>
+
+        <TabsContent value="discovery" className="mt-4">
+          <DiscoveryTab discoveredIntents={discoveredIntents || []} />
         </TabsContent>
       </Tabs>
     </div>
@@ -3860,6 +3901,338 @@ function MinsideMappingsTab({ mappings }: { mappings: MinsideFieldMapping[] }) {
             ))}
           </div>
         </ScrollArea>
+      )}
+    </div>
+  );
+}
+
+function DiscoveryTab({ discoveredIntents }: { discoveredIntents: DiscoveredIntent[] }) {
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState<{ suggestedIntent: string; actionable: boolean; category: string; resolutionSteps: string; requiredFields: string; actionEndpoint: string }>({
+    suggestedIntent: "", actionable: false, category: "", resolutionSteps: "", requiredFields: "", actionEndpoint: "",
+  });
+  const [rejectReason, setRejectReason] = useState("");
+  const [rejectingId, setRejectingId] = useState<number | null>(null);
+
+  const discovery = useSSEWorkflow("/api/training/domain-discovery");
+
+  const pending = discoveredIntents.filter(i => i.status === "pending");
+  const approved = discoveredIntents.filter(i => i.status === "approved");
+  const rejected = discoveredIntents.filter(i => i.status === "rejected");
+
+  const startEdit = (intent: DiscoveredIntent) => {
+    setEditingId(intent.id);
+    setEditForm({
+      suggestedIntent: intent.suggestedIntent,
+      actionable: intent.actionable,
+      category: intent.category || "",
+      resolutionSteps: intent.resolutionSteps || "",
+      requiredFields: intent.requiredFields || "",
+      actionEndpoint: intent.actionEndpoint || "",
+    });
+  };
+
+  const approveIntent = async (id: number) => {
+    try {
+      const body = editingId === id ? { approvedBy: "admin", ...editForm } : { approvedBy: "admin" };
+      await apiRequest("POST", `/api/discovered-intents/${id}/approve`, body);
+      queryClient.invalidateQueries({ queryKey: ["/api/discovered-intents"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/training/stats"] });
+      setEditingId(null);
+    } catch (err: any) {
+      console.error(err);
+    }
+  };
+
+  const rejectIntent = async (id: number) => {
+    try {
+      await apiRequest("POST", `/api/discovered-intents/${id}/reject`, { reason: rejectReason });
+      queryClient.invalidateQueries({ queryKey: ["/api/discovered-intents"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/training/stats"] });
+      setRejectingId(null);
+      setRejectReason("");
+    } catch (err: any) {
+      console.error(err);
+    }
+  };
+
+  const promoteIntent = async (id: number) => {
+    try {
+      await apiRequest("POST", `/api/discovered-intents/${id}/promote`, {});
+      queryClient.invalidateQueries({ queryKey: ["/api/discovered-intents"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/playbook"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/training/stats"] });
+    } catch (err: any) {
+      console.error(err);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0 pb-2">
+          <div>
+            <CardTitle className="text-base">Domain Discovery Pipeline</CardTitle>
+            <p className="text-sm text-muted-foreground mt-1">
+              Analyser ukategoriserte tickets for å oppdage nye intents
+            </p>
+          </div>
+          <Button
+            onClick={discovery.run}
+            disabled={discovery.isRunning}
+            data-testid="button-run-discovery"
+          >
+            {discovery.isRunning ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Search className="h-4 w-4 mr-2" />}
+            Kjør Discovery
+          </Button>
+        </CardHeader>
+        {discovery.isRunning && (
+          <CardContent>
+            <Progress value={discovery.progress} className="mb-2" />
+            <ScrollArea className="h-32">
+              {discovery.logs.map((log, i) => (
+                <p key={i} className="text-xs text-muted-foreground font-mono">{log}</p>
+              ))}
+            </ScrollArea>
+          </CardContent>
+        )}
+      </Card>
+
+      <div className="grid grid-cols-3 gap-2">
+        <Card>
+          <CardContent className="p-4 text-center">
+            <p className="text-2xl font-bold">{pending.length}</p>
+            <p className="text-xs text-muted-foreground">Venter godkjenning</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4 text-center">
+            <p className="text-2xl font-bold text-green-600">{approved.length}</p>
+            <p className="text-xs text-muted-foreground">Godkjent</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4 text-center">
+            <p className="text-2xl font-bold text-red-600">{rejected.length}</p>
+            <p className="text-xs text-muted-foreground">Avvist</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {pending.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex flex-wrap items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-yellow-500" />
+              Venter på godkjenning ({pending.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {pending.map((intent) => (
+                <Card key={intent.id} className="border">
+                  <CardContent className="p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2 mb-1">
+                          <span className="font-mono font-medium" data-testid={`text-intent-name-${intent.id}`}>{intent.suggestedIntent}</span>
+                          <Badge variant={intent.actionable ? "default" : "secondary"} className="no-default-hover-elevate no-default-active-elevate">
+                            {intent.actionable ? "Transaksjonell" : "Informasjonell"}
+                          </Badge>
+                          <Badge variant="outline" className="no-default-hover-elevate no-default-active-elevate">
+                            {Math.round(intent.confidence * 100)}% confidence
+                          </Badge>
+                          <Badge variant="outline" className="no-default-hover-elevate no-default-active-elevate">
+                            {intent.ticketCount} tickets
+                          </Badge>
+                        </div>
+                        <p className="text-sm text-muted-foreground">{intent.description}</p>
+                        {intent.category && (
+                          <p className="text-xs text-muted-foreground mt-1">Kategori: {intent.category}</p>
+                        )}
+                        {intent.keywords && (
+                          <p className="text-xs text-muted-foreground mt-1">Nøkkelord: {intent.keywords}</p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Button size="icon" variant="ghost" onClick={() => setExpandedId(expandedId === intent.id ? null : intent.id)} data-testid={`button-expand-${intent.id}`}>
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                        <Button size="icon" variant="ghost" onClick={() => startEdit(intent)} data-testid={`button-edit-intent-${intent.id}`}>
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button size="icon" variant="ghost" onClick={() => approveIntent(intent.id)} data-testid={`button-approve-${intent.id}`}>
+                          <CheckCircle className="h-4 w-4 text-green-600" />
+                        </Button>
+                        <Button size="icon" variant="ghost" onClick={() => setRejectingId(intent.id)} data-testid={`button-reject-${intent.id}`}>
+                          <X className="h-4 w-4 text-red-600" />
+                        </Button>
+                      </div>
+                    </div>
+
+                    {expandedId === intent.id && (
+                      <div className="mt-3 border-t pt-3 space-y-2">
+                        {intent.resolutionSteps && (
+                          <div>
+                            <p className="text-xs font-medium mb-1">Løsningssteg:</p>
+                            <p className="text-xs text-muted-foreground whitespace-pre-wrap">{intent.resolutionSteps}</p>
+                          </div>
+                        )}
+                        {intent.agentActions && (
+                          <div>
+                            <p className="text-xs font-medium mb-1">Agent-handlinger:</p>
+                            <p className="text-xs text-muted-foreground">{intent.agentActions}</p>
+                          </div>
+                        )}
+                        <div className="flex flex-wrap gap-2">
+                          {intent.requiresOtp && <Badge variant="outline" className="text-xs no-default-hover-elevate no-default-active-elevate">Krever OTP</Badge>}
+                          {intent.affectsRegister && <Badge variant="outline" className="text-xs no-default-hover-elevate no-default-active-elevate">Endrer register</Badge>}
+                          {intent.affectsOwnership && <Badge variant="outline" className="text-xs no-default-hover-elevate no-default-active-elevate">Eierskap</Badge>}
+                          {intent.affectsPayment && <Badge variant="outline" className="text-xs no-default-hover-elevate no-default-active-elevate">Betaling</Badge>}
+                        </div>
+                        {intent.sampleMessages && intent.sampleMessages.length > 0 && (
+                          <div>
+                            <p className="text-xs font-medium mb-1">Eksempler fra kunder:</p>
+                            {intent.sampleMessages.map((msg, i) => (
+                              <p key={i} className="text-xs text-muted-foreground italic ml-2">"{msg}"</p>
+                            ))}
+                          </div>
+                        )}
+                        {intent.requiredFields && (
+                          <p className="text-xs text-muted-foreground">Nødvendige felt: {intent.requiredFields}</p>
+                        )}
+                        {intent.actionEndpoint && (
+                          <p className="text-xs font-mono text-muted-foreground">Endpoint: {intent.actionEndpoint}</p>
+                        )}
+                      </div>
+                    )}
+
+                    {editingId === intent.id && (
+                      <div className="mt-3 border-t pt-3 space-y-2">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <Label className="text-xs">Intent-navn</Label>
+                            <Input value={editForm.suggestedIntent} onChange={e => setEditForm(p => ({ ...p, suggestedIntent: e.target.value }))} className="text-sm" data-testid="input-edit-intent-name" />
+                          </div>
+                          <div>
+                            <Label className="text-xs">Kategori</Label>
+                            <Input value={editForm.category} onChange={e => setEditForm(p => ({ ...p, category: e.target.value }))} className="text-sm" data-testid="input-edit-category" />
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Switch checked={editForm.actionable} onCheckedChange={v => setEditForm(p => ({ ...p, actionable: v }))} data-testid="switch-actionable" />
+                          <Label className="text-xs">Transaksjonell (krever handling)</Label>
+                        </div>
+                        <div>
+                          <Label className="text-xs">Løsningssteg</Label>
+                          <Textarea value={editForm.resolutionSteps} onChange={e => setEditForm(p => ({ ...p, resolutionSteps: e.target.value }))} className="text-sm" rows={3} data-testid="textarea-resolution-steps" />
+                        </div>
+                        {editForm.actionable && (
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <Label className="text-xs">Nødvendige felt</Label>
+                              <Input value={editForm.requiredFields} onChange={e => setEditForm(p => ({ ...p, requiredFields: e.target.value }))} className="text-sm" placeholder="ownerMobile, tagId" data-testid="input-required-fields" />
+                            </div>
+                            <div>
+                              <Label className="text-xs">Action Endpoint</Label>
+                              <Input value={editForm.actionEndpoint} onChange={e => setEditForm(p => ({ ...p, actionEndpoint: e.target.value }))} className="text-sm" placeholder="/api/pet/..." data-testid="input-action-endpoint" />
+                            </div>
+                          </div>
+                        )}
+                        <div className="flex gap-2">
+                          <Button onClick={() => approveIntent(intent.id)} data-testid={`button-save-approve-${intent.id}`}>
+                            <CheckCircle className="h-4 w-4 mr-1" /> Godkjenn med endringer
+                          </Button>
+                          <Button variant="outline" onClick={() => setEditingId(null)}>Avbryt</Button>
+                        </div>
+                      </div>
+                    )}
+
+                    {rejectingId === intent.id && (
+                      <div className="mt-3 border-t pt-3 flex flex-wrap gap-2 items-end">
+                        <div className="flex-1 min-w-0">
+                          <Label className="text-xs">Begrunnelse for avvisning</Label>
+                          <Input value={rejectReason} onChange={e => setRejectReason(e.target.value)} placeholder="Skriv begrunnelse..." data-testid="input-reject-reason" />
+                        </div>
+                        <Button variant="destructive" onClick={() => rejectIntent(intent.id)} data-testid={`button-confirm-reject-${intent.id}`}>
+                          Avvis
+                        </Button>
+                        <Button variant="outline" onClick={() => setRejectingId(null)}>Avbryt</Button>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {approved.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex flex-wrap items-center gap-2">
+              <CheckCircle className="h-4 w-4 text-green-600" />
+              Godkjente intents ({approved.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {approved.map((intent) => (
+                <div key={intent.id} className="flex flex-wrap items-center justify-between gap-2 p-2 rounded-md border">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-mono text-sm font-medium" data-testid={`text-approved-${intent.id}`}>{intent.suggestedIntent}</span>
+                    <Badge variant={intent.actionable ? "default" : "secondary"} className="no-default-hover-elevate no-default-active-elevate">
+                      {intent.actionable ? "Transaksjonell" : "Informasjonell"}
+                    </Badge>
+                    {intent.promotedToPlaybook ? (
+                      <Badge variant="outline" className="text-green-600 no-default-hover-elevate no-default-active-elevate">I Playbook</Badge>
+                    ) : (
+                      <Button variant="outline" onClick={() => promoteIntent(intent.id)} data-testid={`button-promote-${intent.id}`}>
+                        <ArrowRight className="h-3 w-3 mr-1" /> Promoter til Playbook
+                      </Button>
+                    )}
+                  </div>
+                  <span className="text-xs text-muted-foreground">
+                    Godkjent av {intent.approvedBy}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {rejected.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex flex-wrap items-center gap-2">
+              <X className="h-4 w-4 text-red-600" />
+              Avviste intents ({rejected.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-1">
+              {rejected.map((intent) => (
+                <div key={intent.id} className="flex flex-wrap items-center justify-between gap-2 p-2 text-sm text-muted-foreground">
+                  <span className="font-mono">{intent.suggestedIntent}</span>
+                  <span className="text-xs italic">{intent.rejectionReason || "Ingen begrunnelse"}</span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {discoveredIntents.length === 0 && !discovery.isRunning && (
+        <Card>
+          <CardContent className="p-8 text-center text-muted-foreground">
+            <Search className="h-12 w-12 mx-auto mb-4 opacity-50" />
+            <p>Ingen oppdagede intents ennå.</p>
+            <p className="text-sm mt-1">Kjør Domain Discovery Pipeline for å analysere ukategoriserte tickets.</p>
+          </CardContent>
+        </Card>
       )}
     </div>
   );

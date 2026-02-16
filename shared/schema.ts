@@ -357,6 +357,37 @@ export const trainingRuns = pgTable("training_runs", {
 
 export const insertResolutionQualitySchema = createInsertSchema(resolutionQuality).omit({ id: true });
 export const insertTicketHelpCenterMatchSchema = createInsertSchema(ticketHelpCenterMatches).omit({ id: true });
+export const discoveredIntents = pgTable("discovered_intents", {
+  id: serial("id").primaryKey(),
+  clusterName: text("cluster_name").notNull(),
+  suggestedIntent: text("suggested_intent").notNull(),
+  description: text("description"),
+  category: text("category"),
+  ticketCount: integer("ticket_count").default(0),
+  ticketIds: text("ticket_ids"),
+  sampleMessages: jsonb("sample_messages"),
+  resolutionSteps: text("resolution_steps"),
+  agentActions: text("agent_actions"),
+  actionable: boolean("actionable").default(false),
+  requiresOtp: boolean("requires_otp").default(false),
+  affectsRegister: boolean("affects_register").default(false),
+  affectsOwnership: boolean("affects_ownership").default(false),
+  affectsPayment: boolean("affects_payment").default(false),
+  confidence: real("confidence").default(0),
+  keywords: text("keywords"),
+  requiredFields: text("required_fields"),
+  actionEndpoint: text("action_endpoint"),
+  status: text("status").default("pending"),
+  approvedBy: text("approved_by"),
+  approvedAt: timestamp("approved_at"),
+  rejectionReason: text("rejection_reason"),
+  promotedToPlaybook: boolean("promoted_to_playbook").default(false),
+  discoveredAt: timestamp("discovered_at").default(sql`CURRENT_TIMESTAMP`),
+  discoveryRunId: integer("discovery_run_id"),
+});
+
+export const insertDiscoveredIntentSchema = createInsertSchema(discoveredIntents).omit({ id: true });
+
 export const insertChatbotInteractionSchema = createInsertSchema(chatbotInteractions).omit({ id: true });
 export const insertHelpCenterArticleSchema = createInsertSchema(helpCenterArticles).omit({ id: true });
 export const insertResponseTemplateSchema = createInsertSchema(responseTemplates).omit({ id: true });
@@ -410,3 +441,5 @@ export type InsertTicketHelpCenterMatch = z.infer<typeof insertTicketHelpCenterM
 export type MinsideFieldMapping = typeof minsideFieldMappings.$inferSelect;
 export type InsertMinsideFieldMapping = z.infer<typeof insertMinsideFieldMappingSchema>;
 export type TrainingRun = typeof trainingRuns.$inferSelect;
+export type DiscoveredIntent = typeof discoveredIntents.$inferSelect;
+export type InsertDiscoveredIntent = z.infer<typeof insertDiscoveredIntentSchema>;

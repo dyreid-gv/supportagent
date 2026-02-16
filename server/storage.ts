@@ -36,6 +36,8 @@ import {
   type InsertTicketHelpCenterMatch,
   type InsertResolutionQuality,
   type InsertMinsideFieldMapping,
+  discoveredIntents,
+  type InsertDiscoveredIntent,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -103,6 +105,7 @@ export interface IStorage {
     uncertaintyCases: number;
     uncategorizedThemes: number;
     reviewQueuePending: number;
+    discoveredIntentsPending: number;
   }>;
 
   createTrainingRun(workflow: string, totalTickets: number): Promise<number>;
@@ -591,7 +594,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getTrainingStats() {
-    const [raw, scrubbed, catMap, intents, resolutions, playbook, uncertainty, uncat, pendingReview] = await Promise.all([
+    const [raw, scrubbed, catMap, intents, resolutions, playbook, uncertainty, uncat, pendingReview, discoveredPending] = await Promise.all([
       db.select({ count: count() }).from(rawTickets),
       db.select({ count: count() }).from(scrubbedTickets),
       db.select({ count: count() }).from(categoryMappings),
@@ -601,6 +604,7 @@ export class DatabaseStorage implements IStorage {
       db.select({ count: count() }).from(uncertaintyCases),
       db.select({ count: count() }).from(uncategorizedThemes),
       db.select({ count: count() }).from(reviewQueue).where(eq(reviewQueue.status, "pending")),
+      db.select({ count: count() }).from(discoveredIntents).where(eq(discoveredIntents.status, "pending")),
     ]);
     return {
       rawTickets: raw[0].count,
@@ -612,6 +616,7 @@ export class DatabaseStorage implements IStorage {
       uncertaintyCases: uncertainty[0].count,
       uncategorizedThemes: uncat[0].count,
       reviewQueuePending: pendingReview[0].count,
+      discoveredIntentsPending: discoveredPending[0].count,
     };
   }
 
@@ -1420,6 +1425,86 @@ export class DatabaseStorage implements IStorage {
       }
     }
     return inserted;
+  }
+
+  async insertDiscoveredIntent(intent: InsertDiscoveredIntent): Promise<number> {
+    const [row] = await db.insert(discoveredIntents).values(intent).returning();
+    return row.id;
+  }
+
+  async getDiscoveredIntents(): Promise<typeof discoveredIntents.$inferSelect[]> {
+    return db.select().from(discoveredIntents).orderBy(desc(discoveredIntents.discoveredAt));
+  }
+
+  async getPendingDiscoveredIntents(): Promise<typeof discoveredIntents.$inferSelect[]> {
+    return db.select().from(discoveredIntents)
+      .where(eq(discoveredIntents.status, "pending"))
+      .orderBy(desc(discoveredIntents.confidence));
+  }
+
+  async getDiscoveredIntentCount(): Promise<number> {
+    const result = await db.select({ count: count() }).from(discoveredIntents);
+    return result[0].count;
+  }
+
+  async getPendingDiscoveredIntentCount(): Promise<number> {
+    const result = await db.select({ count: count() }).from(discoveredIntents)
+      .where(eq(discoveredIntents.status, "pending"));
+    return result[0].count;
+  }
+
+  async approveDiscoveredIntent(id: number, approvedBy: string, updates?: { suggestedIntent?: string; actionable?: boolean; category?: string; resolutionSteps?: string; requiredFields?: string; actionEndpoint?: string }): Promise<void> {
+    const data: any = {
+      status: "approved",
+      approvedBy,
+      approvedAt: new Date(),
+    };
+    if (updates?.suggestedIntent) data.suggestedIntent = updates.suggestedIntent;
+    if (updates?.actionable !== undefined) data.actionable = updates.actionable;
+    if (updates?.category) data.category = updates.category;
+    if (updates?.resolutionSteps) data.resolutionSteps = updates.resolutionSteps;
+    if (updates?.requiredFields) data.requiredFields = updates.requiredFields;
+    if (updates?.actionEndpoint) data.actionEndpoint = updates.actionEndpoint;
+    await db.update(discoveredIntents).set(data).where(eq(discoveredIntents.id, id));
+  }
+
+  async rejectDiscoveredIntent(id: number, rejectionReason: string): Promise<void> {
+    await db.update(discoveredIntents).set({
+      status: "rejected",
+      rejectionReason,
+    }).where(eq(discoveredIntents.id, id));
+  }
+
+  async promoteDiscoveredIntentToPlaybook(id: number): Promise<void> {
+    const [intent] = await db.select().from(discoveredIntents).where(eq(discoveredIntents.id, id));
+    if (!intent || intent.status !== "approved") {
+      throw new Error("Intent must be approved before promoting to playbook");
+    }
+
+    const actionType = intent.actionable ? "TRANSACTIONAL" : "INFO_ONLY";
+
+    await this.upsertPlaybookEntry({
+      intent: intent.suggestedIntent,
+      hjelpesenterCategory: intent.category || null,
+      keywords: intent.keywords || null,
+      avgConfidence: intent.confidence || 0.8,
+      ticketCount: intent.ticketCount || 0,
+      isActive: true,
+      requiresLogin: intent.requiresOtp || false,
+      requiresAction: intent.actionable || false,
+      actionType,
+      apiEndpoint: intent.actionEndpoint || null,
+      requiredRuntimeDataArray: intent.requiredFields ? intent.requiredFields.split(",").map(s => s.trim()) : null,
+      paymentRequired: intent.affectsPayment || false,
+      chatbotSteps: intent.resolutionSteps ? intent.resolutionSteps.split("\n").filter(Boolean) : null,
+      combinedResponse: !intent.actionable ? intent.description : null,
+    });
+
+    await db.update(discoveredIntents).set({ promotedToPlaybook: true }).where(eq(discoveredIntents.id, id));
+  }
+
+  async clearDiscoveredIntents(): Promise<void> {
+    await db.delete(discoveredIntents);
   }
 }
 

@@ -27,6 +27,7 @@ import {
   runReclassification,
   runQualityAssessment,
   runInfoTextPopulation,
+  runDomainDiscovery,
   type BatchMetrics,
 } from "./training-agent";
 import {
@@ -1609,6 +1610,67 @@ export async function registerRoutes(
     try {
       const stats = await storage.getResolutionQualityStats();
       res.json(stats);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ─── DOMAIN DISCOVERY PIPELINE ──────────────────────────────────
+  app.post("/api/training/domain-discovery", async (_req, res) => {
+    sseHeaders(res);
+    const runId = await storage.createTrainingRun("domain_discovery", 0);
+
+    try {
+      const result = await runDomainDiscovery((msg, pct) => {
+        res.write(`data: ${JSON.stringify({ message: msg, progress: pct })}\n\n`);
+      });
+      await storage.completeTrainingRun(runId, result.errors);
+      res.write(`data: ${JSON.stringify({ done: true, ...result })}\n\n`);
+    } catch (error: any) {
+      await storage.completeTrainingRun(runId, 1, error.message);
+      res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+    }
+    res.end();
+  });
+
+  app.get("/api/discovered-intents", async (_req, res) => {
+    try {
+      const intents = await storage.getDiscoveredIntents();
+      res.json(intents);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/discovered-intents/:id/approve", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { approvedBy, suggestedIntent, actionable, category, resolutionSteps, requiredFields, actionEndpoint } = req.body;
+      await storage.approveDiscoveredIntent(id, approvedBy || "admin", {
+        suggestedIntent, actionable, category, resolutionSteps, requiredFields, actionEndpoint,
+      });
+      res.json({ success: true, message: "Intent godkjent" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/discovered-intents/:id/reject", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { reason } = req.body;
+      await storage.rejectDiscoveredIntent(id, reason || "Avvist uten begrunnelse");
+      res.json({ success: true, message: "Intent avvist" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/discovered-intents/:id/promote", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.promoteDiscoveredIntentToPlaybook(id);
+      res.json({ success: true, message: "Intent promotert til playbook" });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

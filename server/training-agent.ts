@@ -2338,3 +2338,168 @@ Returner KUN teksten, ingen JSON eller formatering.`;
   onProgress?.(`Ferdig! ${populated} populert, ${skipped} hoppet over, ${noArticle} uten artikkel, ${errors} feil`, 100);
   return { populated, skipped, noArticle, errors };
 }
+
+// ─── DOMAIN DISCOVERY PIPELINE (Steps 2A-2D) ──────────────────────────────
+export async function runDomainDiscovery(
+  onProgress?: (msg: string, pct: number) => void
+): Promise<{ discovered: number; errors: number }> {
+  let totalDiscovered = 0;
+  let totalErrors = 0;
+
+  onProgress?.("Starter Domain Discovery Pipeline...", 0);
+
+  const GENERIC_CATEGORIES = ["Generell e-post", "Annet", "Ukategorisert", "Generell"];
+  const allScrubbed = await db.select().from(scrubbedTickets).limit(500);
+
+  const genericTickets = allScrubbed.filter(t => {
+    const cat = t.hjelpesenterCategory || t.category || "";
+    return GENERIC_CATEGORIES.some(g => cat.toLowerCase().includes(g.toLowerCase())) || cat === "";
+  });
+
+  if (genericTickets.length === 0) {
+    onProgress?.("Ingen generiske/ukategoriserte tickets funnet", 100);
+    return { discovered: 0, errors: 0 };
+  }
+
+  onProgress?.(`Fant ${genericTickets.length} generiske tickets. Kjører klyngeanalyse (Steg 2A)...`, 10);
+
+  // ── STEP 2A: CLUSTERING ──
+  const ticketSummaries = genericTickets.map((t, i) =>
+    `TICKET ${i + 1} (ID: ${t.ticketId}):\nEmne: ${t.subject || "Ingen"}\nKunde: ${t.customerQuestion || "Ingen"}\nAgent: ${(t.agentAnswer || "").substring(0, 300)}\n---`
+  ).join("\n");
+
+  let clusters: any[] = [];
+  try {
+    const clusterPrompt = `Du er en ekspert på å analysere support-tickets for DyreID (Norges nasjonale kjæledyrregister).
+
+OPPGAVE: Grupper disse ukategoriserte tickets i semantiske klynger basert på:
+- Hva kunden faktisk spør om
+- Lignende problemtyper
+- Lignende løsningsmetoder
+
+TICKETS:
+${ticketSummaries}
+
+EKSISTERENDE INTENTS (ikke gjenta disse):
+${KNOWN_INTENTS.join(", ")}
+
+INSTRUKSJONER:
+1. Identifiser klynger av lignende saker
+2. Hvert cluster må ha minst 2 tickets
+3. Foreslå et PascalCase intent-navn for hvert cluster (f.eks. SmartTagSyncIssue, PaymentLinkFailure)
+4. IKKE foreslå intents som allerede finnes i listen over
+5. Gi en kort norsk beskrivelse av hva clusteret handler om
+
+SVAR I JSON:
+{
+  "clusters": [
+    {
+      "cluster_name": "Kort navn på klyngen",
+      "suggested_intent": "PascalCaseIntentNavn",
+      "description": "Hva disse sakene handler om",
+      "category": "Foreslått hjelpesenter-kategori",
+      "ticket_ids": [1, 5, 12],
+      "sample_messages": ["Eksempel på kundemelding 1", "Eksempel 2"],
+      "keywords": ["nøkkelord1", "nøkkelord2"]
+    }
+  ]
+}`;
+
+    const clusterText = await callOpenAI(clusterPrompt, "gpt-4o", 8192, true);
+    const clusterResult = extractJson(clusterText);
+    clusters = clusterResult.clusters || [];
+    onProgress?.(`Fant ${clusters.length} klynger. Kjører resolution extraction (Steg 2B)...`, 30);
+  } catch (err: any) {
+    log(`Domain Discovery clustering error: ${err.message}`, "training");
+    totalErrors++;
+    onProgress?.(`Feil i klyngeanalyse: ${err.message}`, -1);
+    return { discovered: 0, errors: 1 };
+  }
+
+  // ── STEP 2B + 2C + 2D: For each cluster, extract resolution, detect actionability, create candidate ──
+  for (let i = 0; i < clusters.length; i++) {
+    const cluster = clusters[i];
+    const pct = 30 + Math.round((i / clusters.length) * 60);
+    onProgress?.(`Analyserer klynge ${i + 1}/${clusters.length}: ${cluster.suggested_intent}...`, pct);
+
+    try {
+      const clusterTicketIds = (cluster.ticket_ids || []).map((idx: number) => {
+        const ticket = genericTickets[idx - 1];
+        return ticket?.ticketId;
+      }).filter(Boolean);
+
+      const clusterTickets = genericTickets.filter(t =>
+        clusterTicketIds.includes(t.ticketId) ||
+        (cluster.ticket_ids || []).includes(genericTickets.indexOf(t) + 1)
+      );
+
+      const dialogSummaries = clusterTickets.slice(0, 5).map(t =>
+        `Kunde: ${t.customerQuestion || "?"}\nAgent: ${(t.agentAnswer || "?").substring(0, 400)}`
+      ).join("\n---\n");
+
+      // STEP 2B: Resolution Extraction + STEP 2C: Actionability Detection
+      const analysisPrompt = `Du er en ekspert på DyreID support-analyse.
+
+OPPGAVE: Analyser dette clusteret av support-saker og besvar to ting:
+
+1. RESOLUTION: Hva gjorde agentene faktisk for å løse disse sakene? List konkrete steg.
+2. ACTIONABILITY: Er dette transaksjonelt (krever innlogging/endring i register) eller informasjonelt?
+
+CLUSTER: ${cluster.suggested_intent}
+BESKRIVELSE: ${cluster.description}
+
+EKSEMPLER FRA DIALOGER:
+${dialogSummaries}
+
+SVAR I JSON:
+{
+  "resolution_steps": "Steg 1: ...\\nSteg 2: ...\\nSteg 3: ...",
+  "agent_actions": "Hva agenten konkret utførte (kort)",
+  "actionable": true/false,
+  "requires_otp": true/false,
+  "affects_register": true/false,
+  "affects_ownership": true/false,
+  "affects_payment": true/false,
+  "confidence": 0.0-1.0,
+  "required_fields": "felt1, felt2",
+  "action_endpoint": "/api/relevant-endpoint eller null"
+}`;
+
+      const analysisText = await callOpenAI(analysisPrompt, "gpt-4o", 2048, true);
+      const analysis = extractJson(analysisText);
+
+      // STEP 2D: Create Playbook Candidate
+      const intentId = await storage.insertDiscoveredIntent({
+        clusterName: cluster.cluster_name || cluster.suggested_intent,
+        suggestedIntent: cluster.suggested_intent,
+        description: cluster.description || "",
+        category: cluster.category || null,
+        ticketCount: clusterTicketIds.length || cluster.ticket_ids?.length || 0,
+        ticketIds: JSON.stringify(clusterTicketIds),
+        sampleMessages: cluster.sample_messages || [],
+        resolutionSteps: analysis.resolution_steps || null,
+        agentActions: analysis.agent_actions || null,
+        actionable: analysis.actionable || false,
+        requiresOtp: analysis.requires_otp || false,
+        affectsRegister: analysis.affects_register || false,
+        affectsOwnership: analysis.affects_ownership || false,
+        affectsPayment: analysis.affects_payment || false,
+        confidence: analysis.confidence || 0,
+        keywords: (cluster.keywords || []).join(", "),
+        requiredFields: analysis.required_fields || null,
+        actionEndpoint: analysis.action_endpoint || null,
+        status: "pending",
+      });
+
+      totalDiscovered++;
+      log(`Discovery: Oppdaget intent "${cluster.suggested_intent}" (${analysis.actionable ? "transactional" : "informational"}, confidence: ${analysis.confidence})`, "training");
+
+    } catch (err: any) {
+      totalErrors++;
+      log(`Discovery error for cluster "${cluster.suggested_intent}": ${err.message}`, "training");
+    }
+  }
+
+  onProgress?.(`Domain Discovery ferdig! ${totalDiscovered} nye intents oppdaget, ${totalErrors} feil. Venter på godkjenning.`, 100);
+  return { discovered: totalDiscovered, errors: totalErrors };
+}
