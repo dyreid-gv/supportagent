@@ -6,7 +6,8 @@ import { getMinSideContext, performAction, lookupOwnerByPhone, lookupByChipNumbe
 import type { ChipLookupResult } from "./minside-sandbox";
 import { getStoredSession } from "./minside-client";
 import { messages, type PlaybookEntry, type ServicePrice, type ResponseTemplate } from "@shared/schema";
-import { findSemanticMatch, getApprovedIntentIds, isIndexReady, refreshIntentIndex } from "./intent-index";
+import { findSemanticMatch, findTopNSemanticMatches, getApprovedIntentIds, isIndexReady, refreshIntentIndex } from "./intent-index";
+import { recordPilotMatch, isPilotEnabled } from "./pilot-stats";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -1741,13 +1742,61 @@ Svar KUN med JSON: {"intent": "IntentNavn", "confidence": 0.85}`,
 const PARAPHRASE_BLOCKLIST = [
   /veterinær/i, /chip.*innsett/i, /sett inn.*chip/i, /ny.*mikrobrikke/i,
   /kontakt.*support/i, /ring.*oss/i, /ta kontakt med/i,
+  /send.*e-?post/i, /skriv.*til.*oss/i,
   /pris.*kr|kr.*pris|\d+\s*kr|\d+\s*nok/i,
+  /anbefal/i, /vi foreslår/i, /du bør/i, /merk at/i,
 ];
 
-// RUNTIME GPT POLICY — PARAPHRASING (allowed ONLY for informational intents)
-// GPT may: rephrase existing Playbook infoText, adapt tone to user's question
-// GPT must NOT: generate new procedures, infer pricing not in Playbook, suggest operational steps
-// NEVER called for transactional intents (API_CALL) — those use collectRequiredData → executeEndpoint without GPT
+function extractNumbers(text: string): string[] {
+  return (text.match(/\d+([.,]\d+)?/g) || []).map(n => n.replace(",", "."));
+}
+
+function extractUrls(text: string): string[] {
+  return (text.match(/https?:\/\/[^\s)]+/gi) || []);
+}
+
+function countSentences(text: string): number {
+  return (text.match(/[.!?]+(?:\s|$)/g) || []).length || 1;
+}
+
+function validateParaphrase(original: string, paraphrased: string): { valid: boolean; reason?: string } {
+  if (!paraphrased) return { valid: false, reason: "empty" };
+
+  for (const pattern of PARAPHRASE_BLOCKLIST) {
+    if (pattern.test(paraphrased) && !pattern.test(original)) {
+      return { valid: false, reason: `blocklist: ${pattern.source}` };
+    }
+  }
+
+  if (paraphrased.length > original.length * 2.5) {
+    return { valid: false, reason: "length exceeded 2.5x" };
+  }
+
+  const origNumbers = extractNumbers(original);
+  const paraNumbers = extractNumbers(paraphrased);
+  for (const num of origNumbers) {
+    if (!paraNumbers.includes(num)) {
+      return { valid: false, reason: `numeric value changed: ${num} missing` };
+    }
+  }
+
+  const origUrls = extractUrls(original);
+  const paraUrls = extractUrls(paraphrased);
+  for (const url of origUrls) {
+    if (!paraUrls.includes(url)) {
+      return { valid: false, reason: `URL changed: ${url} missing` };
+    }
+  }
+
+  const origSentences = countSentences(original);
+  const paraSentences = countSentences(paraphrased);
+  if (paraSentences > origSentences + 1) {
+    return { valid: false, reason: `sentence count exceeded: ${paraSentences} vs ${origSentences}` };
+  }
+
+  return { valid: true };
+}
+
 async function paraphrasePlaybookResponse(
   originalText: string,
   userMessage: string
@@ -1765,10 +1814,13 @@ OPPGAVE: Omformuler teksten under til en mer naturlig, vennlig tone som svarer p
 
 STRENGE REGLER:
 - Du skal KUN omformulere innholdet som allerede finnes i teksten
-- Du skal ALDRI legge til nye steg, prosedyrer eller instruksjoner
+- Du skal ALDRI legge til nye setninger, steg, prosedyrer eller instruksjoner
+- Du skal ALDRI legge til advarsler, anbefalinger eller disclaimers
 - Du skal ALDRI nevne veterinær, chipinnsetting, nye priser eller kontakt support
 - Du skal ALDRI finne opp informasjon som ikke står i originalteksten
-- Behold alle fakta, tall og steg nøyaktig som de er
+- Du skal ALDRI endre tall, priser, beløp eller URLer
+- Du skal ALDRI legge til kontaktinformasjon som ikke finnes i originalen
+- Behold alle fakta, tall, URLer og steg nøyaktig som de er
 - Maks 200 ord
 
 ORIGINALTEKST:
@@ -1783,15 +1835,11 @@ ${originalText}`,
 
     const paraphrased = response.choices[0]?.message?.content?.trim() || "";
 
-    if (!paraphrased) return originalText;
-
-    for (const pattern of PARAPHRASE_BLOCKLIST) {
-      if (pattern.test(paraphrased) && !pattern.test(originalText)) {
-        return originalText;
+    const validation = validateParaphrase(originalText, paraphrased);
+    if (!validation.valid) {
+      if (process.env.RUNTIME_DEBUG === "true") {
+        console.log(`[Paraphrase] Rejected: ${validation.reason}`);
       }
-    }
-
-    if (paraphrased.length > originalText.length * 2.5) {
       return originalText;
     }
 
@@ -1802,13 +1850,21 @@ ${originalText}`,
   }
 }
 
+interface MatchDebugInfo {
+  matchedBy: "session" | "regex" | "semantic" | "keyword" | "gpt" | "block";
+  semanticScore: number;
+  gptConfidence: number;
+  finalIntentId: string | null;
+  responseMethod: string;
+}
+
 async function matchUserIntent(
   message: string,
   conversationId: number,
   isAuthenticated: boolean,
   ownerContext: any | null,
   storedUserContext: any | null
-): Promise<{ intent: string | null; playbook: PlaybookEntry | null; method: string }> {
+): Promise<{ intent: string | null; playbook: PlaybookEntry | null; method: string; debug: MatchDebugInfo }> {
   const session = getOrCreateSession(conversationId);
 
   if (session.intent && session.awaitingInput && session.playbook) {
@@ -1828,8 +1884,11 @@ async function matchUserIntent(
         session.awaitingInput = undefined;
       }
     }
-    return { intent: session.intent, playbook: session.playbook, method: "session-continue" };
+    const d: MatchDebugInfo = { matchedBy: "session", semanticScore: 0, gptConfidence: 0, finalIntentId: session.intent || null, responseMethod: "session" };
+    return { intent: session.intent, playbook: session.playbook, method: "session-continue", debug: d };
   }
+
+  const debugInfo: MatchDebugInfo = { matchedBy: "block", semanticScore: 0, gptConfidence: 0, finalIntentId: null, responseMethod: "BLOCK" };
 
   const quickIntent = quickIntentMatch(message);
   if (quickIntent) {
@@ -1838,62 +1897,88 @@ async function matchUserIntent(
       session.intent = quickIntent;
       session.playbook = playbook;
       session.collectedData = {};
-      return { intent: quickIntent, playbook, method: "quick-match" };
+      debugInfo.matchedBy = "regex";
+      debugInfo.finalIntentId = quickIntent;
+      debugInfo.responseMethod = playbook.actionType === "API_CALL" ? "API_CALL" : "INFO";
+      return { intent: quickIntent, playbook, method: "quick-match", debug: debugInfo };
     }
   }
+
+  let semanticBestScore = 0;
 
   try {
     if (!isIndexReady()) {
       await refreshIntentIndex();
     }
     if (isIndexReady()) {
-      const semanticResult = await findSemanticMatch(message, 0.78);
+      const { match: semanticResult, bestScore } = await findSemanticMatch(message, 0.78);
+      semanticBestScore = bestScore;
+      debugInfo.semanticScore = bestScore;
       if (semanticResult) {
         const semanticPlaybook = await storage.getPlaybookByIntent(semanticResult.intentId);
+        debugInfo.matchedBy = "semantic";
+        debugInfo.finalIntentId = semanticResult.intentId;
         if (semanticPlaybook) {
           session.intent = semanticResult.intentId;
           session.playbook = semanticPlaybook;
           session.collectedData = {};
-          return { intent: semanticResult.intentId, playbook: semanticPlaybook, method: `semantic-match (${semanticResult.similarity.toFixed(2)})` };
+          debugInfo.responseMethod = semanticPlaybook.actionType === "API_CALL" ? "API_CALL" : "INFO";
+          return { intent: semanticResult.intentId, playbook: semanticPlaybook, method: `semantic-match (${semanticResult.similarity.toFixed(2)})`, debug: debugInfo };
         }
         session.intent = semanticResult.intentId;
         session.collectedData = {};
-        return { intent: semanticResult.intentId, playbook: null, method: `semantic-match-no-playbook (${semanticResult.similarity.toFixed(2)})` };
+        debugInfo.responseMethod = "INFO";
+        return { intent: semanticResult.intentId, playbook: null, method: `semantic-match-no-playbook (${semanticResult.similarity.toFixed(2)})`, debug: debugInfo };
       }
     }
   } catch (err: any) {
     console.warn("[SemanticMatch] Skipped due to error:", err.message);
   }
 
+  let hadKeywordMatch = false;
   const keywordMatch = await storage.searchPlaybookByKeywords(message);
   if (keywordMatch) {
+    hadKeywordMatch = true;
     session.intent = keywordMatch.intent;
     session.playbook = keywordMatch;
     session.collectedData = {};
-    return { intent: keywordMatch.intent, playbook: keywordMatch, method: "keyword-match" };
+    debugInfo.matchedBy = "keyword";
+    debugInfo.finalIntentId = keywordMatch.intent;
+    debugInfo.responseMethod = keywordMatch.actionType === "API_CALL" ? "API_CALL" : "INFO";
+    return { intent: keywordMatch.intent, playbook: keywordMatch, method: "keyword-match", debug: debugInfo };
   }
 
   if (quickIntent) {
     session.intent = quickIntent;
     session.collectedData = {};
-    return { intent: quickIntent, playbook: null, method: "quick-match-no-playbook" };
+    debugInfo.matchedBy = "regex";
+    debugInfo.finalIntentId = quickIntent;
+    debugInfo.responseMethod = "INFO";
+    return { intent: quickIntent, playbook: null, method: "quick-match-no-playbook", debug: debugInfo };
   }
 
-  const gptResult = await gptIntentInterpretation(message);
-  if (gptResult.intent && gptResult.confidence >= 0.7) {
-    const gptPlaybook = await storage.getPlaybookByIntent(gptResult.intent);
-    if (gptPlaybook) {
+  if (semanticBestScore < 0.65 && !hadKeywordMatch) {
+    const gptResult = await gptIntentInterpretation(message);
+    debugInfo.gptConfidence = gptResult.confidence;
+    if (gptResult.intent && gptResult.confidence >= 0.7) {
+      const gptPlaybook = await storage.getPlaybookByIntent(gptResult.intent);
+      debugInfo.matchedBy = "gpt";
+      debugInfo.finalIntentId = gptResult.intent;
+      if (gptPlaybook) {
+        session.intent = gptResult.intent;
+        session.playbook = gptPlaybook;
+        session.collectedData = {};
+        debugInfo.responseMethod = gptPlaybook.actionType === "API_CALL" ? "API_CALL" : "INFO";
+        return { intent: gptResult.intent, playbook: gptPlaybook, method: "gpt-intent-interpretation", debug: debugInfo };
+      }
       session.intent = gptResult.intent;
-      session.playbook = gptPlaybook;
       session.collectedData = {};
-      return { intent: gptResult.intent, playbook: gptPlaybook, method: "gpt-intent-interpretation" };
+      debugInfo.responseMethod = "INFO";
+      return { intent: gptResult.intent, playbook: null, method: "gpt-intent-no-playbook", debug: debugInfo };
     }
-    session.intent = gptResult.intent;
-    session.collectedData = {};
-    return { intent: gptResult.intent, playbook: null, method: "gpt-intent-no-playbook" };
   }
 
-  return { intent: null, playbook: null, method: "none" };
+  return { intent: null, playbook: null, method: "none", debug: debugInfo };
 }
 
 // RUNTIME FLOW ROUTER — Separates transactional vs informational intent handling
@@ -2151,9 +2236,17 @@ export async function* streamChatResponse(
     return;
   }
 
-  const { intent, playbook, method } = await matchUserIntent(
+  const { intent, playbook, method, debug: matchDebug } = await matchUserIntent(
     userMessage, conversationId, isAuthenticated, ownerContext, storedUserContext
   );
+
+  if (process.env.RUNTIME_DEBUG === "true") {
+    console.log(`[RuntimeDebug] conv=${conversationId} | matchedBy=${matchDebug.matchedBy} | semanticScore=${matchDebug.semanticScore.toFixed(3)} | gptConfidence=${matchDebug.gptConfidence.toFixed(2)} | intent=${matchDebug.finalIntentId || "NONE"} | responseMethod=${matchDebug.responseMethod}`);
+  }
+
+  if (isPilotEnabled()) {
+    recordPilotMatch(matchDebug.matchedBy, matchDebug.semanticScore, matchDebug.gptConfidence, matchDebug.finalIntentId, userMessage);
+  }
 
   if (chipInMessage && !session.chipLookupFlow) {
     session.chipLookupFlow = "awaiting_chip";
@@ -2376,20 +2469,37 @@ export async function* streamChatResponse(
     }
   }
 
-  const blockResponse = "Beklager, dette er utenfor det jeg kan hjelpe med automatisk. Du kan prøve å omformulere spørsmålet ditt, eller kontakte DyreID kundeservice på **support@dyreid.no** for videre hjelp.\n\nJeg kan hjelpe deg med blant annet:\n- Eierskifte\n- ID-merking og chipregistrering\n- QR-brikke og Smart Tag\n- Savnede og gjenfunnede dyr\n- Min Side og innlogging\n- DyreID-appen og abonnement";
+  let semanticSuggestions: { label: string; action: string; data: { query: string } }[] = [];
+  try {
+    if (isIndexReady()) {
+      const topMatches = await findTopNSemanticMatches(userMessage, 3);
+      semanticSuggestions = topMatches.map(m => ({
+        label: `${m.category}${m.subcategory ? " – " + m.subcategory : ""}`,
+        action: "SUBTOPIC",
+        data: { query: m.intentId },
+      }));
+    }
+  } catch (err: any) {
+    console.warn("[Block] Failed to get semantic suggestions:", err.message);
+  }
+
+  if (semanticSuggestions.length === 0) {
+    semanticSuggestions = [
+      { label: "Eierskifte", action: "SUBTOPIC", data: { query: "eierskifte" } },
+      { label: "ID-merking", action: "SUBTOPIC", data: { query: "id-merking" } },
+      { label: "Min Side", action: "SUBTOPIC", data: { query: "min side" } },
+    ];
+  }
+
+  const suggestionLines = semanticSuggestions.map(s => `- ${s.label}`).join("\n");
+  const blockResponse = `Beklager, dette er utenfor det jeg kan hjelpe med automatisk.\n\nMener du kanskje noe av dette?\n${suggestionLines}\n\nHvis ikke, kontakt DyreID kundeservice på **support@dyreid.no** for videre hjelp.`;
 
   const blockMetadata: any = {
     model: "block-escalation",
-    method: "none",
+    method: matchDebug.matchedBy,
     blocked: true,
-    suggestions: [
-      { label: "Eierskifte", action: "SUBTOPIC", data: { query: "eierskifte" } },
-      { label: "ID-merking", action: "SUBTOPIC", data: { query: "id-merking" } },
-      { label: "QR-brikke", action: "SUBTOPIC", data: { query: "qr-brikke" } },
-      { label: "Savnet dyr", action: "SUBTOPIC", data: { query: "savnet dyr" } },
-      { label: "Min Side", action: "SUBTOPIC", data: { query: "min side" } },
-      { label: "DyreID-appen", action: "SUBTOPIC", data: { query: "dyreid-appen" } },
-    ],
+    semanticScore: matchDebug.semanticScore,
+    suggestions: semanticSuggestions,
   };
 
   const msg = await storage.createMessage({

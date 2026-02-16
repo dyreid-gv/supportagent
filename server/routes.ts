@@ -1824,5 +1824,35 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/pilot/enable", async (_req, res) => {
+    try {
+      const { enablePilot } = await import("./pilot-stats");
+      enablePilot();
+      res.json({ success: true, message: "Pilot mode enabled" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/pilot/disable", async (_req, res) => {
+    try {
+      const { disablePilot } = await import("./pilot-stats");
+      disablePilot();
+      res.json({ success: true, message: "Pilot mode disabled" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/pilot/report", async (_req, res) => {
+    try {
+      const { getPilotReport } = await import("./pilot-stats");
+      const report = getPilotReport();
+      res.json(report);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   return httpServer;
 }

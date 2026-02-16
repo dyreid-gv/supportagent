@@ -15,6 +15,9 @@ let indexReady = false;
 export async function refreshIntentIndex(): Promise<number> {
   const approved = await storage.getApprovedCanonicalIntents();
   intentIndex = [];
+  let skipped = 0;
+  const nullEmbeddingIntents: string[] = [];
+
   for (const intent of approved) {
     if (intent.embedding && Array.isArray(intent.embedding)) {
       intentIndex.push({
@@ -24,10 +27,17 @@ export async function refreshIntentIndex(): Promise<number> {
         actionable: intent.actionable,
         embedding: intent.embedding as number[],
       });
+    } else {
+      skipped++;
+      nullEmbeddingIntents.push(intent.intentId);
     }
   }
+
   indexReady = true;
-  console.log(`[IntentIndex] Refreshed: ${intentIndex.length} intents with embeddings loaded`);
+  console.log(`[IntentIndex] Refreshed: ${intentIndex.length} loaded, ${skipped} skipped (null embedding)`);
+  if (nullEmbeddingIntents.length > 0) {
+    console.warn(`[IntentIndex] WARNING: ${nullEmbeddingIntents.length} approved intents have null embeddings: ${nullEmbeddingIntents.slice(0, 10).join(", ")}${nullEmbeddingIntents.length > 10 ? "..." : ""}`);
+  }
   return intentIndex.length;
 }
 
@@ -51,11 +61,16 @@ export interface SemanticMatch {
   similarity: number;
 }
 
+export interface SemanticSearchResult {
+  match: SemanticMatch | null;
+  bestScore: number;
+}
+
 export async function findSemanticMatch(
   userMessage: string,
   threshold: number = 0.78
-): Promise<SemanticMatch | null> {
-  if (intentIndex.length === 0) return null;
+): Promise<SemanticSearchResult> {
+  if (intentIndex.length === 0) return { match: null, bestScore: 0 };
 
   const messageEmbedding = await generateEmbedding(userMessage);
 
@@ -77,7 +92,27 @@ export async function findSemanticMatch(
   }
 
   if (bestMatch && bestMatch.similarity >= threshold) {
-    return bestMatch;
+    return { match: bestMatch, bestScore };
   }
-  return null;
+  return { match: null, bestScore: bestScore > 0 ? bestScore : 0 };
+}
+
+export async function findTopNSemanticMatches(
+  userMessage: string,
+  n: number = 3
+): Promise<SemanticMatch[]> {
+  if (intentIndex.length === 0) return [];
+
+  const messageEmbedding = await generateEmbedding(userMessage);
+
+  const scored: SemanticMatch[] = intentIndex.map(intent => ({
+    intentId: intent.intentId,
+    category: intent.category,
+    subcategory: intent.subcategory,
+    actionable: intent.actionable,
+    similarity: cosineSimilarity(messageEmbedding, intent.embedding),
+  }));
+
+  scored.sort((a, b) => b.similarity - a.similarity);
+  return scored.slice(0, n);
 }
