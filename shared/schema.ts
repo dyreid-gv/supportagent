@@ -387,10 +387,58 @@ export const discoveredIntents = pgTable("discovered_intents", {
   rejectionReason: text("rejection_reason"),
   promotedToPlaybook: boolean("promoted_to_playbook").default(false),
   discoveredAt: timestamp("discovered_at").default(sql`CURRENT_TIMESTAMP`),
+  clusterId: integer("cluster_id"),
   discoveryRunId: integer("discovery_run_id"),
 });
 
 export const insertDiscoveredIntentSchema = createInsertSchema(discoveredIntents).omit({ id: true });
+
+export const canonicalIntents = pgTable("canonical_intents", {
+  id: serial("id").primaryKey(),
+  intentId: text("intent_id").notNull().unique(),
+  category: text("category").notNull(),
+  subcategory: text("subcategory"),
+  source: text("source").notNull(),
+  actionable: boolean("actionable").default(false),
+  requiredFields: jsonb("required_fields"),
+  endpoint: text("endpoint"),
+  infoText: text("info_text"),
+  approved: boolean("approved").default(false),
+  embedding: jsonb("embedding"),
+  keywords: text("keywords"),
+  description: text("description"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const insertCanonicalIntentSchema = createInsertSchema(canonicalIntents).omit({ id: true });
+
+export const discoveredClusters = pgTable("discovered_clusters", {
+  id: serial("id").primaryKey(),
+  clusterId: text("cluster_id").notNull(),
+  clusterName: text("cluster_name"),
+  suggestedIntent: text("suggested_intent"),
+  description: text("description"),
+  category: text("category"),
+  ticketCount: integer("ticket_count").default(0),
+  ticketIds: jsonb("ticket_ids"),
+  topKeywords: jsonb("top_keywords"),
+  sampleMessages: jsonb("sample_messages"),
+  exampleSubjects: jsonb("example_subjects"),
+  sampleSnippets: jsonb("sample_snippets"),
+  centroidEmbedding: jsonb("centroid_embedding"),
+  actionable: boolean("actionable").default(false),
+  confidence: real("confidence").default(0),
+  normalizedIntent: text("normalized_intent"),
+  isNewCandidate: boolean("is_new_candidate").default(true),
+  similarityScore: real("similarity_score").default(0),
+  matchedCanonicalIntent: text("matched_canonical_intent"),
+  status: text("status").default("pending"),
+  discoveryRunId: integer("discovery_run_id"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const insertDiscoveredClusterSchema = createInsertSchema(discoveredClusters).omit({ id: true });
 
 export const insertChatbotInteractionSchema = createInsertSchema(chatbotInteractions).omit({ id: true });
 export const insertHelpCenterArticleSchema = createInsertSchema(helpCenterArticles).omit({ id: true });
@@ -447,3 +495,7 @@ export type InsertMinsideFieldMapping = z.infer<typeof insertMinsideFieldMapping
 export type TrainingRun = typeof trainingRuns.$inferSelect;
 export type DiscoveredIntent = typeof discoveredIntents.$inferSelect;
 export type InsertDiscoveredIntent = z.infer<typeof insertDiscoveredIntentSchema>;
+export type CanonicalIntent = typeof canonicalIntents.$inferSelect;
+export type InsertCanonicalIntent = z.infer<typeof insertCanonicalIntentSchema>;
+export type DiscoveredCluster = typeof discoveredClusters.$inferSelect;
+export type InsertDiscoveredCluster = z.infer<typeof insertDiscoveredClusterSchema>;

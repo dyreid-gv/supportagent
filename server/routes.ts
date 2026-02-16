@@ -1,7 +1,8 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { z } from "zod";
-import { count, sql } from "drizzle-orm";
+import { count, sql, eq } from "drizzle-orm";
+import { discoveredClusters } from "@shared/schema";
 import axios from "axios";
 import { db } from "./db";
 import { storage } from "./storage";
@@ -1671,6 +1672,135 @@ export async function registerRoutes(
       const id = parseInt(req.params.id);
       await storage.promoteDiscoveredIntentToPlaybook(id);
       res.json({ success: true, message: "Intent promotert til playbook" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/canonical-intents", async (_req, res) => {
+    try {
+      const intents = await storage.getCanonicalIntents();
+      res.json(intents);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/canonical-intents/approved", async (_req, res) => {
+    try {
+      const intents = await storage.getApprovedCanonicalIntents();
+      res.json(intents);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/canonical-intents/stats", async (req, res) => {
+    try {
+      const all = await storage.getCanonicalIntents();
+      const approved = all.filter(i => i.approved);
+      const bySource: Record<string, number> = {};
+      const byCategory: Record<string, number> = {};
+      for (const i of all) {
+        bySource[i.source] = (bySource[i.source] || 0) + 1;
+        if (i.category) byCategory[i.category] = (byCategory[i.category] || 0) + 1;
+      }
+      res.json({
+        total: all.length,
+        approved: approved.length,
+        pending: all.filter(i => !i.approved).length,
+        actionable: all.filter(i => i.actionable).length,
+        bySource,
+        byCategory,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/canonical-intents/:intentId", async (req, res) => {
+    try {
+      const intent = await storage.getCanonicalIntentById(req.params.intentId);
+      if (!intent) return res.status(404).json({ error: "Intent not found" });
+      res.json(intent);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put("/api/canonical-intents/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const allowedFields = ["category", "subcategory", "source", "actionable", "requiredFields", "endpoint", "infoText", "approved", "keywords", "description"];
+      const update: Record<string, any> = {};
+      for (const key of allowedFields) {
+        if (req.body[key] !== undefined) update[key] = req.body[key];
+      }
+      await storage.updateCanonicalIntent(id, update);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/canonical-intents/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.deleteCanonicalIntent(id);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/canonical-intents/seed", async (_req, res) => {
+    try {
+      const { seedCanonicalIntents } = await import("./canonical-intents");
+      const result = await seedCanonicalIntents();
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/discovered-clusters", async (req, res) => {
+    try {
+      const runId = req.query.runId ? parseInt(req.query.runId as string) : undefined;
+      const clusters = await storage.getDiscoveredClusters(runId);
+      res.json(clusters);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/discovered-clusters/:id/promote", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const clusters = await storage.getDiscoveredClusters();
+      const cluster = clusters.find(c => c.id === id);
+      if (!cluster) return res.status(404).json({ error: "Cluster not found" });
+      if (cluster.status === "promoted") return res.status(400).json({ error: "Cluster er allerede promotert" });
+
+      const intentId = cluster.suggestedIntent || cluster.clusterId;
+
+      const existing = await storage.getCanonicalIntentById(intentId);
+      if (existing) return res.status(400).json({ error: `Intent "${intentId}" finnes allerede i canonical registry` });
+
+      await storage.upsertCanonicalIntent({
+        intentId,
+        category: cluster.category || "Ukategorisert",
+        source: "DISCOVERED",
+        actionable: cluster.actionable || false,
+        approved: false,
+        description: cluster.description || undefined,
+        keywords: Array.isArray(cluster.topKeywords) ? (cluster.topKeywords as string[]).join(", ") : undefined,
+      });
+
+      await db.update(discoveredClusters)
+        .set({ status: "promoted" })
+        .where(eq(discoveredClusters.id, id));
+
+      res.json({ success: true, intentId, message: "Cluster promotert til canonical intent (venter på godkjenning)" });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

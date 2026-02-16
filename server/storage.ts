@@ -38,6 +38,10 @@ import {
   type InsertMinsideFieldMapping,
   discoveredIntents,
   type InsertDiscoveredIntent,
+  canonicalIntents,
+  type InsertCanonicalIntent,
+  discoveredClusters,
+  type InsertDiscoveredCluster,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -219,6 +223,19 @@ export interface IStorage {
   updateMinsideFieldMapping(id: number, data: Partial<InsertMinsideFieldMapping>): Promise<void>;
   deleteMinsideFieldMapping(id: number): Promise<void>;
   seedMinsideFieldMappings(mappings: InsertMinsideFieldMapping[]): Promise<number>;
+
+  getCanonicalIntents(): Promise<typeof canonicalIntents.$inferSelect[]>;
+  getApprovedCanonicalIntents(): Promise<typeof canonicalIntents.$inferSelect[]>;
+  getCanonicalIntentById(intentId: string): Promise<typeof canonicalIntents.$inferSelect | undefined>;
+  upsertCanonicalIntent(intent: InsertCanonicalIntent): Promise<typeof canonicalIntents.$inferSelect>;
+  updateCanonicalIntent(id: number, data: Partial<InsertCanonicalIntent>): Promise<void>;
+  deleteCanonicalIntent(id: number): Promise<void>;
+  getCanonicalIntentCount(): Promise<number>;
+  clearCanonicalIntents(): Promise<void>;
+
+  insertDiscoveredCluster(cluster: InsertDiscoveredCluster): Promise<number>;
+  getDiscoveredClusters(runId?: number): Promise<typeof discoveredClusters.$inferSelect[]>;
+  clearDiscoveredClusters(): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1506,6 +1523,83 @@ export class DatabaseStorage implements IStorage {
 
   async clearDiscoveredIntents(): Promise<void> {
     await db.delete(discoveredIntents);
+  }
+
+  async getCanonicalIntents(): Promise<typeof canonicalIntents.$inferSelect[]> {
+    return db.select().from(canonicalIntents).orderBy(canonicalIntents.category, canonicalIntents.intentId);
+  }
+
+  async getApprovedCanonicalIntents(): Promise<typeof canonicalIntents.$inferSelect[]> {
+    return db.select().from(canonicalIntents)
+      .where(eq(canonicalIntents.approved, true))
+      .orderBy(canonicalIntents.category, canonicalIntents.intentId);
+  }
+
+  async getCanonicalIntentById(intentId: string): Promise<typeof canonicalIntents.$inferSelect | undefined> {
+    const [row] = await db.select().from(canonicalIntents)
+      .where(eq(canonicalIntents.intentId, intentId));
+    return row;
+  }
+
+  async upsertCanonicalIntent(intent: InsertCanonicalIntent): Promise<typeof canonicalIntents.$inferSelect> {
+    const [row] = await db.insert(canonicalIntents)
+      .values(intent)
+      .onConflictDoUpdate({
+        target: canonicalIntents.intentId,
+        set: {
+          category: intent.category,
+          subcategory: intent.subcategory,
+          source: intent.source,
+          actionable: intent.actionable,
+          requiredFields: intent.requiredFields,
+          endpoint: intent.endpoint,
+          infoText: intent.infoText,
+          approved: intent.approved,
+          embedding: intent.embedding,
+          keywords: intent.keywords,
+          description: intent.description,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+    return row;
+  }
+
+  async updateCanonicalIntent(id: number, data: Partial<InsertCanonicalIntent>): Promise<void> {
+    await db.update(canonicalIntents)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(canonicalIntents.id, id));
+  }
+
+  async deleteCanonicalIntent(id: number): Promise<void> {
+    await db.delete(canonicalIntents).where(eq(canonicalIntents.id, id));
+  }
+
+  async getCanonicalIntentCount(): Promise<number> {
+    const result = await db.select({ count: count() }).from(canonicalIntents);
+    return result[0].count;
+  }
+
+  async clearCanonicalIntents(): Promise<void> {
+    await db.delete(canonicalIntents);
+  }
+
+  async insertDiscoveredCluster(cluster: InsertDiscoveredCluster): Promise<number> {
+    const [row] = await db.insert(discoveredClusters).values(cluster).returning();
+    return row.id;
+  }
+
+  async getDiscoveredClusters(runId?: number): Promise<typeof discoveredClusters.$inferSelect[]> {
+    if (runId) {
+      return db.select().from(discoveredClusters)
+        .where(eq(discoveredClusters.discoveryRunId, runId))
+        .orderBy(desc(discoveredClusters.ticketCount));
+    }
+    return db.select().from(discoveredClusters).orderBy(desc(discoveredClusters.ticketCount));
+  }
+
+  async clearDiscoveredClusters(): Promise<void> {
+    await db.delete(discoveredClusters);
   }
 }
 

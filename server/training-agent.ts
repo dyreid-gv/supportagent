@@ -2430,55 +2430,118 @@ SVAR I JSON:
   }
 }
 
+// ─── CANONICAL INTENT NORMALIZATION ─────────────────────────────────────────
+async function normalizeAgainstCanonical(
+  suggestedIntent: string,
+  description: string,
+  keywords: string[],
+  canonicalIntents: { intentId: string; category: string; subcategory?: string | null; description?: string | null; keywords?: string | null; actionable?: boolean | null }[]
+): Promise<NormalizationResult> {
+  const canonicalDetails = canonicalIntents.map(ci =>
+    `${ci.intentId} (${ci.category}${ci.subcategory ? "/" + ci.subcategory : ""}): ${ci.description || ""} [${ci.keywords || ""}]`
+  ).join("\n");
+
+  const prompt = `Du er en intent-normaliseringsekspert for DyreID support-systemet.
+
+OPPGAVE: Sammenlign den foreslåtte intenten med eksisterende canonical intents og avgjør om den er semantisk lik noen av dem.
+
+FORESLÅTT INTENT:
+Navn: ${suggestedIntent}
+Beskrivelse: ${description}
+Nøkkelord: ${keywords.join(", ")}
+
+CANONICAL INTENTS:
+${canonicalDetails}
+
+INSTRUKSJONER:
+1. Finn den mest semantisk like canonical intenten
+2. Vurder semantisk likhet (0.0 til 1.0):
+   - 1.0 = identisk formål
+   - 0.75+ = samme underliggende behov, kan slås sammen
+   - 0.5-0.74 = relatert men distinkt nok til å være separat
+   - <0.5 = helt forskjellig
+3. Hvis likhet >= 0.75: Map til eksisterende intent
+4. Hvis likhet < 0.75: Marker som ny intent-kandidat
+
+VIKTIG: Vurder formål og brukerens underliggende behov, ikke bare ordlikhet.
+
+SVAR I JSON:
+{
+  "most_similar_intent": "ExistingIntentName eller null",
+  "similarity_score": 0.0-1.0,
+  "reasoning": "Kort forklaring",
+  "normalized_intent": "Enten eksisterende intent-navn (hvis mapped) eller det foreslåtte navnet (hvis nytt)"
+}`;
+
+  try {
+    const text = await callOpenAI(prompt, "gpt-4o", 1024, true);
+    const result = extractJson(text);
+
+    const score = result.similarity_score || 0;
+    const isNew = score < 0.75;
+    const matchedIntent = !isNew && result.most_similar_intent ? result.most_similar_intent : null;
+    const normalizedName = isNew ? suggestedIntent : (result.most_similar_intent || suggestedIntent);
+
+    return {
+      normalizedIntent: normalizedName,
+      isNewIntentCandidate: isNew,
+      similarityScore: score,
+      matchedExistingIntent: matchedIntent,
+    };
+  } catch (err: any) {
+    log(`Canonical normalization error for "${suggestedIntent}": ${err.message}`, "training");
+    return {
+      normalizedIntent: suggestedIntent,
+      isNewIntentCandidate: true,
+      similarityScore: 0,
+      matchedExistingIntent: null,
+    };
+  }
+}
+
 // ─── DOMAIN DISCOVERY PIPELINE (Steps 2A-2E) ──────────────────────────────
+
+function buildClusterText(ticket: { subject?: string | null; customerQuestion?: string | null; agentAnswer?: string | null }): string {
+  const parts: string[] = [];
+  if (ticket.subject) parts.push(ticket.subject.trim());
+  if (ticket.customerQuestion) parts.push(ticket.customerQuestion.trim());
+  if (ticket.agentAnswer) parts.push(ticket.agentAnswer.substring(0, 300).trim());
+  return parts.join(" | ");
+}
+
 export async function runDomainDiscovery(
   onProgress?: (msg: string, pct: number) => void
 ): Promise<{ discovered: number; errors: number }> {
+  const { isUncategorized } = await import("./canonical-intents");
   let totalDiscovered = 0;
   let totalErrors = 0;
 
   onProgress?.("Starter Domain Discovery Pipeline...", 0);
 
-  const GENERIC_CATEGORIES = ["Generell e-post", "Annet", "Ukategorisert", "Generell"];
   const allScrubbed = await db.select().from(scrubbedTickets).limit(500);
 
-  const genericTickets = allScrubbed.filter(t => {
-    const cat = t.hjelpesenterCategory || t.category || "";
-    return GENERIC_CATEGORIES.some(g => cat.toLowerCase().includes(g.toLowerCase())) || cat === "";
-  });
+  const genericTickets = allScrubbed.filter(t => isUncategorized({
+    categoryId: t.categoryId,
+    category: t.hjelpesenterCategory || t.category || "",
+  }));
 
   if (genericTickets.length === 0) {
-    onProgress?.("Ingen generiske/ukategoriserte tickets funnet", 100);
+    onProgress?.("Ingen ukategoriserte tickets funnet", 100);
     return { discovered: 0, errors: 0 };
   }
 
-  onProgress?.(`Fant ${genericTickets.length} generiske tickets. Laster eksisterende intents...`, 5);
+  onProgress?.(`Fant ${genericTickets.length} ukategoriserte tickets. Laster canonical intents...`, 5);
 
-  // Load existing intents for normalization comparison
-  const existingIntentList = INTENT_DEFINITIONS.map(d => ({
-    intent: d.intent,
-    category: d.category,
-    description: d.description,
-    keywords: d.keywords,
-  }));
+  const canonicalIntentRows = await storage.getApprovedCanonicalIntents();
 
-  const existingPlaybookRows = await db.select().from(playbookEntries);
-  const existingPlaybookIntents = existingPlaybookRows.map(p => ({
-    intent: p.intent,
-    hjelpesenterCategory: p.hjelpesenterCategory,
-    requiredRuntimeData: p.requiredRuntimeData,
-    apiEndpoint: p.apiEndpoint,
-    requiresLogin: p.requiresLogin,
-    requiresAction: p.requiresAction,
-    paymentRequired: p.paymentRequired,
-  }));
+  onProgress?.(`${canonicalIntentRows.length} canonical intents lastet. Kjører klyngeanalyse (Steg 2A)...`, 10);
 
-  onProgress?.(`${existingIntentList.length} intents + ${existingPlaybookIntents.length} playbook-entries lastet. Kjører klyngeanalyse (Steg 2A)...`, 10);
-
-  // ── STEP 2A: CLUSTERING ──
+  // ── STEP 2A: CLUSTERING (GPT-based, HDBSCAN reserved for future via env toggle) ──
   const ticketSummaries = genericTickets.map((t, i) =>
-    `TICKET ${i + 1} (ID: ${t.ticketId}):\nEmne: ${t.subject || "Ingen"}\nKunde: ${t.customerQuestion || "Ingen"}\nAgent: ${(t.agentAnswer || "").substring(0, 300)}\n---`
+    `TICKET ${i + 1} (ID: ${t.ticketId}):\n${buildClusterText(t)}\n---`
   ).join("\n");
+
+  const existingIntentNames = canonicalIntentRows.map(ci => ci.intentId);
 
   let clusters: any[] = [];
   try {
@@ -2493,7 +2556,7 @@ TICKETS:
 ${ticketSummaries}
 
 EKSISTERENDE INTENTS (ikke gjenta disse):
-${KNOWN_INTENTS.join(", ")}
+${existingIntentNames.join(", ")}
 
 INSTRUKSJONER:
 1. Identifiser klynger av lignende saker
@@ -2520,7 +2583,7 @@ SVAR I JSON:
     const clusterText = await callOpenAI(clusterPrompt, "gpt-4o", 8192, true);
     const clusterResult = extractJson(clusterText);
     clusters = clusterResult.clusters || [];
-    onProgress?.(`Fant ${clusters.length} klynger. Kjører resolution extraction (Steg 2B)...`, 30);
+    onProgress?.(`Fant ${clusters.length} klynger. Kjører analyse per klynge...`, 30);
   } catch (err: any) {
     log(`Domain Discovery clustering error: ${err.message}`, "training");
     totalErrors++;
@@ -2528,7 +2591,9 @@ SVAR I JSON:
     return { discovered: 0, errors: 1 };
   }
 
-  // ── STEP 2B + 2C + 2D + Normalization: For each cluster ──
+  const discoveryRunId = Date.now();
+
+  // ── STEP 2B-2E: Analysis, normalization, storage per cluster ──
   for (let i = 0; i < clusters.length; i++) {
     const cluster = clusters[i];
     const pct = 30 + Math.round((i / clusters.length) * 60);
@@ -2549,7 +2614,6 @@ SVAR I JSON:
         `Kunde: ${t.customerQuestion || "?"}\nAgent: ${(t.agentAnswer || "?").substring(0, 400)}`
       ).join("\n---\n");
 
-      // STEP 2B: Resolution Extraction + STEP 2C: Actionability Detection
       const analysisPrompt = `Du er en ekspert på DyreID support-analyse.
 
 OPPGAVE: Analyser dette clusteret av support-saker og besvar to ting:
@@ -2580,17 +2644,14 @@ SVAR I JSON:
       const analysisText = await callOpenAI(analysisPrompt, "gpt-4o", 2048, true);
       const analysis = extractJson(analysisText);
 
-      // STEP 2D: INTENT NORMALIZATION
-      // Compare discovered intent against existing Help Center intents and Playbook intents
-      const normalization = await normalizeDiscoveredIntent(
+      // STEP 2D: INTENT NORMALIZATION against canonical_intents
+      const normalization = await normalizeAgainstCanonical(
         cluster.suggested_intent,
         cluster.description || "",
         cluster.keywords || [],
-        existingIntentList,
-        existingPlaybookIntents
+        canonicalIntentRows
       );
 
-      // Determine fields based on normalization result
       let finalCategory = cluster.category || null;
       let finalActionable = analysis.actionable || false;
       let finalRequiresOtp = analysis.requires_otp || false;
@@ -2601,31 +2662,39 @@ SVAR I JSON:
       let finalActionEndpoint = analysis.action_endpoint || null;
       let finalStatus = "pending";
 
-      // If matched to existing intent (similarity > 0.75), inherit properties
       if (!normalization.isNewIntentCandidate && normalization.matchedExistingIntent) {
-        const matchedDef = INTENT_DEFINITIONS.find(d => d.intent === normalization.matchedExistingIntent);
-        const matchedPlaybook = existingPlaybookIntents.find(p => p.intent === normalization.matchedExistingIntent);
-
-        // Always inherit category from either source
-        if (matchedDef) {
-          finalCategory = matchedDef.category || finalCategory;
+        const matched = canonicalIntentRows.find(ci => ci.intentId === normalization.matchedExistingIntent);
+        if (matched) {
+          finalCategory = matched.category || finalCategory;
+          finalActionable = matched.actionable || finalActionable;
+          finalRequiredFields = matched.requiredFields ? JSON.stringify(matched.requiredFields) : finalRequiredFields;
+          finalActionEndpoint = matched.endpoint || finalActionEndpoint;
         }
-
-        // Playbook provides authoritative operational fields
-        if (matchedPlaybook) {
-          finalCategory = matchedPlaybook.hjelpesenterCategory || finalCategory;
-          finalActionable = matchedPlaybook.requiresAction || matchedPlaybook.requiresLogin || finalActionable;
-          finalRequiresOtp = matchedPlaybook.requiresLogin || finalRequiresOtp;
-          finalRequiredFields = matchedPlaybook.requiredRuntimeData || finalRequiredFields;
-          finalActionEndpoint = matchedPlaybook.apiEndpoint || finalActionEndpoint;
-          finalAffectsPayment = matchedPlaybook.paymentRequired || finalAffectsPayment;
-        }
-
         finalStatus = "auto_mapped";
       }
 
-      // STEP 2E: Create Playbook Candidate
-      const intentId = await storage.insertDiscoveredIntent({
+      await storage.insertDiscoveredCluster({
+        clusterId: `${discoveryRunId}-${i}`,
+        clusterName: cluster.cluster_name || cluster.suggested_intent,
+        suggestedIntent: cluster.suggested_intent,
+        description: cluster.description || "",
+        category: finalCategory,
+        ticketCount: clusterTicketIds.length || cluster.ticket_ids?.length || 0,
+        ticketIds: clusterTicketIds,
+        sampleMessages: cluster.sample_messages || [],
+        topKeywords: cluster.keywords || [],
+        actionable: finalActionable,
+        confidence: analysis.confidence || 0,
+        normalizedIntent: normalization.normalizedIntent,
+        isNewCandidate: normalization.isNewIntentCandidate,
+        similarityScore: normalization.similarityScore,
+        matchedCanonicalIntent: normalization.matchedExistingIntent,
+        status: finalStatus,
+        discoveryRunId,
+      });
+
+      // Also store in legacy discovered_intents for backward compat
+      await storage.insertDiscoveredIntent({
         clusterName: cluster.cluster_name || cluster.suggested_intent,
         suggestedIntent: cluster.suggested_intent,
         description: cluster.description || "",

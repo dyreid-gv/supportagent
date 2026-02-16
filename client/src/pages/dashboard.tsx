@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -48,8 +48,13 @@ import {
   ExternalLink,
   Globe,
   Monitor,
+  Hash,
+  Clock,
+  XCircle,
+  Lock,
 } from "lucide-react";
 import { useState, useCallback } from "react";
+import { useToast } from "@/hooks/use-toast";
 import {
   Dialog,
   DialogContent,
@@ -931,6 +936,9 @@ export default function Dashboard() {
           <TabsTrigger value="discovery" data-testid="tab-discovery">
             Discovery ({stats?.discoveredIntentsPending || 0})
           </TabsTrigger>
+          <TabsTrigger value="canonical" data-testid="tab-canonical">
+            Canonical Intents
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="pipeline" className="space-y-4 mt-4">
@@ -1706,6 +1714,10 @@ export default function Dashboard() {
 
         <TabsContent value="discovery" className="mt-4">
           <DiscoveryTab discoveredIntents={discoveredIntents || []} />
+        </TabsContent>
+
+        <TabsContent value="canonical" className="mt-4">
+          <CanonicalIntentsTab />
         </TabsContent>
       </Tabs>
     </div>
@@ -4309,6 +4321,205 @@ function DiscoveryTab({ discoveredIntents }: { discoveredIntents: DiscoveredInte
           </CardContent>
         </Card>
       )}
+    </div>
+  );
+}
+
+function CanonicalIntentsTab() {
+  const { data: intents, isLoading } = useQuery<any[]>({
+    queryKey: ["/api/canonical-intents"],
+  });
+
+  const { data: stats } = useQuery<{
+    total: number;
+    approved: number;
+    pending: number;
+    actionable: number;
+    bySource: Record<string, number>;
+    byCategory: Record<string, number>;
+  }>({
+    queryKey: ["/api/canonical-intents/stats"],
+  });
+
+  const { toast } = useToast();
+
+  const seedMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/canonical-intents/seed");
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/canonical-intents"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/canonical-intents/stats"] });
+      toast({
+        title: "Seed fullført",
+        description: `${data.seeded} intents seeded, ${data.skipped} skipped`,
+      });
+    },
+    onError: (err: any) => {
+      toast({ title: "Feil", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const toggleApprovalMutation = useMutation({
+    mutationFn: async ({ id, approved }: { id: number; approved: boolean }) => {
+      await apiRequest("PUT", `/api/canonical-intents/${id}`, { approved });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/canonical-intents"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/canonical-intents/stats"] });
+    },
+  });
+
+  const [filterSource, setFilterSource] = useState<string>("all");
+  const [filterCategory, setFilterCategory] = useState<string>("all");
+  const [searchTerm, setSearchTerm] = useState("");
+
+  const filteredIntents = (intents || []).filter((i: any) => {
+    if (filterSource !== "all" && i.source !== filterSource) return false;
+    if (filterCategory !== "all" && i.category !== filterCategory) return false;
+    if (searchTerm && !i.intentId.toLowerCase().includes(searchTerm.toLowerCase()) &&
+        !(i.description || "").toLowerCase().includes(searchTerm.toLowerCase()) &&
+        !(i.keywords || "").toLowerCase().includes(searchTerm.toLowerCase())) return false;
+    return true;
+  });
+
+  const categories = stats ? Object.keys(stats.byCategory).sort() : [];
+  const sources = stats ? Object.keys(stats.bySource).sort() : [];
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center p-12">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3 flex-wrap">
+        <Button
+          data-testid="button-seed-canonical"
+          onClick={() => seedMutation.mutate()}
+          disabled={seedMutation.isPending}
+          size="sm"
+        >
+          {seedMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          {seedMutation.isPending ? "Seeder..." : "Seed Canonical Intents"}
+        </Button>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Totalt</CardTitle>
+            <Hash className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold" data-testid="text-canonical-total">{stats?.total || 0}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Godkjent</CardTitle>
+            <CheckCircle className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold" data-testid="text-canonical-approved">{stats?.approved || 0}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Venter</CardTitle>
+            <Clock className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold" data-testid="text-canonical-pending">{stats?.pending || 0}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Kilder</CardTitle>
+            <FileText className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="flex gap-2 flex-wrap">
+              {sources.map(s => (
+                <Badge key={s} variant="secondary" data-testid={`badge-source-${s}`}>
+                  {s}: {stats?.bySource[s]}
+                </Badge>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
+          <CardTitle className="text-sm font-medium">Canonical Intent Registry</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex gap-2 flex-wrap">
+            <Input
+              data-testid="input-search-canonical"
+              placeholder="Søk intent..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="max-w-[200px]"
+            />
+            <Select value={filterSource} onValueChange={setFilterSource}>
+              <SelectTrigger className="max-w-[150px]" data-testid="select-filter-source">
+                <SelectValue placeholder="Kilde" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Alle kilder</SelectItem>
+                {sources.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={filterCategory} onValueChange={setFilterCategory}>
+              <SelectTrigger className="max-w-[180px]" data-testid="select-filter-category">
+                <SelectValue placeholder="Kategori" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Alle kategorier</SelectItem>
+                {categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <span className="text-xs text-muted-foreground self-center">
+              {filteredIntents.length} av {intents?.length || 0}
+            </span>
+          </div>
+
+          <ScrollArea className="h-[500px]">
+            <div className="space-y-1">
+              {filteredIntents.map((intent: any) => (
+                <div key={intent.id} className="flex flex-wrap items-center justify-between gap-2 p-2 border rounded-md" data-testid={`row-canonical-${intent.intentId}`}>
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <span className="font-mono text-sm truncate">{intent.intentId}</span>
+                    <Badge variant="outline">{intent.source}</Badge>
+                    <Badge variant="secondary">{intent.category}</Badge>
+                    {intent.subcategory && (
+                      <span className="text-xs text-muted-foreground truncate">{intent.subcategory}</span>
+                    )}
+                    {intent.actionable && <Badge variant="default">Transaksjonell</Badge>}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      size="icon"
+                      variant={intent.approved ? "default" : "outline"}
+                      data-testid={`button-toggle-approve-${intent.id}`}
+                      onClick={() => toggleApprovalMutation.mutate({ id: intent.id, approved: !intent.approved })}
+                      disabled={toggleApprovalMutation.isPending}
+                    >
+                      {intent.approved ? <CheckCircle className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </ScrollArea>
+        </CardContent>
+      </Card>
     </div>
   );
 }

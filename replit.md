@@ -12,19 +12,22 @@
 3. **9-stegs implementasjonsplan (diskutert)** — Bruker ga detaljert steg-for-steg for ukategoriserte saker: identifiser → cluster-tekst → HDBSCAN → oppsummering → GPT intent-forslag → normalisering → review → promote → test.
 4. **Full implementasjonsprompt (diskutert, ikke startet)** — Utvidet til 12 steg (0–11) med: Canonical Intent Registry, embedding-basert clustering, continuous learning, pilot batch test, runtime safety. Kjerneprinsipp: trening = AI-assistert, runtime = deterministisk + voktet.
 
+### Implementert (Steg 0–8)
+- **Steg 0**: `canonical_intents`-tabell (intentId unique, embedding nullable jsonb, source enum, approved flag) + `discovered_clusters`-tabell. Seed-funksjon migrerer TEMPLATE_CATEGORY_MAPPING (21), INTENT_DEFINITIONS (55+), og Playbook-entries. 76 canonical intents seeded.
+- **Steg 1**: `isUncategorized(ticket)` predikat i `server/canonical-intents.ts` — sjekker categoryId mot TEMPLATE_CATEGORY_MAPPING, filtrerer GeneralInquiry/ReopenedTicket/SurveyFeedback.
+- **Steg 2**: Deterministisk `buildClusterText()` i training-agent.ts — subject | customerQuestion | agentAnswer (trunkert 300 tegn).
+- **Steg 3**: GPT-basert clustering som default (HDBSCAN reservert for fremtid via env toggle).
+- **Steg 4**: Discovered clusters lagres i `discovered_clusters`-tabell med full metadata.
+- **Steg 5**: GPT intent-forslag per cluster — kun label/type/keywords, ikke prosedyrer.
+- **Steg 6**: `normalizeAgainstCanonical()` — sammenligner mot canonical_intents (ikke spredte kilder). Score > 0.75 = auto-map, < 0.75 = new candidate.
+- **Steg 7**: Canonical Intents tab i dashboard — 4 stat-kort, filtrering (kilde/kategori/søk), godkjenning/avvisning toggle per intent.
+- **Steg 8**: Promote discovered cluster → canonical intent (approved=false, krever menneskelig godkjenning). Re-promotion forhindret.
+
 ### Hva gjenstår å implementere
-- **Steg 0**: `canonical_intents`-tabell med embedding-vektor + migrering av alle eksisterende intents
-- **Steg 1**: `isUncategorized(ticket)` predikat-funksjon
-- **Steg 2**: Deterministisk `cluster_text`-konstruksjon
-- **Steg 3**: Embeddings + HDBSCAN clustering (erstatte GPT-basert)
-- **Steg 4**: `discovered_clusters`-tabell med oppsummeringskort
-- **Steg 5**: GPT intent-forslag per cluster (kun label/type, ingen prosedyrer)
-- **Steg 6**: Normalisering mot `canonical_intents` (embedding similarity)
-- **Steg 7**: Utvidet review-UI (subcategory, infoText, endpoint-blokkering, provenance)
-- **Steg 8**: Promote + continuous learning (refresh embedding index)
 - **Steg 9**: Pilot batch test (1000 tickets, rapport)
 - **Steg 10**: Runtime safety verification (30 testspørsmål)
 - **Steg 11**: Continuous learning regler (aldri auto-promote)
+- **Fremtidig**: Embedding-basert clustering (HDBSCAN) via CLUSTERING_MODE env toggle
 
 ### Viktige designbeslutninger (denne tråden)
 - `canonical_intents` erstatter spredte intent-kilder (TEMPLATE_CATEGORY_MAPPING, INTENT_DEFINITIONS, Playbook)
