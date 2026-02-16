@@ -47,7 +47,7 @@ const INTENT_PATTERNS: IntentQuickMatch[] = [
   // ── ID-søk ──────────────────────────────────────────────
   { intent: "WhyIDMark", regex: /hvorfor.*id.?merk|bør.*merke|fordel.*chip/i },
   { intent: "CheckContactData", regex: /kontrollere.*kontaktdata|kontaktdata.*riktig|sjekke.*chip/i },
-  { intent: "InactiveRegistration", regex: /ikke søkbar|søkbar|inaktiv.*registr/i },
+  { intent: "InactiveRegistration", regex: /ikke søkbar|kjaledyr.*søkbar|dyr.*søkbar|inaktiv.*registr/i },
 
   // ── DyreID-appen ────────────────────────────────────────
   { intent: "AppAccess", regex: /laste ned.*app|installere.*app|tilgang.*app/i },
@@ -103,7 +103,7 @@ const INTENT_PATTERNS: IntentQuickMatch[] = [
 
   // ── Utenlandsregistrering ───────────────────────────────
   { intent: "UnregisteredChip578", regex: /uregistrert.*brikke|uregistrert.*chip|578.*ikke.*registrert|ikke.*forhåndsbetalt/i },
-  { intent: "ForeignRegistration", regex: /registrere.*norge|utenlands.*registrer|importert.*dyr/i },
+  { intent: "ForeignRegistration", regex: /registrer.*norge|registrer.*i norge|utenlands.*registrer|importert.*dyr/i },
   { intent: "ForeignRegistrationCost", regex: /kost.*registrer|pris.*registrer|registrer.*kost|676/i },
   { intent: "ForeignPedigree", regex: /stamtavle.*utenlandsk|utenlandsk.*stamtavle|pedigree/i },
 
@@ -270,6 +270,18 @@ const CATEGORY_MENUS: Record<string, CategoryMenu> = {
       { label: "Registrere nytt dyr", query: "Hvordan registrere et nytt dyr i DyreID?", intent: "NewRegistration", description: "Registrere et dyr som ikke er i systemet", url: `${HJELPESENTER_BASE}/hjelp-id-sok/1-hvorfor-bor-jeg-id-merke` },
     ],
   },
+  "Priser": {
+    broadRegex: /^(pris|priser|priser og abonnement|abonnement|abonnement og priser|hva koster|kostnader|betaling)[\?\.\!]?$/i,
+    title: "Priser og abonnement",
+    intro: "Her er informasjon om priser og abonnement hos DyreID:",
+    subtopics: [
+      { label: "Hva koster eierskifte?", query: "Hva koster eierskifte?", intent: "OwnershipTransferCost", url: `${HJELPESENTER_BASE}/hjelp-eierskifte/40-hva-koster-eierskifte` },
+      { label: "Koster DyreID-appen noe?", query: "Koster DyreID-appen noe?", intent: "AppCost", url: `${HJELPESENTER_BASE}/hjelp-dyreid-appen/9-koster-appen-noe` },
+      { label: "Basis vs DyreID+", query: "Hva er forskjellen på DyreID basis og DyreID+ abonnement?", intent: "SubscriptionComparison", url: `${HJELPESENTER_BASE}/hjelp-dyreid-appen/8-basis-vs-dyreID-pluss` },
+      { label: "QR-brikke: abonnement eller engang?", query: "Er QR-brikke abonnement eller engangskostnad?", intent: "QRPricingModel", url: `${HJELPESENTER_BASE}/hjelp-qr-brikke/34-qr-prismodell` },
+      { label: "Hva koster registrering?", query: "Hva koster det å registrere et dyr i Norge?", intent: "ForeignRegistrationCost", url: `${HJELPESENTER_BASE}/hjelp-utenlandsregistrering/44-kostnad-registrering` },
+    ],
+  },
   Familiedeling: {
     broadRegex: /^(familiedeling|om familiedeling|hjelp.*familiedeling|dele.*tilgang)[\?\.\!]?$/i,
     title: "Familiedeling",
@@ -290,6 +302,17 @@ function getHelpCenterUrl(intent: string): string | null {
     for (const sub of menu.subtopics) {
       if (sub.intent === intent && sub.url) {
         return sub.url;
+      }
+    }
+  }
+  return null;
+}
+
+function getSubtopicInfo(intent: string): { label: string; url: string; description?: string; category: string } | null {
+  for (const [key, menu] of Object.entries(CATEGORY_MENUS)) {
+    for (const sub of menu.subtopics) {
+      if (sub.intent === intent && sub.url) {
+        return { label: sub.label, url: sub.url, description: sub.description, category: menu.title };
       }
     }
   }
@@ -1974,6 +1997,19 @@ export async function* streamChatResponse(
   }
 
   if (session.chipLookupFlow) {
+    const newTopicIntent = quickIntentMatch(userMessage);
+    const isCategorySwitch = detectCategoryMenu(userMessage) !== null;
+    if ((newTopicIntent && newTopicIntent !== "ChipLookup" && newTopicIntent !== session.intent) || isCategorySwitch) {
+      session.chipLookupFlow = undefined;
+      session.chipLookupResult = undefined;
+      session.intent = undefined;
+      session.collectedData = {};
+      session.directIntentFlow = undefined;
+      session.loginHelpStep = undefined;
+    }
+  }
+
+  if (session.chipLookupFlow) {
     const chipResponse = handleChipLookupFlow(session, userMessage, isAuthenticated, ownerContext, storedUserContext || null);
     if (chipResponse) {
       let responseText = chipResponse.text;
@@ -2025,6 +2061,19 @@ export async function* streamChatResponse(
 
       yield responseText;
       return;
+    }
+  }
+
+  if (session.directIntentFlow || session.loginHelpStep) {
+    const newTopicIntent = quickIntentMatch(userMessage);
+    const isCategorySwitch = detectCategoryMenu(userMessage) !== null;
+    if ((newTopicIntent && newTopicIntent !== session.intent && newTopicIntent !== session.directIntentFlow) || isCategorySwitch) {
+      session.directIntentFlow = undefined;
+      session.loginHelpStep = undefined;
+      session.intent = undefined;
+      session.collectedData = {};
+      session.awaitingInput = undefined;
+      session.playbook = undefined;
     }
   }
 
@@ -2111,23 +2160,6 @@ export async function* streamChatResponse(
     }
   }
 
-  if (isChipLookupTrigger(intent) && !session.chipLookupFlow && !chipInMessage) {
-    session.chipLookupFlow = "awaiting_chip";
-    session.intent = intent || undefined;
-    const responseText = "Jeg kan hjelpe deg med å slå opp dyret i registeret. Har du dyrets ID-nummer (chipnummer)? Det er vanligvis 15 siffer og står på registreringsbeviset eller kan leses av en veterinær.";
-    const metadata: any = { model: "chip-lookup-start", chipLookup: true };
-    const msg = await storage.createMessage({ conversationId, role: "assistant", content: responseText, metadata });
-    const interaction = await storage.logChatbotInteraction({
-      conversationId, messageId: msg.id, userQuestion: userMessage, botResponse: responseText,
-      responseMethod: "chip-lookup-start", matchedIntent: intent,
-      actionsExecuted: null, authenticated: isAuthenticated, responseTimeMs: Date.now() - startTime,
-    });
-    lastInteractionId = interaction.id;
-    await db.update(messages).set({ metadata: { ...metadata, interactionId: interaction.id } }).where(eq(messages.id, msg.id));
-    yield responseText;
-    return;
-  }
-
   const DIRECT_INTENTS = ["ViewMyPets", "OwnershipTransferWeb", "ReportLostPet", "ReportFoundPet", "QRTagActivation", "PetDeceased", "NKKOwnership", "LoginIssue", "LoginProblem", "UnregisteredChip578", "ForeignRegistration", "WrongInfo", "WrongOwner", "MissingPetProfile", "InactiveRegistration", "NewRegistration"];
   if ((intent && DIRECT_INTENTS.includes(intent)) || session.directIntentFlow || session.loginHelpStep) {
     let effectiveIntent = session.directIntentFlow || intent || "";
@@ -2183,6 +2215,23 @@ export async function* streamChatResponse(
       yield directResponse.text;
       return;
     }
+  }
+
+  if (isChipLookupTrigger(intent) && !session.chipLookupFlow && !chipInMessage) {
+    session.chipLookupFlow = "awaiting_chip";
+    session.intent = intent || undefined;
+    const responseText = "Jeg kan hjelpe deg med å slå opp dyret i registeret. Har du dyrets ID-nummer (chipnummer)? Det er vanligvis 15 siffer og står på registreringsbeviset eller kan leses av en veterinær.";
+    const metadata: any = { model: "chip-lookup-start", chipLookup: true };
+    const msg = await storage.createMessage({ conversationId, role: "assistant", content: responseText, metadata });
+    const interaction = await storage.logChatbotInteraction({
+      conversationId, messageId: msg.id, userQuestion: userMessage, botResponse: responseText,
+      responseMethod: "chip-lookup-start", matchedIntent: intent,
+      actionsExecuted: null, authenticated: isAuthenticated, responseTimeMs: Date.now() - startTime,
+    });
+    lastInteractionId = interaction.id;
+    await db.update(messages).set({ metadata: { ...metadata, interactionId: interaction.id } }).where(eq(messages.id, msg.id));
+    yield responseText;
+    return;
   }
 
   if (playbook) {
@@ -2243,6 +2292,51 @@ export async function* streamChatResponse(
         responseMethod: playbookResponse.model,
         matchedIntent: intent,
         actionsExecuted: playbookResponse.actionExecuted ? [{ action: playbookResponse.actionType, success: playbookResponse.actionSuccess }] : null,
+        authenticated: isAuthenticated,
+        responseTimeMs: Date.now() - startTime,
+      });
+      lastInteractionId = interaction.id;
+
+      await db
+        .update(messages)
+        .set({ metadata: { ...metadata, interactionId: interaction.id } })
+        .where(eq(messages.id, msg.id));
+
+      yield responseText;
+      return;
+    }
+  }
+
+  if (intent) {
+    const subtopicInfo = getSubtopicInfo(intent);
+    if (subtopicInfo) {
+      const responseText = `**${subtopicInfo.label}**\n\n${subtopicInfo.description ? subtopicInfo.description + "\n\n" : ""}Du finner detaljert informasjon om dette på hjelpesenteret vårt:\n${subtopicInfo.url}`;
+
+      const metadata: any = {
+        model: "help-center-redirect",
+        matchedIntent: intent,
+        method,
+        helpCenterLink: subtopicInfo.url,
+        suggestions: [
+          { label: "Tilbake til " + subtopicInfo.category, action: "SUBTOPIC", data: { query: subtopicInfo.category.toLowerCase() } },
+        ],
+      };
+
+      const msg = await storage.createMessage({
+        conversationId,
+        role: "assistant",
+        content: responseText,
+        metadata,
+      });
+
+      const interaction = await storage.logChatbotInteraction({
+        conversationId,
+        messageId: msg.id,
+        userQuestion: userMessage,
+        botResponse: responseText,
+        responseMethod: "help-center-redirect",
+        matchedIntent: intent,
+        actionsExecuted: null,
         authenticated: isAuthenticated,
         responseTimeMs: Date.now() - startTime,
       });
