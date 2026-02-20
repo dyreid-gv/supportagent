@@ -156,6 +156,17 @@ export async function registerRoutes(
     }
   });
 
+  // ─── DIAGNOSTIC: PAGINATION TEST ──────────────────────────────────
+  app.post("/api/training/diagnostic-pagination", async (_req, res) => {
+    try {
+      const { runPaginationDiagnostic } = await import("./diagnostic-pagination");
+      const report = await runPaginationDiagnostic();
+      res.json(report);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // ─── WORKFLOW 1: INGESTION ────────────────────────────────────────
   app.post("/api/training/ingest", async (_req, res) => {
     sseHeaders(res);
