@@ -1431,6 +1431,69 @@ function handleDirectIntent(
     };
   }
 
+  if (intent === "SmartTagActivation") {
+    return {
+      text: "**Slik aktiverer du Smart Tag:**\n\n1. Last ned **DyreID-appen** fra App Store eller Google Play\n2. Opprett en bruker eller logg inn\n3. Trykk på **Smart Tag**-ikonet i appen\n4. Hold Smart Tag inntil telefonen til den kobles\n5. Følg instruksjonene i appen for å knytte taggen til dyret ditt\n\n**Tips:** Sørg for at Bluetooth er aktivert på telefonen. Smart Tag bruker Bluetooth Low Energy (BLE) for tilkobling.\n\nHvis du har problemer med tilkoblingen, prøv å starte appen på nytt og hold taggen helt inntil telefonen.",
+      helpCenterLink: `${HJELPESENTER_BASE}/hjelp-smart-tag/25-aktivering-smart-tag`,
+      model: "direct-smart-tag-info",
+      requestFeedback: true,
+    };
+  }
+
+  if (intent === "SmartTagQRActivation") {
+    return {
+      text: "**Aktivere QR-koden på Smart Tag:**\n\nSmart Tag har en innebygd QR-kode som kan skannes av alle med en smarttelefon.\n\n1. Åpne **DyreID-appen**\n2. Gå til **Smart Tag**-seksjonen\n3. Velg taggen du vil aktivere QR for\n4. Trykk på **Aktiver QR-kode**\n5. Velg hvilke kontaktopplysninger som skal vises ved skanning\n\nNår QR-koden er aktivert, kan den som finner dyret ditt skanne koden og kontakte deg direkte uten å se sensitive opplysninger.",
+      helpCenterLink: `${HJELPESENTER_BASE}/hjelp-smart-tag/26-aktiver-qr-smart-tag`,
+      model: "direct-smart-tag-info",
+      requestFeedback: true,
+    };
+  }
+
+  if (intent === "SmartTagConnection") {
+    return {
+      text: "**Problemer med å koble til Smart Tag?**\n\nHer er noen feilsøkingssteg:\n\n1. **Sjekk Bluetooth** – Sørg for at Bluetooth er slått på i telefonens innstillinger\n2. **Nærhet** – Hold Smart Tag helt inntil telefonen under tilkobling\n3. **Start appen på nytt** – Lukk DyreID-appen helt og åpne den igjen\n4. **Restart telefonen** – Noen ganger hjelper det å starte telefonen på nytt\n5. **Batteri** – Sjekk at Smart Tag har strøm (den skal pipe/blinke ved aktivering)\n6. **Oppdater appen** – Sørg for at du har siste versjon av DyreID-appen\n\n**Viktig:** Smart Tag bruker Bluetooth Low Energy (BLE). Noen eldre telefoner støtter ikke dette. Sjekk at telefonen din er kompatibel.",
+      helpCenterLink: `${HJELPESENTER_BASE}/hjelp-smart-tag/27-kan-ikke-koble-smart-tag`,
+      model: "direct-smart-tag-info",
+      requestFeedback: true,
+    };
+  }
+
+  if (intent === "SmartTagMissing") {
+    return {
+      text: "**Smart Tag forsvunnet fra appen?**\n\nHvis Smart Tag ikke lenger vises i DyreID-appen, prøv følgende:\n\n1. **Lukk og åpne appen** – Noen ganger må appen oppdateres\n2. **Sjekk Bluetooth** – Sørg for at Bluetooth er aktivert\n3. **Rekkevidde** – Smart Tag må være innenfor Bluetooth-rekkevidde (ca. 10-15 meter)\n4. **Logg ut og inn igjen** – Gå til innstillinger i appen, logg ut og logg inn på nytt\n5. **Legg til på nytt** – Hvis taggen fortsatt ikke vises, prøv å legge den til på nytt via Smart Tag-menyen\n\nHvis ingen av stegene fungerer, kan det være et problem med taggens batteri eller en teknisk feil. Kontakt oss på **support@dyreid.no** for videre hjelp.",
+      helpCenterLink: `${HJELPESENTER_BASE}/hjelp-smart-tag/28-smart-tag-forsvunnet`,
+      model: "direct-smart-tag-info",
+      requestFeedback: true,
+    };
+  }
+
+  if (intent === "SmartTagPosition") {
+    return {
+      text: "**Smart Tag-posisjonen oppdateres ikke?**\n\nSmart Tag oppdaterer posisjonen via Bluetooth, noe som betyr at den trenger en tilkoblet telefon i nærheten for å sende posisjon.\n\n**Slik fungerer det:**\n- Posisjonen oppdateres når Smart Tag er innenfor Bluetooth-rekkevidde av telefonen din (ca. 10-15 meter)\n- Hvis dyret er utenfor rekkevidde, vises siste kjente posisjon\n- Andre DyreID-brukere i nærheten kan også oppdatere posisjonen anonymt\n\n**Feilsøking:**\n1. Sjekk at Bluetooth er aktivert på telefonen\n2. Sjekk at appen har tillatelse til bakgrunnsoppdatering\n3. Sjekk at appen har plasseringstillatelse\n4. Sørg for at batteriet i taggen ikke er tomt",
+      helpCenterLink: `${HJELPESENTER_BASE}/hjelp-smart-tag/29-smart-tag-posisjon`,
+      model: "direct-smart-tag-info",
+      requestFeedback: true,
+    };
+  }
+
+  if (intent === "SmartTagSound") {
+    return {
+      text: "**Smart Tag lager lyder av seg selv?**\n\nHvis Smart Tag piper eller lager lyder uventet, kan det skyldes flere ting:\n\n1. **Lavt batteri** – Taggen varsler når batteriet begynner å bli lavt\n2. **Adskillelsesvarsel** – Hvis du har aktivert varsel ved adskillelse, vil taggen pipe når den mister kontakt med telefonen\n3. **Finn min tag-funksjon** – Noen i nærheten kan ha aktivert \"Finn min tag\" i appen\n\n**Slik stopper du lyden:**\n- Åpne DyreID-appen og sjekk Smart Tag-innstillingene\n- Deaktiver adskillelsesvarsel hvis du ikke ønsker det\n- Sjekk batterinivået i appen\n\nHvis lydene fortsetter uten åpenbar grunn, prøv å ta ut og sette inn batteriet på nytt.",
+      helpCenterLink: `${HJELPESENTER_BASE}/hjelp-smart-tag/30-smart-tag-lyd`,
+      model: "direct-smart-tag-info",
+      requestFeedback: true,
+    };
+  }
+
+  if (intent === "SmartTagMultiple") {
+    return {
+      text: "**Problemer med flere Smart Tags?**\n\nHvis du har flere Smart Tags men bare klarer å koble til én, prøv dette:\n\n1. **Koble til én om gangen** – Aktiver og koble til én Smart Tag ferdig før du starter med neste\n2. **Hold avstand** – Legg de andre taggene i et annet rom mens du kobler til én\n3. **Unike navn** – Gi hver tag et unikt navn (f.eks. dyrets navn) så de er lette å skille\n4. **Start på nytt mellom tilkoblinger** – Lukk appen mellom hver tilkobling\n\n**OBS:** Hver Smart Tag kan kun kobles til ett dyr. Sørg for at du velger riktig dyr for hver tag under oppsettet.",
+      helpCenterLink: `${HJELPESENTER_BASE}/hjelp-smart-tag/31-smart-tag-flere`,
+      model: "direct-smart-tag-info",
+      requestFeedback: true,
+    };
+  }
+
   if (intent === "UnregisteredChip578") {
     return {
       text: "**Uregistrert 578-brikke**\n\nNoen ID-merker som begynner med **578** (Norges landskode) er likevel ikke registrert hos DyreID. Dette gjelder brikker som ikke er **forhåndsbetalte** hos oss – de er såkalte uregistrerte brikker og betraktes som **utlandsregistrerte**.\n\nDette betyr at selv om dyret er ID-merket hos en veterinær i Norge, er ikke chipen automatisk registrert i DyreID-registeret.\n\n**Hva må du gjøre?**\nFor å få dyret registrert i DyreID med en slik brikke, må du ta kontakt med en veterinær som kan registrere chipen hos oss. Dette koster **676 kr** og følger samme prosedyre som for utlandsregistrering.\n\nLes mer om prosessen her:\nhttps://hjelpesenter.dyreid.no/hjelp-utenlandsregistrering/43-registrering-norge",
@@ -2307,7 +2370,7 @@ export async function* streamChatResponse(
     }
   }
 
-  const DIRECT_INTENTS = ["ViewMyPets", "OwnershipTransferWeb", "ReportLostPet", "ReportFoundPet", "QRTagActivation", "PetDeceased", "NKKOwnership", "LoginIssue", "LoginProblem", "UnregisteredChip578", "ForeignRegistration", "WrongInfo", "WrongOwner", "MissingPetProfile", "InactiveRegistration", "NewRegistration"];
+  const DIRECT_INTENTS = ["ViewMyPets", "OwnershipTransferWeb", "ReportLostPet", "ReportFoundPet", "QRTagActivation", "PetDeceased", "NKKOwnership", "LoginIssue", "LoginProblem", "UnregisteredChip578", "ForeignRegistration", "WrongInfo", "WrongOwner", "MissingPetProfile", "InactiveRegistration", "NewRegistration", "SmartTagActivation", "SmartTagQRActivation", "SmartTagConnection", "SmartTagMissing", "SmartTagPosition", "SmartTagSound", "SmartTagMultiple"];
   if ((intent && DIRECT_INTENTS.includes(intent)) || session.directIntentFlow || session.loginHelpStep) {
     let effectiveIntent = session.directIntentFlow || intent || "";
     let directResponse = handleDirectIntent(effectiveIntent, session, isAuthenticated, ownerContext, storedUserContext || null, userMessage);
