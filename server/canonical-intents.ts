@@ -161,3 +161,83 @@ export function getTemplateCategoryMapping() {
 export function getTemplateIntentIds(): string[] {
   return Object.values(TEMPLATE_CATEGORY_MAPPING).map(m => m.intent);
 }
+
+let approvedIntentCache: Set<string> | null = null;
+let approvedIntentCacheTime = 0;
+const APPROVED_INTENT_CACHE_TTL = 60_000;
+
+export async function getApprovedIntentSet(): Promise<Set<string>> {
+  if (approvedIntentCache && Date.now() - approvedIntentCacheTime < APPROVED_INTENT_CACHE_TTL) {
+    return approvedIntentCache;
+  }
+  const approved = await storage.getApprovedCanonicalIntents();
+  approvedIntentCache = new Set(approved.map(i => i.intentId));
+  approvedIntentCacheTime = Date.now();
+  return approvedIntentCache;
+}
+
+export function invalidateApprovedIntentCache(): void {
+  approvedIntentCache = null;
+  approvedIntentCacheTime = 0;
+}
+
+export async function validateIntentId(intentId: string): Promise<boolean> {
+  const approved = await getApprovedIntentSet();
+  return approved.has(intentId);
+}
+
+export async function validateRuntimeIntents(runtimeIntentIds: string[]): Promise<{ valid: string[]; invalid: string[] }> {
+  const approved = await getApprovedIntentSet();
+  const valid: string[] = [];
+  const invalid: string[] = [];
+  for (const id of runtimeIntentIds) {
+    if (approved.has(id)) {
+      valid.push(id);
+    } else {
+      invalid.push(id);
+    }
+  }
+  return { valid, invalid };
+}
+
+export async function ensureRuntimeIntentsInCanonical(runtimeIntentIds: string[]): Promise<{ migrated: string[]; alreadyExists: string[] }> {
+  const approved = await getApprovedIntentSet();
+  const migrated: string[] = [];
+  const alreadyExists: string[] = [];
+
+  for (const intentId of runtimeIntentIds) {
+    if (approved.has(intentId)) {
+      alreadyExists.push(intentId);
+      continue;
+    }
+    const def = INTENT_DEFINITIONS.find(d => d.intent === intentId);
+    if (def) {
+      await storage.upsertCanonicalIntent({
+        intentId: def.intent,
+        category: def.category,
+        subcategory: def.subcategory,
+        source: "RUNTIME",
+        actionable: false,
+        approved: true,
+        keywords: def.keywords.join(", "),
+        description: def.description,
+      });
+      try {
+        await generateAndStoreEmbedding(def.intent);
+      } catch (err: any) {
+        console.error(`[Canonical] Embedding failed for migrated intent ${def.intent}:`, err.message);
+      }
+      migrated.push(intentId);
+    } else {
+      console.warn(`[Canonical] Runtime intent ${intentId} has no definition in shared/intents.ts — skipping migration`);
+    }
+  }
+
+  if (migrated.length > 0) {
+    invalidateApprovedIntentCache();
+    await refreshIntentIndex();
+    console.log(`[Canonical] Migrated ${migrated.length} runtime intents: ${migrated.join(", ")}`);
+  }
+
+  return { migrated, alreadyExists };
+}

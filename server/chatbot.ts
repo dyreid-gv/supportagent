@@ -8,6 +8,7 @@ import { getStoredSession } from "./minside-client";
 import { messages, type PlaybookEntry, type ServicePrice, type ResponseTemplate } from "@shared/schema";
 import { findSemanticMatch, findTopNSemanticMatches, getApprovedIntentIds, getIndexSize, isIndexReady, refreshIntentIndex } from "./intent-index";
 import { recordPilotMatch, isPilotEnabled } from "./pilot-stats";
+import { ensureRuntimeIntentsInCanonical, validateRuntimeIntents, getApprovedIntentSet } from "./canonical-intents";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -363,6 +364,41 @@ function quickIntentMatch(message: string): string | null {
     if (p.regex.test(message)) return p.intent;
   }
   return null;
+}
+
+export function getRuntimeIntentIds(): string[] {
+  const ids = new Set<string>();
+  for (const p of INTENT_PATTERNS) ids.add(p.intent);
+  for (const [, menu] of Object.entries(CATEGORY_MENUS)) {
+    for (const sub of menu.subtopics) {
+      if (sub.intent) ids.add(sub.intent);
+    }
+  }
+  return Array.from(ids);
+}
+
+export async function validateAndAlignCanonicalIntents(): Promise<{
+  total: number;
+  valid: number;
+  migrated: string[];
+  invalid: string[];
+}> {
+  const runtimeIds = getRuntimeIntentIds();
+  const result = await ensureRuntimeIntentsInCanonical(runtimeIds);
+  const postValidation = await validateRuntimeIntents(runtimeIds);
+
+  if (postValidation.invalid.length > 0) {
+    console.error(`[Canonical] CRITICAL: ${postValidation.invalid.length} runtime intents still missing from canonical_intents after migration: ${postValidation.invalid.join(", ")}`);
+  } else {
+    console.log(`[Canonical] All ${runtimeIds.length} runtime intents are aligned with canonical_intents`);
+  }
+
+  return {
+    total: runtimeIds.length,
+    valid: postValidation.valid.length,
+    migrated: result.migrated,
+    invalid: postValidation.invalid,
+  };
 }
 
 function extractDataFromMessage(message: string, requiredFields: string[] | null): Record<string, any> {
@@ -2277,9 +2313,19 @@ export async function testIntentMatch(query: string): Promise<{
   method: string;
   semanticScore?: number;
   model: string;
+  isCanonical?: boolean;
 }> {
   const normalized = query.trim().toLowerCase();
+  let approvedSet: Set<string> | null = null;
+  try { approvedSet = await getApprovedIntentSet(); } catch {}
   
+  const tagCanonical = (intentId: string, result: any) => {
+    if (approvedSet && intentId !== "CategoryMenu" && intentId !== "NONE" && intentId !== "PlaybookMatch") {
+      result.isCanonical = approvedSet.has(intentId);
+    }
+    return result;
+  };
+
   // 1. Category menu check (broadRegex)
   for (const [, menu] of Object.entries(CATEGORY_MENUS)) {
     if (menu.broadRegex.test(normalized) || menu.broadRegex.test(query.trim())) {
@@ -2290,7 +2336,7 @@ export async function testIntentMatch(query: string): Promise<{
   // 2. Regex matching
   for (const pattern of INTENT_PATTERNS) {
     if (pattern.regex.test(query) || pattern.regex.test(normalized)) {
-      return { matchedIntent: pattern.intent, method: "regex", model: "regex-match" };
+      return tagCanonical(pattern.intent, { matchedIntent: pattern.intent, method: "regex", model: "regex-match" });
     }
   }
   
@@ -2298,12 +2344,12 @@ export async function testIntentMatch(query: string): Promise<{
   if (isIndexReady()) {
     const semanticResult = await findSemanticMatch(query);
     if (semanticResult && semanticResult.bestScore >= 0.78 && semanticResult.bestIntentId) {
-      return { 
+      return tagCanonical(semanticResult.bestIntentId, { 
         matchedIntent: semanticResult.bestIntentId, 
         method: "semantic", 
         semanticScore: semanticResult.bestScore,
         model: "semantic-match" 
-      };
+      });
     }
     
     // 4. Keyword/playbook matching
@@ -2313,19 +2359,20 @@ export async function testIntentMatch(query: string): Promise<{
       const keywords = Array.isArray(entry.keywords) ? entry.keywords : [];
       for (const kw of keywords) {
         if (normalized.includes((kw as string).toLowerCase())) {
-          return { matchedIntent: entry.intentId || "PlaybookMatch", method: "keyword", model: "keyword-match" };
+          const intentId = entry.intent || "PlaybookMatch";
+          return tagCanonical(intentId, { matchedIntent: intentId, method: "keyword", model: "keyword-match" });
         }
       }
     }
     
     // 5. Return semantic result even below threshold if available
     if (semanticResult && semanticResult.bestIntentId) {
-      return { 
+      return tagCanonical(semanticResult.bestIntentId, { 
         matchedIntent: semanticResult.bestIntentId, 
         method: "semantic-below-threshold", 
         semanticScore: semanticResult.bestScore,
         model: "semantic-weak" 
-      };
+      });
     }
   }
   

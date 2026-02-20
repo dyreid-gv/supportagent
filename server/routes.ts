@@ -1784,6 +1784,19 @@ export async function registerRoutes(
         console.error(`[IntentIndex] ERROR: Index refresh failed after seed: ${refreshErr.message}`);
       }
 
+      const { validateAndAlignCanonicalIntents } = await import("./chatbot");
+      const alignment = await validateAndAlignCanonicalIntents();
+
+      res.json({ success: true, ...result, alignment });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/canonical-intents/align-runtime", async (_req, res) => {
+    try {
+      const { validateAndAlignCanonicalIntents } = await import("./chatbot");
+      const result = await validateAndAlignCanonicalIntents();
       res.json({ success: true, ...result });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
