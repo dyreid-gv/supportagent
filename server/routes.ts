@@ -167,6 +167,32 @@ export async function registerRoutes(
     }
   });
 
+  // ─── STAGING: 5000 TICKET INGEST + ANALYSIS ─────────────────────
+  app.post("/api/training/staging-ingest", async (_req, res) => {
+    sseHeaders(res);
+    try {
+      const { runStagingIngest } = await import("./staging-ingest");
+      const result = await runStagingIngest((msg, progress) => {
+        res.write(`data: ${JSON.stringify({ message: msg, progress })}\n\n`);
+      });
+      res.write(`data: ${JSON.stringify({ done: true, ...result })}\n\n`);
+      res.end();
+    } catch (error: any) {
+      res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+      res.end();
+    }
+  });
+
+  app.get("/api/training/staging-analysis", async (_req, res) => {
+    try {
+      const { runStagingAnalysis } = await import("./staging-ingest");
+      const report = await runStagingAnalysis();
+      res.json(report);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // ─── WORKFLOW 1: INGESTION ────────────────────────────────────────
   app.post("/api/training/ingest", async (_req, res) => {
     sseHeaders(res);
