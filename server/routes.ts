@@ -1862,5 +1862,35 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/chat/test-intent", async (req, res) => {
+    try {
+      const { query } = req.body;
+      if (!query) return res.status(400).json({ error: "query required" });
+      const { testIntentMatch } = await import("./chatbot");
+      const result = await testIntentMatch(query);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/chat/test-intent-batch", async (req, res) => {
+    try {
+      const { queries } = req.body;
+      if (!Array.isArray(queries)) return res.status(400).json({ error: "queries array required" });
+      const { testIntentMatch } = await import("./chatbot");
+      const results = await Promise.all(
+        queries.map(async (q: { query: string; expected: string }, idx: number) => {
+          const start = Date.now();
+          const result = await testIntentMatch(q.query);
+          return { idx, query: q.query, expected: q.expected, ...result, elapsed: Date.now() - start };
+        })
+      );
+      res.json(results);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   return httpServer;
 }
