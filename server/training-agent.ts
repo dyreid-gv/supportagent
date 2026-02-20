@@ -866,7 +866,10 @@ export async function runPlaybookGeneration(
       `);
       const tickets = ticketDataRows.rows as any[];
 
-      if (tickets.length === 0) continue;
+      if (tickets.length === 0) {
+        log(`Playbook: skipping ${intent} - no tickets found`, "training");
+        continue;
+      }
 
       const mostCommonCategory = getMostCommon(tickets.map(t => t.reclassified_category || t.hjelpesenter_category).filter(Boolean));
       const mostCommonSubcategory = getMostCommon(tickets.map(t => t.reclassified_subcategory || t.hjelpesenter_subcategory).filter(Boolean));
@@ -934,6 +937,7 @@ export async function runPlaybookGeneration(
       });
 
       const ticketIds = tickets.map((t: any) => t.id);
+      const ticketIdArray = `{${ticketIds.join(",")}}`;
       const qualityRows = await db.execute(sql`
         SELECT quality_level, COUNT(*)::int as cnt,
           ARRAY_AGG(DISTINCT elem) FILTER (WHERE elem IS NOT NULL) as all_missing,
@@ -941,7 +945,7 @@ export async function runPlaybookGeneration(
         FROM resolution_quality
         LEFT JOIN LATERAL unnest(missing_elements) AS elem ON true
         LEFT JOIN LATERAL unnest(positive_elements) AS pos ON true
-        WHERE ticket_id = ANY(${ticketIds})
+        WHERE ticket_id = ANY(${ticketIdArray}::int[])
         GROUP BY quality_level
       `);
       const qualityData = qualityRows.rows as any[];
@@ -972,7 +976,7 @@ export async function runPlaybookGeneration(
           AVG(thcm.match_confidence)::real as avg_conf
         FROM help_center_articles hca
         JOIN ticket_help_center_matches thcm ON thcm.article_id = hca.id
-        WHERE thcm.ticket_id = ANY(${ticketIds})
+        WHERE thcm.ticket_id = ANY(${ticketIdArray}::int[])
         GROUP BY hca.id
         ORDER BY match_count DESC, avg_conf DESC
         LIMIT 1
