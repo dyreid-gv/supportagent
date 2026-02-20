@@ -222,7 +222,7 @@ const CATEGORY_MENUS: Record<string, CategoryMenu> = {
     ],
   },
   "QR-brikke": {
-    broadRegex: /^(qr.?brikke|om qr|hjelp.*qr|qr.?tag)[\?\.\!]?$/i,
+    broadRegex: /^(qr|qr.?brikke|om qr|hjelp.*qr|qr.?tag|qr.?kode)[\?\.\!]?$/i,
     title: "QR-brikke",
     intro: "QR-brikken fra DyreID festes på halsbåndet og gjør at hvem som helst kan skanne og finne eieren hvis dyret kommer bort. Velg et tema, eller still meg et spørsmål.",
     subtopics: [
