@@ -94,7 +94,7 @@ const INTENT_PATTERNS: IntentQuickMatch[] = [
   { intent: "QRCompatibility", regex: /qr.*hund.*katt|passer.*qr.*brikke|kompatib.*qr/i },
   { intent: "QRRequiresIDMark", regex: /må.*id.?merk.*qr|qr.*krav.*chip|id.?merket.*brikke/i },
   { intent: "QRPricingModel", regex: /qr.*abonnement.*engang|engangskostnad.*qr|qr.*prismodell/i },
-  { intent: "QRTagActivation", regex: /aktivere.*qr|qr.?brikke.*aktiver|skann.*brikke|qr.*fungerer\s*ikke|qr.*virker\s*ikke|brikke.*fungerer\s*ikke|brikke.*virker\s*ikke|qr.*problem|qr.*feil|brikke.*feil/i },
+  { intent: "QRTagActivation", regex: /aktivere.*qr|qr.?brikke.*aktiver|skann.*brikke|qr.*(?:fungerer|funker|finker|virker|funke|funka|virke)\s*(?:ikke|ikkje|itj)|brikke.*(?:fungerer|funker|finker|virker|funke|funka|virke)\s*(?:ikke|ikkje|itj)|qr.*problem|qr.*feil|brikke.*feil/i },
   { intent: "QRTagContactInfo", regex: /kontaktinfo.*qr|synlig.*kontakt.*skann|hvem ser.*qr/i },
   { intent: "QRScanResult", regex: /hva skjer.*skann|skanne.*qr.*resultat|skann.*kode/i },
   { intent: "QRUpdateContact", regex: /oppdatere.*kontakt.*qr|endre.*info.*brikke|qr.*kontakt.*endre/i },
