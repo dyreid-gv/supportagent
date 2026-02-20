@@ -1,0 +1,144 @@
+ANONICAL ALIGNMENT FIX – SINGLE SOURCE OF TRUTH
+
+We have identified a critical architectural inconsistency:
+
+Runtime intent IDs do NOT align 1:1 with canonical_intents.intentId.
+
+This causes:
+
+0% canonical mapping in training pipeline
+
+All runtime intents flagged as new candidates
+
+Potential duplication during discovery
+
+Registry fragmentation
+
+We must fix this immediately.
+
+OBJECTIVE
+
+Make canonical_intents the single source of truth for ALL intent IDs.
+
+Runtime must ONLY use intent IDs that exist in canonical_intents.
+
+No hardcoded or orphan runtime intents allowed.
+
+STEP 1 – DIAGNOSTIC REPORT (DO NOT MODIFY ANYTHING YET)
+
+Generate a strict comparison report:
+
+List all runtime intent IDs (regex + semantic + GPT fallback list)
+
+List all canonical_intents.intentId WHERE approved=true
+
+Produce:
+
+Exact matches
+
+Runtime-only intents (missing in canonical)
+
+Canonical-only intents (unused by runtime)
+
+Case mismatches
+
+Whitespace or formatting mismatches
+
+Return structured diff output.
+
+DO NOT apply fixes yet.
+
+STEP 2 – ALIGNMENT STRATEGY
+
+We must enforce this rule:
+
+Runtime intent resolution must ONLY resolve to intentIds present in canonical_intents.
+
+Choose this approach:
+
+✔ Runtime pulls intent IDs dynamically from canonical_intents
+✔ Hardcoded INTENT_DEFINITIONS removed as source of truth
+✔ Regex mapping returns canonical intentId only
+
+If any runtime intent is not present in canonical_intents:
+
+Add it to canonical_intents via migration
+
+Preserve casing EXACTLY
+
+Mark source="RUNTIME"
+
+approved=true
+
+Generate embedding immediately
+
+STEP 3 – PLAYBOOK CONSISTENCY FIX
+
+Check Playbook entries:
+
+If Playbook.intentId NOT in canonical_intents:
+
+→ Log error
+→ Do NOT allow Playbook build
+
+Ensure:
+
+actionable flag in canonical_intents matches runtime behavior
+
+requiredFields present for transactional
+
+endpoint defined for transactional
+
+infoText present for informational
+
+No transactional intent may exist without endpoint.
+
+STEP 4 – ENFORCE SINGLE SOURCE IN CODE
+
+Refactor:
+
+Remove intent lists defined outside canonical_intents
+
+Replace with dynamic loading:
+getApprovedCanonicalIntents()
+
+Regex match must validate:
+
+if (!canonicalIntentExists(intentId)) → throw error in dev mode
+
+STEP 5 – VALIDATION TEST
+
+Re-run:
+
+739 runtime stress test
+
+1000-ticket training pipeline
+
+Confirm:
+
+100% runtime intents map to canonical
+
+0% new candidates (unless truly new)
+
+No duplicate intent creation
+
+OUTPUT REQUIRED
+
+Return:
+
+Intent diff report (before fix)
+
+Description of migration actions taken
+
+Updated runtime intent resolution snippet
+
+Confirmation that canonical_intents is now the only intent source
+
+Post-fix validation summary
+
+Do NOT modify thresholds.
+Do NOT modify embedding logic.
+Do NOT auto-promote anything new.
+Do NOT change GPT flow.
+
+This is strictly a structural alignment fix.
