@@ -94,7 +94,7 @@ const INTENT_PATTERNS: IntentQuickMatch[] = [
   { intent: "QRCompatibility", regex: /qr.*hund.*katt|passer.*qr.*brikke|kompatib.*qr/i },
   { intent: "QRRequiresIDMark", regex: /må.*id.?merk.*qr|qr.*krav.*chip|id.?merket.*brikke/i },
   { intent: "QRPricingModel", regex: /qr.*abonnement.*engang|engangskostnad.*qr|qr.*prismodell/i },
-  { intent: "QRTagActivation", regex: /aktivere.*qr|qr.?brikke.*aktiver|skann.*brikke/i },
+  { intent: "QRTagActivation", regex: /aktivere.*qr|qr.?brikke.*aktiver|skann.*brikke|qr.*fungerer\s*ikke|qr.*virker\s*ikke|brikke.*fungerer\s*ikke|brikke.*virker\s*ikke|qr.*problem|qr.*feil|brikke.*feil/i },
   { intent: "QRTagContactInfo", regex: /kontaktinfo.*qr|synlig.*kontakt.*skann|hvem ser.*qr/i },
   { intent: "QRScanResult", regex: /hva skjer.*skann|skanne.*qr.*resultat|skann.*kode/i },
   { intent: "QRUpdateContact", regex: /oppdatere.*kontakt.*qr|endre.*info.*brikke|qr.*kontakt.*endre/i },
@@ -1896,15 +1896,13 @@ async function matchUserIntent(
   const quickIntent = quickIntentMatch(message);
   if (quickIntent) {
     const playbook = await storage.getPlaybookByIntent(quickIntent);
-    if (playbook) {
-      session.intent = quickIntent;
-      session.playbook = playbook;
-      session.collectedData = {};
-      debugInfo.matchedBy = "regex";
-      debugInfo.finalIntentId = quickIntent;
-      debugInfo.responseMethod = playbook.actionType === "API_CALL" ? "API_CALL" : "INFO";
-      return { intent: quickIntent, playbook, method: "quick-match", debug: debugInfo };
-    }
+    session.intent = quickIntent;
+    session.playbook = playbook;
+    session.collectedData = {};
+    debugInfo.matchedBy = "regex";
+    debugInfo.finalIntentId = quickIntent;
+    debugInfo.responseMethod = playbook ? (playbook.actionType === "API_CALL" ? "API_CALL" : "INFO") : "DIRECT";
+    return { intent: quickIntent, playbook: playbook || null, method: "quick-match", debug: debugInfo };
   }
 
   let semanticBestScore = 0;
