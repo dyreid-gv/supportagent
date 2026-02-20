@@ -1772,6 +1772,14 @@ export async function registerRoutes(
     try {
       const { seedCanonicalIntents } = await import("./canonical-intents");
       const result = await seedCanonicalIntents();
+
+      try {
+        const loadedCount = await refreshIntentIndex();
+        console.log(`[IntentIndex] Index refreshed after seed – ${loadedCount} intents loaded`);
+      } catch (refreshErr: any) {
+        console.error(`[IntentIndex] ERROR: Index refresh failed after seed: ${refreshErr.message}`);
+      }
+
       res.json({ success: true, ...result });
     } catch (error: any) {
       res.status(500).json({ error: error.message });

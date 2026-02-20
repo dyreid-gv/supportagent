@@ -1,5 +1,6 @@
 import { storage } from "./storage";
 import { cosineSimilarity, generateEmbedding } from "./embeddings";
+import { isPilotEnabled } from "./pilot-stats";
 
 interface IndexedIntent {
   intentId: string;
@@ -15,7 +16,6 @@ let indexReady = false;
 export async function refreshIntentIndex(): Promise<number> {
   const approved = await storage.getApprovedCanonicalIntents();
   intentIndex = [];
-  let skipped = 0;
   const nullEmbeddingIntents: string[] = [];
 
   for (const intent of approved) {
@@ -28,17 +28,31 @@ export async function refreshIntentIndex(): Promise<number> {
         embedding: intent.embedding as number[],
       });
     } else {
-      skipped++;
       nullEmbeddingIntents.push(intent.intentId);
     }
   }
 
-  indexReady = true;
-  console.log(`[IntentIndex] Refreshed: ${intentIndex.length} loaded, ${skipped} skipped (null embedding)`);
-  if (nullEmbeddingIntents.length > 0) {
-    console.warn(`[IntentIndex] WARNING: ${nullEmbeddingIntents.length} approved intents have null embeddings: ${nullEmbeddingIntents.slice(0, 10).join(", ")}${nullEmbeddingIntents.length > 10 ? "..." : ""}`);
+  const totalApproved = approved.length;
+  const totalLoaded = intentIndex.length;
+  const totalMissing = nullEmbeddingIntents.length;
+  const ready = totalMissing === 0 && totalLoaded > 0;
+
+  if (totalMissing > 0 && isPilotEnabled()) {
+    indexReady = false;
+    const errorMsg = `[IntentIndex] FATAL: ${totalMissing} approved intents have null embeddings in PILOT MODE. Intents: ${nullEmbeddingIntents.join(", ")}`;
+    console.error(errorMsg);
+    throw new Error(errorMsg);
   }
-  return intentIndex.length;
+
+  indexReady = true;
+
+  console.log(`[IntentIndex] Approved: ${totalApproved} | Loaded embeddings: ${totalLoaded} | Missing: ${totalMissing} | Ready: ${ready}`);
+
+  if (totalMissing > 0) {
+    console.error(`[IntentIndex] CRITICAL: ${totalMissing} approved intents have null embeddings: ${nullEmbeddingIntents.join(", ")}`);
+  }
+
+  return totalLoaded;
 }
 
 export function isIndexReady(): boolean {
@@ -64,13 +78,14 @@ export interface SemanticMatch {
 export interface SemanticSearchResult {
   match: SemanticMatch | null;
   bestScore: number;
+  bestIntentId: string | null;
 }
 
 export async function findSemanticMatch(
   userMessage: string,
   threshold: number = 0.78
 ): Promise<SemanticSearchResult> {
-  if (intentIndex.length === 0) return { match: null, bestScore: 0 };
+  if (intentIndex.length === 0) return { match: null, bestScore: 0, bestIntentId: null };
 
   const messageEmbedding = await generateEmbedding(userMessage);
 
@@ -91,10 +106,12 @@ export async function findSemanticMatch(
     }
   }
 
+  const bestIntentId = bestMatch?.intentId || null;
+
   if (bestMatch && bestMatch.similarity >= threshold) {
-    return { match: bestMatch, bestScore };
+    return { match: bestMatch, bestScore, bestIntentId };
   }
-  return { match: null, bestScore: bestScore > 0 ? bestScore : 0 };
+  return { match: null, bestScore: bestScore > 0 ? bestScore : 0, bestIntentId };
 }
 
 export async function findTopNSemanticMatches(

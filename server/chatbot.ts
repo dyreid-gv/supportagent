@@ -6,7 +6,7 @@ import { getMinSideContext, performAction, lookupOwnerByPhone, lookupByChipNumbe
 import type { ChipLookupResult } from "./minside-sandbox";
 import { getStoredSession } from "./minside-client";
 import { messages, type PlaybookEntry, type ServicePrice, type ResponseTemplate } from "@shared/schema";
-import { findSemanticMatch, findTopNSemanticMatches, getApprovedIntentIds, isIndexReady, refreshIntentIndex } from "./intent-index";
+import { findSemanticMatch, findTopNSemanticMatches, getApprovedIntentIds, getIndexSize, isIndexReady, refreshIntentIndex } from "./intent-index";
 import { recordPilotMatch, isPilotEnabled } from "./pilot-stats";
 
 const openai = new OpenAI({
@@ -1856,6 +1856,9 @@ interface MatchDebugInfo {
   gptConfidence: number;
   finalIntentId: string | null;
   responseMethod: string;
+  blockReason?: "lowSemanticZone" | "noMatch" | "lowGptConfidence" | "embeddingUnavailable" | null;
+  topIntentId?: string | null;
+  topSemanticScore?: number;
 }
 
 async function matchUserIntent(
@@ -1888,7 +1891,7 @@ async function matchUserIntent(
     return { intent: session.intent, playbook: session.playbook, method: "session-continue", debug: d };
   }
 
-  const debugInfo: MatchDebugInfo = { matchedBy: "block", semanticScore: 0, gptConfidence: 0, finalIntentId: null, responseMethod: "BLOCK" };
+  const debugInfo: MatchDebugInfo = { matchedBy: "block", semanticScore: 0, gptConfidence: 0, finalIntentId: null, responseMethod: "BLOCK", blockReason: null, topIntentId: null, topSemanticScore: 0 };
 
   const quickIntent = quickIntentMatch(message);
   if (quickIntent) {
@@ -1905,15 +1908,20 @@ async function matchUserIntent(
   }
 
   let semanticBestScore = 0;
+  let embeddingAvailable = false;
 
   try {
     if (!isIndexReady()) {
       await refreshIntentIndex();
     }
-    if (isIndexReady()) {
-      const { match: semanticResult, bestScore } = await findSemanticMatch(message, 0.78);
+    if (isIndexReady() && getIndexSize() > 0) {
+      embeddingAvailable = true;
+      const { match: semanticResult, bestScore, bestIntentId } = await findSemanticMatch(message, 0.78);
       semanticBestScore = bestScore;
       debugInfo.semanticScore = bestScore;
+      debugInfo.topSemanticScore = bestScore;
+      debugInfo.topIntentId = bestIntentId;
+
       if (semanticResult) {
         const semanticPlaybook = await storage.getPlaybookByIntent(semanticResult.intentId);
         debugInfo.matchedBy = "semantic";
@@ -1930,9 +1938,12 @@ async function matchUserIntent(
         debugInfo.responseMethod = "INFO";
         return { intent: semanticResult.intentId, playbook: null, method: `semantic-match-no-playbook (${semanticResult.similarity.toFixed(2)})`, debug: debugInfo };
       }
+    } else {
+      debugInfo.blockReason = "embeddingUnavailable";
     }
   } catch (err: any) {
     console.warn("[SemanticMatch] Skipped due to error:", err.message);
+    debugInfo.blockReason = "embeddingUnavailable";
   }
 
   let hadKeywordMatch = false;
@@ -1957,7 +1968,15 @@ async function matchUserIntent(
     return { intent: quickIntent, playbook: null, method: "quick-match-no-playbook", debug: debugInfo };
   }
 
-  if (semanticBestScore < 0.65 && !hadKeywordMatch) {
+  // BETWEEN-ZONE: semanticScore >= 0.65 but below threshold (0.78)
+  // This zone must NOT leak to GPT — go directly to BLOCK with suggestions
+  if (semanticBestScore >= 0.65) {
+    debugInfo.blockReason = "lowSemanticZone";
+    return { intent: null, playbook: null, method: "none", debug: debugInfo };
+  }
+
+  // GPT GATE: only if semanticScore < 0.65 AND no keyword match was found
+  if (!hadKeywordMatch) {
     const gptResult = await gptIntentInterpretation(message);
     debugInfo.gptConfidence = gptResult.confidence;
     if (gptResult.intent && gptResult.confidence >= 0.7) {
@@ -1976,6 +1995,15 @@ async function matchUserIntent(
       debugInfo.responseMethod = "INFO";
       return { intent: gptResult.intent, playbook: null, method: "gpt-intent-no-playbook", debug: debugInfo };
     }
+    if (gptResult.confidence > 0) {
+      debugInfo.blockReason = "lowGptConfidence";
+    } else {
+      debugInfo.blockReason = debugInfo.blockReason || "noMatch";
+    }
+  }
+
+  if (!debugInfo.blockReason) {
+    debugInfo.blockReason = "noMatch";
   }
 
   return { intent: null, playbook: null, method: "none", debug: debugInfo };
@@ -2241,7 +2269,11 @@ export async function* streamChatResponse(
   );
 
   if (process.env.RUNTIME_DEBUG === "true") {
-    console.log(`[RuntimeDebug] conv=${conversationId} | matchedBy=${matchDebug.matchedBy} | semanticScore=${matchDebug.semanticScore.toFixed(3)} | gptConfidence=${matchDebug.gptConfidence.toFixed(2)} | intent=${matchDebug.finalIntentId || "NONE"} | responseMethod=${matchDebug.responseMethod}`);
+    let debugLine = `[RuntimeDebug] conv=${conversationId} | matchedBy=${matchDebug.matchedBy} | semanticScore=${matchDebug.semanticScore.toFixed(3)} | gptConfidence=${matchDebug.gptConfidence.toFixed(2)} | intent=${matchDebug.finalIntentId || "NONE"} | responseMethod=${matchDebug.responseMethod}`;
+    if (matchDebug.matchedBy === "block") {
+      debugLine += ` | blockReason=${matchDebug.blockReason || "noMatch"} | topIntentId=${matchDebug.topIntentId || "NONE"} | topSemanticScore=${(matchDebug.topSemanticScore || 0).toFixed(3)}`;
+    }
+    console.log(debugLine);
   }
 
   if (isPilotEnabled()) {
@@ -2469,37 +2501,57 @@ export async function* streamChatResponse(
     }
   }
 
-  let semanticSuggestions: { label: string; action: string; data: { query: string } }[] = [];
+  let semanticSuggestions: { label: string; action: string; data: { query: string }; score: number }[] = [];
+  let usedFallbackCategories = false;
   try {
-    if (isIndexReady()) {
+    if (isIndexReady() && getIndexSize() > 0) {
       const topMatches = await findTopNSemanticMatches(userMessage, 3);
-      semanticSuggestions = topMatches.map(m => ({
-        label: `${m.category}${m.subcategory ? " – " + m.subcategory : ""}`,
-        action: "SUBTOPIC",
-        data: { query: m.intentId },
-      }));
+      const topScore = topMatches.length > 0 ? topMatches[0].similarity : 0;
+
+      if (topScore >= 0.50) {
+        semanticSuggestions = topMatches
+          .filter(m => m.similarity >= 0.50)
+          .sort((a, b) => b.similarity - a.similarity)
+          .map(m => ({
+            label: `${m.category}${m.subcategory ? " – " + m.subcategory : ""}`,
+            action: "SUBTOPIC",
+            data: { query: m.intentId },
+            score: parseFloat(m.similarity.toFixed(3)),
+          }));
+      }
     }
   } catch (err: any) {
     console.warn("[Block] Failed to get semantic suggestions:", err.message);
   }
 
-  if (semanticSuggestions.length === 0) {
+  if (semanticSuggestions.length === 0 && (!isIndexReady() || getIndexSize() === 0)) {
+    usedFallbackCategories = true;
     semanticSuggestions = [
-      { label: "Eierskifte", action: "SUBTOPIC", data: { query: "eierskifte" } },
-      { label: "ID-merking", action: "SUBTOPIC", data: { query: "id-merking" } },
-      { label: "Min Side", action: "SUBTOPIC", data: { query: "min side" } },
+      { label: "Eierskifte", action: "SUBTOPIC", data: { query: "eierskifte" }, score: 0 },
+      { label: "ID-merking", action: "SUBTOPIC", data: { query: "id-merking" }, score: 0 },
+      { label: "Min Side", action: "SUBTOPIC", data: { query: "min side" }, score: 0 },
     ];
   }
 
-  const suggestionLines = semanticSuggestions.map(s => `- ${s.label}`).join("\n");
-  const blockResponse = `Beklager, dette er utenfor det jeg kan hjelpe med automatisk.\n\nMener du kanskje noe av dette?\n${suggestionLines}\n\nHvis ikke, kontakt DyreID kundeservice på **support@dyreid.no** for videre hjelp.`;
+  const showSuggestions = semanticSuggestions.length > 0;
+  let blockResponse: string;
+  if (showSuggestions) {
+    const suggestionLines = semanticSuggestions.map(s => `- ${s.label}`).join("\n");
+    blockResponse = `Beklager, dette er utenfor det jeg kan hjelpe med automatisk.\n\nMener du kanskje noe av dette?\n${suggestionLines}\n\nHvis ikke, kontakt DyreID kundeservice på **support@dyreid.no** for videre hjelp.`;
+  } else {
+    blockResponse = `Beklager, dette er utenfor det jeg kan hjelpe med automatisk.\n\nKontakt DyreID kundeservice på **support@dyreid.no** for videre hjelp.`;
+  }
 
   const blockMetadata: any = {
     model: "block-escalation",
     method: matchDebug.matchedBy,
     blocked: true,
     semanticScore: matchDebug.semanticScore,
-    suggestions: semanticSuggestions,
+    blockReason: matchDebug.blockReason || "noMatch",
+    topIntentId: matchDebug.topIntentId || null,
+    topSemanticScore: matchDebug.topSemanticScore || 0,
+    suggestions: showSuggestions ? semanticSuggestions : [],
+    usedFallbackCategories,
   };
 
   const msg = await storage.createMessage({
