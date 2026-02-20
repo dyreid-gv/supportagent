@@ -13,6 +13,34 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+let priceCache: Map<string, number> = new Map();
+let priceCacheLastLoad = 0;
+const PRICE_CACHE_TTL = 60_000;
+
+export async function ensurePriceCache(): Promise<void> {
+  if (Date.now() - priceCacheLastLoad < PRICE_CACHE_TTL && priceCache.size > 0) return;
+  try {
+    const prices = await storage.getActiveServicePrices();
+    const m = new Map<string, number>();
+    for (const p of prices) m.set(p.serviceKey, p.price);
+    priceCache = m;
+    priceCacheLastLoad = Date.now();
+  } catch (e) {
+    console.error("[PriceCache] Failed to load prices:", e);
+  }
+}
+
+export function getPrice(key: string, fallback?: number): string {
+  const val = priceCache.get(key);
+  if (val !== undefined) return val === 0 ? "gratis" : `${val} kr`;
+  if (fallback !== undefined) return fallback === 0 ? "gratis" : `${fallback} kr`;
+  return "[pris ikke tilgjengelig]";
+}
+
+function getPriceNum(key: string): number | undefined {
+  return priceCache.get(key);
+}
+
 interface SessionState {
   intent?: string;
   playbook?: PlaybookEntry;
@@ -402,13 +430,13 @@ function handleChipLookupFlow(
         notFoundText += `- Chipen er en uregistrert 578-brikke (ikke forhåndsbetalt hos DyreID)\n`;
         notFoundText += `- Dyret ikke er registrert i DyreID ennå\n`;
         notFoundText += `- Nummeret er feil\n\n`;
-        notFoundText += `For å få dyret registrert i DyreID må du ta kontakt med en veterinær. Veterinæren registrerer chipen, og det koster 676 kr. Les mer: ${HJELPESENTER_BASE}/hjelp-utenlandsregistrering/43-registrering-norge`;
+        notFoundText += `For å få dyret registrert i DyreID må du ta kontakt med en veterinær. Veterinæren registrerer chipen, og det koster ${getPrice("utenlandsregistrering")}. Les mer: ${HJELPESENTER_BASE}/hjelp-utenlandsregistrering/43-registrering-norge`;
       } else {
         notFoundText += `Dette kan bety at:\n`;
         notFoundText += `- Chipen ikke er registrert i DyreID ennå\n`;
         notFoundText += `- Nummeret er feil\n`;
         notFoundText += `- Dyret er registrert i et annet land\n\n`;
-        notFoundText += `For å få dyret registrert i Norge/DyreID, ta kontakt med en veterinær. Registrering av utenlandsk chip koster 676 kr. Les mer: ${HJELPESENTER_BASE}/hjelp-utenlandsregistrering/43-registrering-norge`;
+        notFoundText += `For å få dyret registrert i Norge/DyreID, ta kontakt med en veterinær. Registrering av utenlandsk chip koster ${getPrice("utenlandsregistrering")}. Les mer: ${HJELPESENTER_BASE}/hjelp-utenlandsregistrering/43-registrering-norge`;
       }
       return {
         text: notFoundText,
@@ -1406,7 +1434,7 @@ function handleDirectIntent(
 
   if (intent === "NewRegistration") {
     return {
-      text: "For å registrere et nytt dyr i DyreID, må du ta det med til en **veterinær**.\n\n**Slik gjør du:**\n1. Bestill time hos en veterinærklinikk\n2. Veterinæren implanterer en mikrochip (hvis dyret ikke allerede har en)\n3. Veterinæren registrerer dyret i DyreID\n4. Du får tilgang til Min Side og kan administrere dyrets profil\n\n**Pris:** Registrering koster vanligvis 590 kr (inkl. chip og registrering).\n\nHar dyret allerede en chip? Da kan du sjekke om det er registrert ved å oppgi chipnummeret.",
+      text: `For å registrere et nytt dyr i DyreID, må du ta det med til en **veterinær**.\n\n**Slik gjør du:**\n1. Bestill time hos en veterinærklinikk\n2. Veterinæren implanterer en mikrochip (hvis dyret ikke allerede har en)\n3. Veterinæren registrerer dyret i DyreID\n4. Du får tilgang til Min Side og kan administrere dyrets profil\n\n**Pris:** Registrering koster vanligvis ${getPrice("registrering_ny")} (inkl. chip og registrering).\n\nHar dyret allerede en chip? Da kan du sjekke om det er registrert ved å oppgi chipnummeret.`,
       helpCenterLink: `${HJELPESENTER_BASE}/hjelp-id-sok/1-hvorfor-bor-jeg-id-merke`,
       model: "direct-newreg-info",
       requestFeedback: true,
@@ -1496,7 +1524,7 @@ function handleDirectIntent(
 
   if (intent === "UnregisteredChip578") {
     return {
-      text: "**Uregistrert 578-brikke**\n\nNoen ID-merker som begynner med **578** (Norges landskode) er likevel ikke registrert hos DyreID. Dette gjelder brikker som ikke er **forhåndsbetalte** hos oss – de er såkalte uregistrerte brikker og betraktes som **utlandsregistrerte**.\n\nDette betyr at selv om dyret er ID-merket hos en veterinær i Norge, er ikke chipen automatisk registrert i DyreID-registeret.\n\n**Hva må du gjøre?**\nFor å få dyret registrert i DyreID med en slik brikke, må du ta kontakt med en veterinær som kan registrere chipen hos oss. Dette koster **676 kr** og følger samme prosedyre som for utlandsregistrering.\n\nLes mer om prosessen her:\nhttps://hjelpesenter.dyreid.no/hjelp-utenlandsregistrering/43-registrering-norge",
+      text: `**Uregistrert 578-brikke**\n\nNoen ID-merker som begynner med **578** (Norges landskode) er likevel ikke registrert hos DyreID. Dette gjelder brikker som ikke er **forhåndsbetalte** hos oss – de er såkalte uregistrerte brikker og betraktes som **utlandsregistrerte**.\n\nDette betyr at selv om dyret er ID-merket hos en veterinær i Norge, er ikke chipen automatisk registrert i DyreID-registeret.\n\n**Hva må du gjøre?**\nFor å få dyret registrert i DyreID med en slik brikke, må du ta kontakt med en veterinær som kan registrere chipen hos oss. Dette koster **${getPrice("utenlandsregistrering")}** og følger samme prosedyre som for utlandsregistrering.\n\nLes mer om prosessen her:\nhttps://hjelpesenter.dyreid.no/hjelp-utenlandsregistrering/43-registrering-norge`,
       helpCenterLink: `${HJELPESENTER_BASE}/hjelp-utenlandsregistrering/43-registrering-norge`,
       model: "direct-unregistered-578",
       requestFeedback: true,
@@ -1505,7 +1533,7 @@ function handleDirectIntent(
 
   if (intent === "ForeignRegistration") {
     return {
-      text: "**Registrering av dyr med utenlandsk eller uregistrert chip i Norge**\n\nFor å registrere et dyr i DyreID som har en utenlandsk chip, eller en **uregistrert 578-brikke** (brikke som begynner med 578 men ikke er forhåndsbetalt hos oss), må du ta kontakt med en **veterinær**.\n\n**OBS:** Ikke alle brikker som begynner med 578 er registrert hos DyreID. Noen 578-brikker er ikke forhåndsbetalte og betraktes som utlandsregistrerte. Disse må registreres på nytt.\n\n**Slik gjør du:**\n1. Bestill time hos en veterinærklinikk\n2. Veterinæren skanner chipen og registrerer dyret i DyreID\n3. Registreringen koster **676 kr**\n4. Du får tilgang til Min Side og kan administrere dyrets profil\n\nLes mer: https://hjelpesenter.dyreid.no/hjelp-utenlandsregistrering/43-registrering-norge",
+      text: `**Registrering av dyr med utenlandsk eller uregistrert chip i Norge**\n\nFor å registrere et dyr i DyreID som har en utenlandsk chip, eller en **uregistrert 578-brikke** (brikke som begynner med 578 men ikke er forhåndsbetalt hos oss), må du ta kontakt med en **veterinær**.\n\n**OBS:** Ikke alle brikker som begynner med 578 er registrert hos DyreID. Noen 578-brikker er ikke forhåndsbetalte og betraktes som utlandsregistrerte. Disse må registreres på nytt.\n\n**Slik gjør du:**\n1. Bestill time hos en veterinærklinikk\n2. Veterinæren skanner chipen og registrerer dyret i DyreID\n3. Registreringen koster **${getPrice("utenlandsregistrering")}**\n4. Du får tilgang til Min Side og kan administrere dyrets profil\n\nLes mer: https://hjelpesenter.dyreid.no/hjelp-utenlandsregistrering/43-registrering-norge`,
       helpCenterLink: `${HJELPESENTER_BASE}/hjelp-utenlandsregistrering/43-registrering-norge`,
       model: "direct-foreign-registration",
       requestFeedback: true,
@@ -1514,7 +1542,7 @@ function handleDirectIntent(
 
   if (intent === "ForeignRegistrationCost") {
     return {
-      text: "**Pris for registrering av dyr i Norge**\n\nRegistrering av dyr med utenlandsk chip eller uregistrert 578-brikke koster **676 kr**. Dette inkluderer:\n\n- Registrering i DyreID-registeret\n- Tilgang til Min Side for administrasjon av dyrets profil\n- Søkbarhet i DyreID-systemet\n\n**Slik gjør du:**\n1. Bestill time hos en veterinærklinikk\n2. Veterinæren skanner chipen og registrerer dyret\n3. Du betaler registreringsavgiften på **676 kr**\n\nFor norske dyr som allerede har forhåndsbetalt chip er registreringen inkludert i chipprisen (vanligvis 590 kr totalt hos veterinær).",
+      text: `**Pris for registrering av dyr i Norge**\n\nRegistrering av dyr med utenlandsk chip eller uregistrert 578-brikke koster **${getPrice("utenlandsregistrering")}**. Dette inkluderer:\n\n- Registrering i DyreID-registeret\n- Tilgang til Min Side for administrasjon av dyrets profil\n- Søkbarhet i DyreID-systemet\n\n**Slik gjør du:**\n1. Bestill time hos en veterinærklinikk\n2. Veterinæren skanner chipen og registrerer dyret\n3. Du betaler registreringsavgiften på **${getPrice("utenlandsregistrering")}**\n\nFor norske dyr som allerede har forhåndsbetalt chip er registreringen inkludert i chipprisen (vanligvis ${getPrice("registrering_ny")} totalt hos veterinær).`,
       helpCenterLink: `${HJELPESENTER_BASE}/hjelp-utenlandsregistrering/43-registrering-norge`,
       model: "direct-foreign-registration-cost",
       requestFeedback: true,
@@ -1523,7 +1551,7 @@ function handleDirectIntent(
 
   if (intent === "OwnershipTransferApp") {
     return {
-      text: "**Eierskifte via DyreID-appen**\n\nDu kan gjennomføre eierskifte direkte i DyreID-appen. Slik gjør du:\n\n1. Åpne **DyreID-appen**\n2. Gå til dyret du vil overføre\n3. Trykk på **Eierskifte** eller **Overfør eierskap**\n4. Skriv inn ny eiers mobilnummer\n5. Ny eier mottar en SMS med bekreftelseslenke\n6. Ny eier bekrefter og betaler eierskiftegebyret\n\n**Pris:** Eierskifte koster vanligvis 190 kr.\n\n**Viktig:**\n- Begge parter må ha DyreID-konto\n- Ny eier må godkjenne overføringen innen 14 dager\n- Eierskiftet fullføres først etter betaling\n\nVil du heller gjøre eierskiftet her i chatten? Da kan jeg hjelpe deg etter innlogging.",
+      text: `**Eierskifte via DyreID-appen**\n\nDu kan gjennomføre eierskifte direkte i DyreID-appen. Slik gjør du:\n\n1. Åpne **DyreID-appen**\n2. Gå til dyret du vil overføre\n3. Trykk på **Eierskifte** eller **Overfør eierskap**\n4. Skriv inn ny eiers mobilnummer\n5. Ny eier mottar en SMS med bekreftelseslenke\n6. Ny eier bekrefter og betaler eierskiftegebyret\n\n**Pris:** Eierskifte koster ${getPrice("eierskifte")}.\n\n**Viktig:**\n- Begge parter må ha DyreID-konto\n- Ny eier må godkjenne overføringen innen 14 dager\n- Eierskiftet fullføres først etter betaling\n\nVil du heller gjøre eierskiftet her i chatten? Da kan jeg hjelpe deg etter innlogging.`,
       suggestions: [
         { label: "Gjør eierskifte her", action: "SELECT_PET", data: { intent: "OwnershipTransferWeb" } },
       ],
@@ -1586,7 +1614,7 @@ function handleDirectIntent(
 
   if (intent === "PetNotInSystem") {
     return {
-      text: "**Finner ikke dyret i registeret?**\n\nDet kan være flere grunner til at dyret ditt ikke finnes i DyreID:\n\n1. **Ikke registrert** – Dyret er kanskje ikke registrert i DyreID ennå. Registrering gjøres hos veterinær\n2. **Utenlandsk chip** – Hvis dyret har en utenlandsk chip, må det registreres på nytt i Norge (koster 676 kr)\n3. **Uregistrert 578-brikke** – Noen norske 578-chipper er ikke forhåndsbetalt og må registreres separat\n4. **Feil chipnummer** – Dobbeltsjekk at du har riktig chipnummer\n5. **Registrert på annen person** – Dyret kan være registrert på en tidligere eier\n\n**Hva kan du gjøre?**\n- Har du chipnummeret? Jeg kan søke det opp for deg\n- Kontakt veterinæren som chipet dyret for å sjekke registreringsstatus\n\nVil du at jeg søker opp et chipnummer?",
+      text: `**Finner ikke dyret i registeret?**\n\nDet kan være flere grunner til at dyret ditt ikke finnes i DyreID:\n\n1. **Ikke registrert** – Dyret er kanskje ikke registrert i DyreID ennå. Registrering gjøres hos veterinær\n2. **Utenlandsk chip** – Hvis dyret har en utenlandsk chip, må det registreres på nytt i Norge (koster ${getPrice("utenlandsregistrering")})\n3. **Uregistrert 578-brikke** – Noen norske 578-chipper er ikke forhåndsbetalt og må registreres separat\n4. **Feil chipnummer** – Dobbeltsjekk at du har riktig chipnummer\n5. **Registrert på annen person** – Dyret kan være registrert på en tidligere eier\n\n**Hva kan du gjøre?**\n- Har du chipnummeret? Jeg kan søke det opp for deg\n- Kontakt veterinæren som chipet dyret for å sjekke registreringsstatus\n\nVil du at jeg søker opp et chipnummer?`,
       suggestions: [
         { label: "Søk opp chipnummer", action: "SELECT_PET", data: { intent: "ChipLookup" } },
       ],
@@ -1597,7 +1625,7 @@ function handleDirectIntent(
 
   if (intent === "FamilySharingRequirement") {
     return {
-      text: "**Krever familiedeling DyreID+?**\n\nJa, familiedeling er en del av **DyreID+**-abonnementet.\n\n**DyreID+ inkluderer:**\n- Familiedeling med opptil 5 personer\n- Utvidet Smart Tag-funksjonalitet\n- Prioritert kundeservice\n- Avanserte varsler og notifikasjoner\n\n**Pris:** DyreID+ koster 49 kr/mnd eller 490 kr/år.\n\nDu kan oppgradere til DyreID+ direkte i DyreID-appen under **Innstillinger** → **Abonnement**.",
+      text: `**Krever familiedeling DyreID+?**\n\nJa, familiedeling er en del av **DyreID+**-abonnementet.\n\n**DyreID+ inkluderer:**\n- Familiedeling med opptil 5 personer\n- Utvidet Smart Tag-funksjonalitet\n- Prioritert kundeservice\n- Avanserte varsler og notifikasjoner\n\n**Pris:** DyreID+ koster ${getPrice("dyreid_pluss_maaned")}/mnd eller ${getPrice("dyreid_pluss_aar")}/år.\n\nDu kan oppgradere til DyreID+ direkte i DyreID-appen under **Innstillinger** → **Abonnement**.`,
       model: "direct-family-sharing-requirement",
       requestFeedback: true,
     };
@@ -1665,7 +1693,7 @@ For informasjonssporsmaal (priser, prosedyrer, hjelpesenter-info), gi svaret dir
 Be KUN om innlogging nar handlingen faktisk krever tilgang til Min Side data.
 
 UREGISTRERTE 578-BRIKKER:
-Ikke alle ID-merker som begynner med 578 er registrert hos DyreID. Noen 578-brikker er ikke forhandsbetalt hos oss og betraktes som utlandsregistrerte. Disse ma registreres pa nytt via en veterinaer (koster 676 kr). Folger samme prosedyre som utenlandsregistrering.
+Ikke alle ID-merker som begynner med 578 er registrert hos DyreID. Noen 578-brikker er ikke forhandsbetalt hos oss og betraktes som utlandsregistrerte. Disse ma registreres pa nytt via en veterinaer (koster ${getPrice("utenlandsregistrering")}). Folger samme prosedyre som utenlandsregistrering.
 
 Nar du identifiserer at en handling er nodvendig, inkluder en ACTION-blokk i svaret ditt:
 [ACTION: action_name | param1=value1 | param2=value2]
@@ -2319,6 +2347,7 @@ export async function* streamChatResponse(
     content: userMessage,
   });
 
+  await ensurePriceCache();
   const isAuthenticated = !!(ownerId && (storedUserContext || getMinSideContext(ownerId)));
   const ownerContext = ownerId ? getMinSideContext(ownerId) : null;
   const session = getOrCreateSession(conversationId);

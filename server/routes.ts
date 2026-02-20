@@ -6,7 +6,7 @@ import { discoveredClusters } from "@shared/schema";
 import axios from "axios";
 import { db } from "./db";
 import { storage } from "./storage";
-import { streamChatResponse, getLastInteractionId, clearSession as clearChatSession } from "./chatbot";
+import { streamChatResponse, getLastInteractionId, clearSession as clearChatSession, ensurePriceCache, getPrice } from "./chatbot";
 import { scrapeHjelpesenter } from "./hjelpesenter-scraper";
 import { getMinSideContext, lookupOwnerByPhone, getAllSandboxPhones, performAction, lookupByChipNumber, getSmsLog } from "./minside-sandbox";
 import { authenticateWithOTP, fetchPetList, fetchPaymentHistory, storeSession, getStoredSession, clearSession as clearMinsideSession, type MinSidePet } from "./minside-client";
@@ -142,6 +142,8 @@ export async function registerRoutes(
   if (csvCategories.length > 0) {
     await storage.seedHjelpesenterCategories(csvCategories);
   }
+
+  await ensurePriceCache();
 
   // ─── TRAINING STATS ──────────────────────────────────────────────
   app.get("/api/training/stats", async (_req, res) => {
@@ -1256,6 +1258,8 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Det finnes allerede tickets i databasen. Tøm først om du vil seede på nytt." });
       }
 
+      await ensurePriceCache();
+
       const categories = [
         "Min side", "Eierskifte", "Registrering", "QR Tag",
         "Smart Tag", "Abonnement", "Savnet/Funnet", "Familiedeling", "App"
@@ -1272,14 +1276,14 @@ export async function registerRoutes(
         { cat: "Eierskifte", subject: "Eierskifte avvist", q: "Eierskiftet ble avvist. Hva kan være grunnen?", a: "Eierskifte kan avvises hvis chipnummeret ikke stemmer, eller hvis ny eier ikke har bekreftet innen fristen på 14 dager. Start prosessen på nytt." },
         { cat: "Eierskifte", subject: "Arvet dyr etter dødsfall", q: "Min far har gått bort og etterlatt seg en hund. Hvordan overfører vi eierskapet?", a: "Ved dødsfall kan eierskifte gjøres ved å sende inn kopi av skifteattest og utfylt eierskifteskjema til oss per e-post." },
         { cat: "Eierskifte", subject: "Oppdretter - registrere valpekull", q: "Jeg er oppdretter og har et nytt valpekull. Hvordan registrerer jeg alle valpene og overfører til nye eiere?", a: "Som oppdretter kan du bruke bulkregistrering på Min Side. Gå til 'Mine dyr' > 'Registrer kull'. Eierskifte til nye eiere gjøres når valpene hentes." },
-        { cat: "Registrering", subject: "Registrere ny katt", q: "Jeg har fått en kattunge og vil registrere den i DyreID. Katten er chippet hos veterinær.", a: "Logg inn på Min Side og velg 'Registrer nytt dyr'. Du trenger chipnummer (15 siffer), rase, farge og fødselsdato. Registreringsavgift er 250 kr." },
+        { cat: "Registrering", subject: "Registrere ny katt", q: "Jeg har fått en kattunge og vil registrere den i DyreID. Katten er chippet hos veterinær.", a: `Logg inn på Min Side og velg 'Registrer nytt dyr'. Du trenger chipnummer (15 siffer), rase, farge og fødselsdato. Registreringsavgift er ${getPrice("registrering_ny")}.` },
         { cat: "Registrering", subject: "Betaling for registrering", q: "Jeg prøvde å registrere hunden min men betalingen gikk ikke gjennom. Hva gjør jeg?", a: "Prøv igjen med et annet betalingskort, eller velg Vipps som betalingsmetode. Hvis problemet vedvarer, ta kontakt med banken din." },
         { cat: "Registrering", subject: "Feil chipnummer registrert", q: "Veterinæren registrerte feil chipnummer på katten min. Kan dette rettes?", a: "Ja, be veterinæren sende oss en bekreftelse på riktig chipnummer med dyrets signalement. Vi oppdaterer registreringen." },
         { cat: "Registrering", subject: "Importert dyr fra utlandet", q: "Jeg har importert en hund fra Sverige. Hvordan registrerer jeg den i DyreID?", a: "Importerte dyr registreres på vanlig måte, men du må også laste opp EU-pass eller helsesertifikat. Chipnummeret må være ISO-standard." },
         { cat: "Registrering", subject: "Dobbeltregistrering", q: "Det ser ut som hunden min er registrert to ganger med ulike chipnumre. Kan dere rydde opp?", a: "Jeg kan se overlappende registreringer. Send oss chipnumrene og vi slår sammen registreringene til én." },
         { cat: "QR Tag", subject: "Aktivere QR-brikke", q: "Jeg har mottatt QR-brikken men vet ikke hvordan jeg aktiverer den. Kan dere hjelpe?", a: "Skann QR-koden på brikken med mobilkameraet. Du blir sendt til en aktiveringsside. Logg inn og koble brikken til dyret ditt." },
         { cat: "QR Tag", subject: "QR-brikke fungerer ikke", q: "QR-brikken min skannes ikke. Koden er slitt og uleselig.", a: "Vi sender deg en ny QR-brikke kostnadsfritt. Oppgi adressen din og dyrets chipnummer så sender vi ny brikke i posten." },
-        { cat: "QR Tag", subject: "Bestille ekstra QR-brikke", q: "Kan jeg bestille en ekstra QR-brikke til halsbåndet? Har allerede én på selen.", a: "Ja! Gå til Min Side > 'Dine dyr' > velg dyret > 'Bestill QR-brikke'. Ekstra brikker koster 99 kr." },
+        { cat: "QR Tag", subject: "Bestille ekstra QR-brikke", q: "Kan jeg bestille en ekstra QR-brikke til halsbåndet? Har allerede én på selen.", a: `Ja! Gå til Min Side > 'Dine dyr' > velg dyret > 'Bestill QR-brikke'. Ekstra brikker koster ${getPrice("qr_brikke_ekstra")}.` },
         { cat: "QR Tag", subject: "QR-brikke viser feil dyr", q: "Når noen skanner QR-brikken vises feil dyr. Brikken var koblet til forrige hund.", a: "Gå til Min Side og koble brikken til riktig dyr under 'QR-brikker'. Du kan flytte brikken mellom dine registrerte dyr." },
         { cat: "QR Tag", subject: "Mistet QR-brikke", q: "Hunden min har mistet QR-brikken fra halsbåndet. Kan dere sende ny?", a: "Bestill ny QR-brikke via Min Side under 'Dine dyr'. Velg dyret og klikk 'Ny QR-brikke'. Den gamle deaktiveres automatisk." },
         { cat: "Smart Tag", subject: "Koble Smart Tag til app", q: "Jeg har kjøpt en Smart Tag men klarer ikke å koble den til DyreID-appen. Bluetooth finner den ikke.", a: "Sørg for at Bluetooth er aktivert og at du er innenfor 2 meters rekkevidde. Hold inne knappen på taggen i 5 sekunder til lyset blinker blått. Prøv deretter å koble på nytt i appen." },
@@ -1291,7 +1295,7 @@ export async function registerRoutes(
         { cat: "Abonnement", subject: "Endre abonnementstype", q: "Kan jeg oppgradere fra Basis til Premium-abonnement?", a: "Ja, gå til Min Side > Abonnement > 'Endre plan'. Differansen beregnes automatisk for gjenstående periode." },
         { cat: "Abonnement", subject: "Faktura ikke mottatt", q: "Jeg har ikke mottatt faktura for abonnementet. Betaler jeg via AvtaleGiro?", a: "Ditt abonnement betales via AvtaleGiro. Neste trekk er 15. mars. Du finner alle fakturaer under Min Side > Betalingshistorikk." },
         { cat: "Abonnement", subject: "Dobbeltbelastning", q: "Jeg er trukket dobbelt for abonnementet denne måneden. Kan dere sjekke?", a: "Jeg ser at det er trukket to ganger. Vi refunderer det ekstra beløpet innen 3-5 virkedager til kontoen din." },
-        { cat: "Abonnement", subject: "Legge til flere dyr i abonnement", q: "Jeg har tre katter nå. Kan alle dekkes av samme abonnement?", a: "Med Familie-abonnementet til 399 kr/mnd dekkes opptil 5 dyr. Gå til Min Side > Abonnement > 'Legg til dyr'." },
+        { cat: "Abonnement", subject: "Legge til flere dyr i abonnement", q: "Jeg har tre katter nå. Kan alle dekkes av samme abonnement?", a: `Med Familie-abonnementet til ${getPrice("abonnement_familie")}/mnd dekkes opptil 5 dyr. Gå til Min Side > Abonnement > 'Legg til dyr'.` },
         { cat: "Savnet/Funnet", subject: "Hund savnet", q: "Hunden min har rømt! Kan dere hjelpe meg å melde den savnet? Schæfer, hannhund, 4 år.", a: "Jeg har registrert hunden som savnet i systemet. Alle som skanner chipnummeret eller QR-brikken vil nå se at dyret er meldt savnet med ditt kontaktnummer." },
         { cat: "Savnet/Funnet", subject: "Funnet katt", q: "Jeg har funnet en katt i hagen min. Den har chip. Chipnr: 578xxxxxxxxx. Kan dere finne eier?", a: "Takk for at du melder inn! Jeg har kontaktet eier via SMS og e-post. De er informert om at katten er funnet hos deg." },
         { cat: "Savnet/Funnet", subject: "Oppdatere savnet-status", q: "Vi fant hunden vår igjen! Kan dere fjerne savnet-meldingen?", a: "Så bra! Jeg har oppdatert statusen. Dyret er ikke lenger registrert som savnet i systemet." },
@@ -1307,10 +1311,10 @@ export async function registerRoutes(
         { cat: "App", subject: "Appen viser feil språk", q: "Appen viser alt på engelsk. Hvordan endrer jeg til norsk?", a: "Gå til Settings (Innstillinger) i appen og velg 'Language/Språk' > Norsk. Appen vil starte på nytt med norsk tekst." },
         { cat: "Min side", subject: "Slette konto", q: "Jeg ønsker å slette kontoen min hos DyreID. Hvordan gjør jeg det?", a: "Du kan be om kontosletting via Min Side > Innstillinger > 'Slett konto'. Merk at dyreregistreringene beholdes i det nasjonale registeret." },
         { cat: "Registrering", subject: "Registrere kanin", q: "Kan jeg registrere kaninen min i DyreID? Den er chippet.", a: "DyreID støtter registrering av hund, katt, hest og frettdyr. Kaniner kan dessverre ikke registreres i systemet per nå." },
-        { cat: "Eierskifte", subject: "Eierskifte koster penger?", q: "Koster det noe å overføre eierskapet av en hund?", a: "Eierskifte er gratis for dyr som allerede er registrert i DyreID. Ny eier må ha eller opprette en konto på Min Side." },
+        { cat: "Eierskifte", subject: "Eierskifte koster penger?", q: "Koster det noe å overføre eierskapet av en hund?", a: `Ja, eierskifte koster ${getPrice("eierskifte")}. Gebyret dekkes av selgeren. Ny eier må ha eller opprette en konto på Min Side.` },
         { cat: "Min side", subject: "To-faktor autentisering", q: "Kan jeg aktivere to-faktor autentisering på Min Side for ekstra sikkerhet?", a: "Min Side bruker BankID som innlogging, som allerede er to-faktor. Du trenger ikke aktivere noe ekstra." },
         { cat: "Savnet/Funnet", subject: "Stjålet hund", q: "Vi tror hunden vår er stjålet fra hagen. Kan dere hjelpe?", a: "Jeg har registrert dyret som savnet/mulig stjålet. Anbefaler å anmelde forholdet til politiet. Alle som skanner chipen vil se savnet-melding." },
-        { cat: "Abonnement", subject: "Priser og pakker", q: "Hva koster de ulike abonnementene? Har to hunder.", a: "Basis: 99 kr/mnd (1 dyr), Standard: 199 kr/mnd (2 dyr), Familie: 399 kr/mnd (opptil 5 dyr). Med to hunder anbefaler vi Standard." },
+        { cat: "Abonnement", subject: "Priser og pakker", q: "Hva koster de ulike abonnementene? Har to hunder.", a: `Basis: ${getPrice("abonnement_basis")}/mnd (1 dyr), Standard: ${getPrice("abonnement_standard")}/mnd (2 dyr), Familie: ${getPrice("abonnement_familie")}/mnd (opptil 5 dyr). Med to hunder anbefaler vi Standard.` },
       ];
 
       const tickets = [];
