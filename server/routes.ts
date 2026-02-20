@@ -183,6 +183,22 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/training/staging-cluster", async (_req, res) => {
+    sseHeaders(res);
+    try {
+      const { runStagingClustering } = await import("./staging-cluster");
+      const result = await runStagingClustering((msg, progress) => {
+        res.write(`data: ${JSON.stringify({ message: msg, progress })}\n\n`);
+      });
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      res.write(`data: ${JSON.stringify(result)}\n\n`);
+      res.end();
+    } catch (error: any) {
+      res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+      res.end();
+    }
+  });
+
   app.get("/api/training/staging-analysis", async (_req, res) => {
     try {
       const { runStagingAnalysis } = await import("./staging-ingest");
