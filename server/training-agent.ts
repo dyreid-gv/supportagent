@@ -2518,7 +2518,7 @@ export async function runDomainDiscovery(
 
   onProgress?.("Starter Domain Discovery Pipeline...", 0);
 
-  const allScrubbed = await db.select().from(scrubbedTickets).limit(500);
+  const allScrubbed = await db.select().from(scrubbedTickets).limit(1000);
 
   const genericTickets = allScrubbed.filter(t => isUncategorized({
     categoryId: t.categoryId,
