@@ -124,19 +124,24 @@ function extractJson(text: string): any {
 
 // ─── WORKFLOW 1: PURESERVICE TICKET INGESTION ─────────────────────────────
 export async function runIngestion(
-  onProgress?: (msg: string, pct: number) => void
+  onProgress?: (msg: string, pct: number) => void,
+  maxTickets?: number
 ): Promise<{ ingested: number; errors: number }> {
   let totalIngested = 0;
   let totalErrors = 0;
   let page = 1;
   const pageSize = 100;
   let hasMore = true;
+  const limit = maxTickets || Infinity;
 
-  onProgress?.("Starter ticket-innhenting fra Pureservice...", 0);
+  onProgress?.(`Starter ticket-innhenting fra Pureservice${maxTickets ? ` (maks ${maxTickets})` : ''}...`, 0);
 
   while (hasMore) {
     try {
-      const { tickets, total } = await getClosedTickets(page, pageSize);
+      const fetchSize = Math.min(pageSize, limit - totalIngested);
+      if (fetchSize <= 0) break;
+
+      const { tickets, total } = await getClosedTickets(page, fetchSize);
 
       if (tickets.length === 0) {
         hasMore = false;
@@ -147,10 +152,11 @@ export async function runIngestion(
       await storage.insertRawTickets(rawTicketData);
       totalIngested += tickets.length;
 
-      const pct = Math.min(100, Math.round((totalIngested / Math.max(total, 1)) * 100));
-      onProgress?.(`Hentet ${totalIngested} av ~${total} tickets (side ${page})`, pct);
+      const target = maxTickets ? Math.min(total, maxTickets) : total;
+      const pct = Math.min(100, Math.round((totalIngested / Math.max(target, 1)) * 100));
+      onProgress?.(`Hentet ${totalIngested} av ~${target} tickets (side ${page})`, pct);
 
-      if (totalIngested >= total || tickets.length < pageSize) {
+      if (totalIngested >= limit || totalIngested >= total || tickets.length < fetchSize) {
         hasMore = false;
       }
       page++;

@@ -44,9 +44,36 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
+interface CIData {
+  lower: number;
+  upper: number;
+  margin: number;
+}
+
 interface HealthData {
   period: number;
   healthScore: number;
+  confidenceIntervals?: {
+    autoResolution: CIData;
+    coverage: CIData;
+    escalation: CIData;
+  };
+  baseline?: {
+    sampleSize: number;
+    healthScore: number;
+    autoResolutionRate: number;
+    coverageScore: number;
+    escalationRate: number;
+    coverageMapped: number;
+    coverageTotal: number;
+  };
+  delta?: {
+    healthScore: number;
+    autoResolutionRate: number;
+    coverageScore: number;
+    escalationRate: number;
+    sampleSize: number;
+  };
   breakdown: {
     autoResolution: { rate: number; score: number; weight: number };
     reopenRate: { rate: number; score: number; weight: number; note?: string };
@@ -186,6 +213,14 @@ function BreakdownBar({
       {note && <div className="text-xs text-muted-foreground ml-36 pl-3">{note}</div>}
     </div>
   );
+}
+
+function DeltaBadge({ value, unit, inverted }: { value: number; unit: string; inverted: boolean }) {
+  if (value === 0) return <span className="text-muted-foreground">0{unit}</span>;
+  const isPositive = inverted ? value < 0 : value > 0;
+  const color = isPositive ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400";
+  const prefix = value > 0 ? "+" : "";
+  return <span className={`font-semibold ${color}`}>{prefix}{Math.round(value * 10) / 10}{unit}</span>;
 }
 
 function HealthBadge({ value, thresholdGreen = 5, thresholdYellow = 10 }: { value: number; thresholdGreen?: number; thresholdYellow?: number }) {
@@ -374,6 +409,110 @@ export default function HealthDashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {data.confidenceIntervals && data.baseline && data.delta && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">95% Konfidensintervall (Wilson)</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>KPI</TableHead>
+                    <TableHead className="text-right">Verdi</TableHead>
+                    <TableHead className="text-right">Nedre</TableHead>
+                    <TableHead className="text-right">Øvre</TableHead>
+                    <TableHead className="text-right">Margin</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow data-testid="row-ci-auto-resolution">
+                    <TableCell className="text-sm">Auto Resolution</TableCell>
+                    <TableCell className="text-right font-semibold">{data.kpi.autoResolutionRate}%</TableCell>
+                    <TableCell className="text-right">{data.confidenceIntervals.autoResolution.lower}%</TableCell>
+                    <TableCell className="text-right">{data.confidenceIntervals.autoResolution.upper}%</TableCell>
+                    <TableCell className="text-right text-muted-foreground">±{data.confidenceIntervals.autoResolution.margin}%</TableCell>
+                  </TableRow>
+                  <TableRow data-testid="row-ci-coverage">
+                    <TableCell className="text-sm">Coverage</TableCell>
+                    <TableCell className="text-right font-semibold">{data.kpi.coverageScore}%</TableCell>
+                    <TableCell className="text-right">{data.confidenceIntervals.coverage.lower}%</TableCell>
+                    <TableCell className="text-right">{data.confidenceIntervals.coverage.upper}%</TableCell>
+                    <TableCell className="text-right text-muted-foreground">±{data.confidenceIntervals.coverage.margin}%</TableCell>
+                  </TableRow>
+                  <TableRow data-testid="row-ci-escalation">
+                    <TableCell className="text-sm">Escalation</TableCell>
+                    <TableCell className="text-right font-semibold">{data.kpi.escalationRate}%</TableCell>
+                    <TableCell className="text-right">{data.confidenceIntervals.escalation.lower}%</TableCell>
+                    <TableCell className="text-right">{data.confidenceIntervals.escalation.upper}%</TableCell>
+                    <TableCell className="text-right text-muted-foreground">±{data.confidenceIntervals.escalation.margin}%</TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+              <p className="text-xs text-muted-foreground mt-3">
+                n = {data.kpi.totalTickets} tickets (Wilson score interval, 95% konfidens)
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Endring vs. 200-test baseline</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>KPI</TableHead>
+                    <TableHead className="text-right">Baseline (n={data.baseline.sampleSize})</TableHead>
+                    <TableHead className="text-right">Nå (n={data.kpi.totalTickets})</TableHead>
+                    <TableHead className="text-right">Endring</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow data-testid="row-delta-health">
+                    <TableCell className="text-sm font-medium">Health Score</TableCell>
+                    <TableCell className="text-right">{data.baseline.healthScore}</TableCell>
+                    <TableCell className="text-right font-semibold">{data.healthScore}</TableCell>
+                    <TableCell className="text-right">
+                      <DeltaBadge value={data.delta.healthScore} unit="" inverted={false} />
+                    </TableCell>
+                  </TableRow>
+                  <TableRow data-testid="row-delta-auto-resolution">
+                    <TableCell className="text-sm">Auto Resolution</TableCell>
+                    <TableCell className="text-right">{data.baseline.autoResolutionRate}%</TableCell>
+                    <TableCell className="text-right font-semibold">{data.kpi.autoResolutionRate}%</TableCell>
+                    <TableCell className="text-right">
+                      <DeltaBadge value={data.delta.autoResolutionRate} unit="%" inverted={false} />
+                    </TableCell>
+                  </TableRow>
+                  <TableRow data-testid="row-delta-coverage">
+                    <TableCell className="text-sm">Coverage</TableCell>
+                    <TableCell className="text-right">{data.baseline.coverageScore}%</TableCell>
+                    <TableCell className="text-right font-semibold">{data.kpi.coverageScore}%</TableCell>
+                    <TableCell className="text-right">
+                      <DeltaBadge value={data.delta.coverageScore} unit="%" inverted={false} />
+                    </TableCell>
+                  </TableRow>
+                  <TableRow data-testid="row-delta-escalation">
+                    <TableCell className="text-sm">Escalation</TableCell>
+                    <TableCell className="text-right">{data.baseline.escalationRate}%</TableCell>
+                    <TableCell className="text-right font-semibold">{data.kpi.escalationRate}%</TableCell>
+                    <TableCell className="text-right">
+                      <DeltaBadge value={data.delta.escalationRate} unit="%" inverted={true} />
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+              <p className="text-xs text-muted-foreground mt-3">
+                Utvidet fra {data.baseline.sampleSize} til {data.kpi.totalTickets} tickets (+{data.delta.sampleSize})
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card>

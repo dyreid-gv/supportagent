@@ -210,14 +210,15 @@ export async function registerRoutes(
   });
 
   // ─── WORKFLOW 1: INGESTION ────────────────────────────────────────
-  app.post("/api/training/ingest", async (_req, res) => {
+  app.post("/api/training/ingest", async (req, res) => {
     sseHeaders(res);
+    const maxTickets = req.body?.maxTickets;
     const runId = await storage.createTrainingRun("ingestion", 0);
 
     try {
       const result = await runIngestion((msg, pct) => {
         res.write(`data: ${JSON.stringify({ message: msg, progress: pct })}\n\n`);
-      });
+      }, maxTickets);
       await storage.completeTrainingRun(runId, result.errors);
       res.write(`data: ${JSON.stringify({ done: true, ...result })}\n\n`);
     } catch (error: any) {
@@ -1306,10 +1307,12 @@ export async function registerRoutes(
   app.post("/api/training/seed-test-data", async (req, res) => {
     try {
       const count = req.body?.count || 100;
+      const append = req.body?.append || false;
       const existing = await storage.getTrainingStats();
-      if (existing.rawTickets > 0) {
-        return res.status(400).json({ error: "Det finnes allerede tickets i databasen. Tøm først om du vil seede på nytt." });
+      if (existing.rawTickets > 0 && !append) {
+        return res.status(400).json({ error: "Det finnes allerede tickets i databasen. Bruk append:true for å legge til flere, eller tøm først." });
       }
+      const startOffset = append ? existing.rawTickets : 0;
 
       await ensurePriceCache();
 
@@ -1378,7 +1381,7 @@ export async function registerRoutes(
         const closedDaysAgo = daysAgo - Math.floor(Math.random() * 7) - 1;
 
         tickets.push({
-          ticketId: 10000 + i,
+          ticketId: 10000 + startOffset + i,
           category: template.cat,
           categoryId: categories.indexOf(template.cat) + 1,
           subject: variation > 0 ? `${template.subject} (${variation + 1})` : template.subject,
@@ -1481,6 +1484,21 @@ export async function registerRoutes(
       res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
     }
     res.end();
+  });
+
+  app.post("/api/training/resume-combined", async (req, res) => {
+    const ticketLimit = req.body?.ticketLimit || 50000;
+    const runId = await storage.createTrainingRun("test_combined_batch", 0);
+    res.json({ started: true, runId, ticketLimit });
+
+    runCombinedBatchAnalysis((msg, pct) => {
+      console.log(`[resume] ${pct}% - ${msg}`);
+    }, ticketLimit).then(async (result) => {
+      await storage.completeTrainingRun(runId, result.metrics.errors);
+      console.log(`[resume] DONE: ${result.metrics.processedTickets} tickets, ${result.metrics.apiCalls} API calls`);
+    }).catch((err) => {
+      console.error(`[resume] ERROR: ${err.message}`);
+    });
   });
 
   // ─── WORKFLOW 3C: HELP CENTER MATCHING ──────────────────────────────
@@ -2115,9 +2133,53 @@ export async function registerRoutes(
         (0.20 * (1 - Math.min(escalationRate, 1))) * 100
       );
 
+      const wilsonCI = (successes: number, n: number, z: number = 1.96): { lower: number; upper: number; margin: number } => {
+        if (n === 0) return { lower: 0, upper: 0, margin: 0 };
+        const p = successes / n;
+        const denominator = 1 + z * z / n;
+        const center = (p + z * z / (2 * n)) / denominator;
+        const spread = z * Math.sqrt((p * (1 - p) + z * z / (4 * n)) / n) / denominator;
+        const lower = Math.max(0, center - spread);
+        const upper = Math.min(1, center + spread);
+        return {
+          lower: Math.round(lower * 1000) / 10,
+          upper: Math.round(upper * 1000) / 10,
+          margin: Math.round(spread * 1000) / 10,
+        };
+      }
+
+      const ciAutoResolution = wilsonCI(autoResolvedStrict, totalTickets);
+      const ciCoverage = wilsonCI(covMapped, covTotal);
+      const ciEscalation = wilsonCI(escFlagged + escBlocked, escTotal);
+
+      const baseline = {
+        sampleSize: 200,
+        healthScore: 58,
+        autoResolutionRate: 0,
+        coverageScore: 64.6,
+        escalationRate: 0,
+        coverageMapped: 128,
+        coverageTotal: 198,
+      };
+
+      const delta = {
+        healthScore: healthScore - baseline.healthScore,
+        autoResolutionRate: Math.round(autoResolutionRate * 1000) / 10 - baseline.autoResolutionRate,
+        coverageScore: Math.round(coverageScore * 1000) / 10 - baseline.coverageScore,
+        escalationRate: Math.round(escalationRate * 1000) / 10 - baseline.escalationRate,
+        sampleSize: totalTickets - baseline.sampleSize,
+      };
+
       res.json({
         period: periodMonths,
         healthScore,
+        confidenceIntervals: {
+          autoResolution: ciAutoResolution,
+          coverage: ciCoverage,
+          escalation: ciEscalation,
+        },
+        baseline,
+        delta,
         breakdown: {
           autoResolution: { rate: autoResolutionRate, score: Math.round(autoResolutionRate * 100), weight: 0.35 },
           reopenRate: { rate: reopenRate, score: Math.round((1 - reopenRate) * 100), weight: 0.25, note: "Reopen-data ikke tilgjengelig ennå" },
