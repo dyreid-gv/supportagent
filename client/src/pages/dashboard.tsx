@@ -969,6 +969,9 @@ export default function Dashboard() {
           <TabsTrigger value="canonical" data-testid="tab-canonical">
             Canonical Intents
           </TabsTrigger>
+          <TabsTrigger value="intent-discovery" data-testid="tab-intent-discovery">
+            Intent Discovery
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="pipeline" className="space-y-4 mt-4">
@@ -1748,6 +1751,10 @@ export default function Dashboard() {
 
         <TabsContent value="canonical" className="mt-4">
           <CanonicalIntentsTab />
+        </TabsContent>
+
+        <TabsContent value="intent-discovery" className="mt-4">
+          <IntentDiscoveryTab />
         </TabsContent>
       </Tabs>
     </div>
@@ -4550,6 +4557,321 @@ function CanonicalIntentsTab() {
           </ScrollArea>
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function IntentDiscoveryTab() {
+  const discovery = useSSEWorkflow("/api/admin/intent-discovery");
+  const { data: results, refetch } = useQuery<any>({
+    queryKey: ["/api/admin/intent-discovery/results"],
+  });
+  const [expandedSection, setExpandedSection] = useState<string | null>("proposed_new_intents");
+  const [expandedCluster, setExpandedCluster] = useState<number | null>(null);
+  const { toast } = useToast();
+
+  const hasResults = results && !results.status;
+
+  const handleRunDiscovery = async () => {
+    await discovery.run();
+    refetch();
+  };
+
+  const flagBadge = (flag: string) => {
+    switch (flag) {
+      case "MIDDLE_ZONE": return <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-300" data-testid={`badge-flag-${flag}`}>MIDDLE_ZONE</Badge>;
+      case "HIGH_RISK": return <Badge variant="destructive" data-testid={`badge-flag-${flag}`}>HIGH_RISK</Badge>;
+      case "HIGH_AUTOMATION_POTENTIAL": return <Badge className="bg-green-100 text-green-700 border-green-300" data-testid={`badge-flag-${flag}`}>HIGH_AUTOMATION</Badge>;
+      default: return <Badge variant="outline">{flag}</Badge>;
+    }
+  };
+
+  const renderCluster = (cluster: any, sectionType: string) => {
+    const isExpanded = expandedCluster === cluster.clusterId;
+    return (
+      <div
+        key={`${sectionType}-${cluster.clusterId}`}
+        className="border rounded-lg p-3 space-y-2"
+        data-testid={`cluster-${sectionType}-${cluster.clusterId}`}
+      >
+        <div
+          className="flex flex-wrap items-center justify-between gap-2 cursor-pointer"
+          onClick={() => setExpandedCluster(isExpanded ? null : cluster.clusterId)}
+        >
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-mono text-sm font-medium">{cluster.suggestedLabel || cluster.dominantIntent || `Cluster ${cluster.clusterId}`}</span>
+            <Badge variant="secondary">{cluster.clusterSize} saker</Badge>
+            <Badge variant="outline">sim: {cluster.avgSemanticSimilarityToNearest}</Badge>
+            {cluster.qualityFlags?.map((f: any) => (
+              <span key={f.flag}>{flagBadge(f.flag)}</span>
+            ))}
+          </div>
+          <div className="flex items-center gap-1">
+            {sectionType === "proposed_new_intents" && (
+              <Badge className="bg-blue-100 text-blue-700">NY</Badge>
+            )}
+            {sectionType === "map_to_existing" && (
+              <Badge className="bg-green-100 text-green-700">→ {cluster.nearestCanonical?.intentId}</Badge>
+            )}
+            {sectionType === "ambiguous_clusters" && (
+              <Badge className="bg-yellow-100 text-yellow-700">TVETYDIG</Badge>
+            )}
+          </div>
+        </div>
+
+        {isExpanded && (
+          <div className="space-y-3 pt-2 border-t">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+              <div>
+                <p className="text-muted-foreground">Auto-close %</p>
+                <p className="font-medium">{cluster.autoCloseablePct}%</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Reopen rate</p>
+                <p className="font-medium">{cluster.reopenRate}%</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Avg confidence</p>
+                <p className="font-medium">{cluster.avgConfidence}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Nearest canonical</p>
+                <p className="font-medium text-xs">{cluster.nearestCanonical?.intentId} ({cluster.nearestCanonical?.similarity?.toFixed(3)})</p>
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Nøkkelord</p>
+              <div className="flex flex-wrap gap-1">
+                {cluster.topKeywords?.map((kw: string) => (
+                  <Badge key={kw} variant="outline" className="text-xs">{kw}</Badge>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Eksempel-spørsmål</p>
+              {cluster.exampleQuestions?.map((q: string, i: number) => (
+                <p key={i} className="text-sm pl-2 border-l-2 mb-1">"{q}"</p>
+              ))}
+            </div>
+
+            {cluster.qualityFlags?.length > 0 && (
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">Kvalitetsflagg</p>
+                {cluster.qualityFlags.map((f: any) => (
+                  <p key={f.flag} className="text-xs text-muted-foreground">
+                    {flagBadge(f.flag)} <span className="ml-1">{f.detail}</span>
+                  </p>
+                ))}
+              </div>
+            )}
+
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Eksempel-saker</p>
+              <div className="space-y-1">
+                {cluster.sampleTickets?.map((t: any) => (
+                  <p key={t.ticketId} className="text-xs font-mono bg-muted p-1 rounded">
+                    #{t.ticketId}: {t.question}
+                  </p>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <Button
+                size="sm"
+                variant="default"
+                data-testid={`button-approve-cluster-${cluster.clusterId}`}
+                onClick={() => toast({ title: "Godkjenn som ny canonical", description: "Denne handlingen krever manuell opprettelse i Canonical Intents-fanen" })}
+              >
+                <CheckCircle className="h-3 w-3 mr-1" /> Godkjenn som ny
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                data-testid={`button-map-cluster-${cluster.clusterId}`}
+                onClick={() => toast({ title: "Koble til eksisterende", description: `Nærmeste canonical: ${cluster.nearestCanonical?.intentId} (${cluster.nearestCanonical?.similarity?.toFixed(3)})` })}
+              >
+                <Link2 className="h-3 w-3 mr-1" /> Koble til eksisterende
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                data-testid={`button-reject-cluster-${cluster.clusterId}`}
+                onClick={() => toast({ title: "Avvist", description: "Clusteret er markert som avvist" })}
+              >
+                <X className="h-3 w-3 mr-1" /> Avvis
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const sections = [
+    { key: "proposed_new_intents", label: "Foreslåtte nye intents", icon: Plus, color: "text-blue-600" },
+    { key: "map_to_existing", label: "Kan kobles til eksisterende", icon: Link2, color: "text-green-600" },
+    { key: "ambiguous_clusters", label: "Tvetydige clustere", icon: AlertTriangle, color: "text-yellow-600" },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0 pb-2">
+          <div>
+            <CardTitle className="text-base">Controlled Intent Discovery Pipeline</CardTitle>
+            <p className="text-sm text-muted-foreground mt-1">
+              Offline analyse av historiske saker uten canonical intent. Ingen automatisk promotering.
+            </p>
+          </div>
+          <Button
+            onClick={handleRunDiscovery}
+            disabled={discovery.isRunning}
+            data-testid="button-run-intent-discovery"
+          >
+            {discovery.isRunning ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Search className="h-4 w-4 mr-2" />}
+            Kjør Intent Discovery
+          </Button>
+        </CardHeader>
+        {discovery.isRunning && (
+          <CardContent>
+            <Progress value={discovery.progress} className="mb-2" />
+            <ScrollArea className="h-32">
+              {discovery.logs.map((log, i) => (
+                <p key={i} className="text-xs text-muted-foreground font-mono">{log}</p>
+              ))}
+            </ScrollArea>
+          </CardContent>
+        )}
+        {discovery.error && (
+          <CardContent>
+            <p className="text-sm text-red-500">{discovery.error}</p>
+          </CardContent>
+        )}
+      </Card>
+
+      {hasResults && (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+            <Card>
+              <CardContent className="p-3 text-center">
+                <p className="text-xl font-bold" data-testid="text-source-tickets">{results.metadata?.sourceTickets || 0}</p>
+                <p className="text-xs text-muted-foreground">Kilde-saker</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-3 text-center">
+                <p className="text-xl font-bold text-blue-600" data-testid="text-proposed-count">{results.proposed_new_intents?.length || 0}</p>
+                <p className="text-xs text-muted-foreground">Nye forslag</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-3 text-center">
+                <p className="text-xl font-bold text-green-600" data-testid="text-map-count">{results.map_to_existing?.length || 0}</p>
+                <p className="text-xs text-muted-foreground">Koble til eksisterende</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-3 text-center">
+                <p className="text-xl font-bold text-yellow-600" data-testid="text-ambiguous-count">{results.ambiguous_clusters?.length || 0}</p>
+                <p className="text-xs text-muted-foreground">Tvetydige</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-3 text-center">
+                <p className="text-xl font-bold text-muted-foreground" data-testid="text-noise-count">{results.noise?.length || 0}</p>
+                <p className="text-xs text-muted-foreground">Støy</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card>
+            <CardContent className="p-3">
+              <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+                <span>Kjørt: {results.metadata?.runAt ? new Date(results.metadata.runAt).toLocaleString("nb-NO") : "—"}</span>
+                <span>Eligible: {results.metadata?.eligibleTickets || 0} saker</span>
+                <span>Clustere: {results.metadata?.totalClusters || 0}</span>
+                <span>Noise: {results.metadata?.noiseTickets || 0}</span>
+                <span>Tid: {results.metadata?.processingTimeMs ? `${(results.metadata.processingTimeMs / 1000).toFixed(1)}s` : "—"}</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {sections.map(section => {
+            const clusters = results[section.key] || [];
+            if (clusters.length === 0) return null;
+            const isOpen = expandedSection === section.key;
+            return (
+              <Card key={section.key}>
+                <CardHeader
+                  className="cursor-pointer pb-2"
+                  onClick={() => setExpandedSection(isOpen ? null : section.key)}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <section.icon className={`h-4 w-4 ${section.color}`} />
+                      <CardTitle className="text-base">{section.label}</CardTitle>
+                      <Badge variant="secondary">{clusters.length}</Badge>
+                    </div>
+                    <ArrowRight className={`h-4 w-4 transition-transform ${isOpen ? "rotate-90" : ""}`} />
+                  </div>
+                </CardHeader>
+                {isOpen && (
+                  <CardContent>
+                    <ScrollArea className="max-h-[600px]">
+                      <div className="space-y-2">
+                        {clusters.map((cluster: any) => renderCluster(cluster, section.key))}
+                      </div>
+                    </ScrollArea>
+                  </CardContent>
+                )}
+              </Card>
+            );
+          })}
+
+          {results.noise?.length > 0 && (
+            <Card>
+              <CardHeader
+                className="cursor-pointer pb-2"
+                onClick={() => setExpandedSection(expandedSection === "noise" ? null : "noise")}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Hash className="h-4 w-4 text-muted-foreground" />
+                    <CardTitle className="text-base">Støy (ikke-gruppert)</CardTitle>
+                    <Badge variant="secondary">{results.noise.length}</Badge>
+                  </div>
+                  <ArrowRight className={`h-4 w-4 transition-transform ${expandedSection === "noise" ? "rotate-90" : ""}`} />
+                </div>
+              </CardHeader>
+              {expandedSection === "noise" && (
+                <CardContent>
+                  <ScrollArea className="max-h-[300px]">
+                    <div className="space-y-1">
+                      {results.noise.map((n: any) => (
+                        <p key={n.ticketId} className="text-xs font-mono bg-muted p-1 rounded">
+                          #{n.ticketId}: {n.question} {n.intent && <Badge variant="outline" className="ml-1">{n.intent}</Badge>}
+                        </p>
+                      ))}
+                    </div>
+                  </ScrollArea>
+                </CardContent>
+              )}
+            </Card>
+          )}
+        </>
+      )}
+
+      {!hasResults && !discovery.isRunning && (
+        <Card>
+          <CardContent className="p-8 text-center text-muted-foreground">
+            <Search className="h-8 w-8 mx-auto mb-2 opacity-50" />
+            <p>Ingen resultater ennå. Kjør Intent Discovery for å analysere historiske saker.</p>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

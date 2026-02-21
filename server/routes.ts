@@ -400,6 +400,38 @@ export async function registerRoutes(
     }
   });
 
+  // ─── INTENT DISCOVERY PIPELINE ──────────────────────────────────
+  let lastDiscoveryResult: any = null;
+
+  app.post("/api/admin/intent-discovery", async (_req, res) => {
+    try {
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+
+      const { runIntentDiscovery } = await import("./intent-discovery");
+
+      const result = await runIntentDiscovery((msg, pct) => {
+        res.write(`data: ${JSON.stringify({ progress: pct, message: msg })}\n\n`);
+      });
+
+      lastDiscoveryResult = result;
+
+      res.write(`data: ${JSON.stringify({ done: true, result })}\n\n`);
+    } catch (error: any) {
+      console.error("[IntentDiscovery] Error:", error);
+      res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+    }
+    res.end();
+  });
+
+  app.get("/api/admin/intent-discovery/results", async (_req, res) => {
+    if (!lastDiscoveryResult) {
+      return res.json({ status: "no_results", message: "No intent discovery has been run yet. Trigger via POST /api/admin/intent-discovery" });
+    }
+    res.json(lastDiscoveryResult);
+  });
+
   // ─── UNCATEGORIZED THEMES ────────────────────────────────────────
   app.get("/api/training/uncategorized-themes", async (_req, res) => {
     try {
