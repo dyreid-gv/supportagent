@@ -1967,6 +1967,309 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/reports/consolidation-proposal", async (_req, res) => {
+    try {
+      const { db } = await import("./db");
+      const { intentClassifications, scrubbedTickets, canonicalIntents, playbookEntries } = await import("@shared/schema");
+      const { eq, sql, and, isNotNull } = await import("drizzle-orm");
+
+      const unmappedRows = await db
+        .select({
+          intent: intentClassifications.intent,
+          ticketId: intentClassifications.ticketId,
+          confidence: intentClassifications.intentConfidence,
+          keywords: intentClassifications.keywords,
+          autoClose: intentClassifications.autoClosePossible,
+          paymentRequired: intentClassifications.paymentRequired,
+          requiredAction: intentClassifications.requiredAction,
+          subject: scrubbedTickets.subject,
+          question: scrubbedTickets.customerQuestion,
+        })
+        .from(intentClassifications)
+        .innerJoin(scrubbedTickets, eq(scrubbedTickets.ticketId, intentClassifications.ticketId))
+        .where(eq(intentClassifications.isNewIntent, true));
+
+      const canonicals = await db
+        .select()
+        .from(canonicalIntents)
+        .where(eq(canonicalIntents.approved, true));
+
+      const playbook = await db
+        .select({
+          intent: playbookEntries.intent,
+          endpoint: playbookEntries.primaryEndpoint,
+          action: playbookEntries.primaryAction,
+        })
+        .from(playbookEntries)
+        .where(isNotNull(playbookEntries.primaryEndpoint));
+
+      const endpointMap = new Map<string, string>();
+      for (const p of playbook) {
+        if (p.endpoint) endpointMap.set(p.intent, p.endpoint);
+      }
+
+      const canonicalMap = new Map<string, typeof canonicals[0]>();
+      for (const c of canonicals) canonicalMap.set(c.intentId, c);
+
+      const clusterMap = new Map<string, typeof unmappedRows>();
+      for (const row of unmappedRows) {
+        const intent = row.intent as string;
+        const list = clusterMap.get(intent) || [];
+        list.push(row);
+        clusterMap.set(intent, list);
+      }
+
+      const computeSimilarity = (variantName: string, canonicalId: string, canonicalKeywords: string | null): { score: number; method: string } => {
+        const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const v = norm(variantName);
+        const c = norm(canonicalId);
+
+        if (v === c) return { score: 1.0, method: "exact" };
+
+        const vTokens = variantName.replace(/([A-Z])/g, ' $1').toLowerCase().trim().split(/\s+/);
+        const cTokens = canonicalId.replace(/([A-Z])/g, ' $1').toLowerCase().trim().split(/\s+/);
+        const overlap = vTokens.filter(t => cTokens.includes(t)).length;
+        const union = new Set([...vTokens, ...cTokens]).size;
+        const nameJaccard = union > 0 ? overlap / union : 0;
+
+        let keywordBoost = 0;
+        if (canonicalKeywords) {
+          const ckw = canonicalKeywords.toLowerCase().split(',').map(k => k.trim());
+          const matchedKw = vTokens.filter(t => ckw.some(k => k.includes(t)));
+          keywordBoost = matchedKw.length > 0 ? 0.15 : 0;
+        }
+
+        if (v.includes(c) || c.includes(v)) {
+          return { score: Math.min(0.95, 0.85 + keywordBoost), method: "substring" };
+        }
+
+        const score = Math.min(0.99, nameJaccard * 0.7 + keywordBoost + (nameJaccard > 0.3 ? 0.15 : 0));
+        return { score: parseFloat(score.toFixed(3)), method: nameJaccard > 0.5 ? "semantic" : "keyword" };
+      }
+
+      interface MapCandidate {
+        discovered_intent_name: string;
+        count: number;
+        avg_confidence: number;
+        suggested_canonical_intent: string;
+        similarityScore: number;
+        matchMethod: string;
+        risk_flag: boolean;
+        risk_reason: string | null;
+        example_questions: string[];
+        example_ticket_ids: number[];
+      }
+
+      interface NewCanonicalCandidate {
+        proposed_intentId: string;
+        cluster_size: number;
+        variant_labels: string[];
+        top_keywords: string[];
+        example_questions: string[];
+        example_ticket_ids: number[];
+        suggested_category: string;
+        suggested_subcategory: string;
+        type: "informational" | "transactional";
+        has_endpoint: "ja" | "nei" | "TODO";
+        avg_confidence: number;
+        auto_closeable_pct: number;
+      }
+
+      const semanticGroups: Record<string, string[]> = {
+        "AppLanguageSettings": ["AppLanguage", "AppChangeLanguage", "AppLanguageChange", "AppLanguageSetting", "AppSettings"],
+        "AppPushNotificationIssue": ["AppPushNotifications", "AppNotifications", "PushNotifications", "PushNotificationsIssue", "PushNotificationIssue"],
+        "SmartTagBatteryInfo": ["SmartTagBattery", "SmartTagBatteryInfo"],
+        "SmartTagNotificationIssue": ["SmartTagNotifications"],
+        "SubscriptionUpgrade": ["SubscriptionUpgrade", "UpgradeSubscription", "SubscriptionChange"],
+        "AddPetToSubscription": ["AddPetsToSubscription", "AddPetToSubscription", "SubscriptionAddPet", "AddAnimalsToSubscription", "AddMorePetsToSubscription", "SubscriptionCoverage"],
+        "AppCrashReport": ["AppCrash", "AppCrashOnStartup"],
+        "DoubleChargeRefund": ["DoubleChargeRefund", "BillingRefund", "BillingDoubleCharge", "DoubleCharge", "DuplicateChargeRefund", "PaymentRefund", "RefundDoubleCharge", "RefundRequest", "SubscriptionRefund", "SubscriptionDoubleCharge", "SubscriptionDoubleCharge_Refund"],
+        "InvoiceInquiry": ["BillingInquiry", "CheckPaymentMethod", "SubscriptionBilling", "InvoiceQuery", "InvoiceQuery_AvtaleGiro", "InvoiceNotReceived", "PaymentInquiry", "PaymentMethodInquiry"],
+        "DuplicateRegistrationMerge": ["MergeDuplicateRegistrations", "DuplicateRegistration", "DuplicateRegistrationMerge", "MergeRegistrations"],
+        "UpdateChipRecord": ["UpdateChipNumber", "CorrectRegisteredChip", "ChipReplacement", "RegistrationCorrection"],
+        "SmartTagTransferPet": ["SmartTagTransfer", "SmartTagReassign", "SmartTagTransferToNewPet", "SmartTagTransferToAnotherPet"],
+        "QRTagOrderExtra": ["QRTagOrder", "OrderExtraQRTag", "OrderExtraQR", "QROrder_ExtraTag", "QRTagOrderExtra", "QRTagPurchase", "QRTagPurchaseInfo"],
+        "NonSupportedSpeciesHelp": ["NonSupportedSpeciesInquiry", "NonSupportedSpecies", "FoundNonSupportedSpecies", "FoundNonSupportedAnimal", "FoundNonDogCat", "FoundOtherSpecies", "NewRegistration_SpeciesUnsupported"],
+        "QRTagReplaceDamaged": ["QRTagReplacement", "QRTagReplace", "QRTagDamaged"],
+        "RegistrationPaymentFailure": ["RegistrationPaymentIssue", "RegistrationPaymentFailure", "PaymentFailureRegistration", "PaymentFailureDuringRegistration", "PaymentIssue"],
+        "TwoFactorAuthInfo": ["TwoFactorAuth", "TwoFactorAuthQuestion", "TwoFactorInfo", "TwoFactorQuery"],
+        "FamilyAccessRemoval": ["FamilyAccessRemoval", "FamilyAccessRemove", "RemoveFamilyMember"],
+        "LostPetStatusCheck": ["LostPetStatus", "LostStatusCheck", "LostFoundResolved", "LostFoundStatusInquiry"],
+        "QRTagReassignPet": ["QRTagReassign", "QRReassignTag", "QRAssignCorrection", "QRTagRelink"],
+        "CancelSubscriptionDeceased": ["CancelSubscription", "CancelSubscriptionDueToDeceasedPet"],
+        "PasswordResetHelp": ["PasswordReset"],
+        "BreederLitterRegistration": ["BreederRegisterLitter"],
+      };
+
+      const mapToExistingCandidates: Record<string, string> = {
+        "AppLanguageSettings": "AppLoginIssue",
+        "AppCrashReport": "AppLoginIssue",
+        "DoubleChargeRefund": "SubscriptionComparison",
+        "InvoiceInquiry": "SubscriptionComparison",
+        "DuplicateRegistrationMerge": "RegistrationError",
+        "UpdateChipRecord": "RegistrationError",
+        "CancelSubscriptionDeceased": "PetDeceased",
+        "PasswordResetHelp": "LoginProblem",
+        "LostPetStatusCheck": "ReportLostPet",
+        "FamilyAccessRemoval": "FamilySharing",
+        "QRTagReplaceDamaged": "QRTagLost",
+        "QRTagReassignPet": "QRTagActivation",
+      };
+
+      const newCandidateConfig: Record<string, { category: string; subcategory: string; type: "informational" | "transactional" }> = {
+        "SmartTagNotificationIssue": { category: "Smart Tag", subcategory: "Varsler fra Smart Tag", type: "informational" },
+        "SmartTagBatteryInfo": { category: "Smart Tag", subcategory: "Batteri og levetid", type: "informational" },
+        "SubscriptionUpgrade": { category: "Abonnement", subcategory: "Oppgradere abonnement", type: "transactional" },
+        "AddPetToSubscription": { category: "Abonnement", subcategory: "Legge til dyr i abonnement", type: "transactional" },
+        "AppPushNotificationIssue": { category: "DyreID-appen", subcategory: "Push-varsler feilsøking", type: "informational" },
+        "SmartTagTransferPet": { category: "Smart Tag", subcategory: "Overføre Smart Tag til nytt dyr", type: "transactional" },
+        "QRTagOrderExtra": { category: "QR-brikke", subcategory: "Bestille ekstra QR-brikke", type: "transactional" },
+        "NonSupportedSpeciesHelp": { category: "ID-søk", subcategory: "Funnet dyr utenfor register", type: "informational" },
+        "RegistrationPaymentFailure": { category: "Registrering", subcategory: "Betalingsfeil ved registrering", type: "transactional" },
+        "TwoFactorAuthInfo": { category: "Min Side", subcategory: "To-faktor autentisering", type: "informational" },
+        "BreederLitterRegistration": { category: "Registrering", subcategory: "Oppdretter valpekull", type: "transactional" },
+        "AppLanguageSettings": { category: "DyreID-appen", subcategory: "Språkinnstillinger", type: "informational" },
+      };
+
+      const mapToExisting: MapCandidate[] = [];
+      const newCandidates: NewCanonicalCandidate[] = [];
+
+      for (const [groupId, variants] of Object.entries(semanticGroups)) {
+        let allRows: typeof unmappedRows = [];
+        for (const v of variants) {
+          const rows = clusterMap.get(v);
+          if (rows) allRows = allRows.concat(rows);
+        }
+        if (allRows.length === 0) continue;
+
+        const targetCanonical = mapToExistingCandidates[groupId];
+        const isNewCandidate = !targetCanonical || newCandidateConfig[groupId];
+
+        if (targetCanonical && !newCandidateConfig[groupId]) {
+          const canonical = canonicalMap.get(targetCanonical);
+          const sim = computeSimilarity(groupId, targetCanonical, canonical?.keywords || null);
+
+          const uniqueQuestions: string[] = [];
+          const uniqueIds: number[] = [];
+          const seen = new Set<string>();
+          for (const r of allRows) {
+            const q = r.question || r.subject || '';
+            const short = q.substring(0, 80);
+            if (!seen.has(short) && uniqueQuestions.length < 5) {
+              seen.add(short);
+              uniqueQuestions.push(q);
+              uniqueIds.push(r.ticketId);
+            }
+          }
+
+          for (const v of variants) {
+            const vRows = clusterMap.get(v);
+            if (!vRows || vRows.length === 0) continue;
+            const avgConf = vRows.reduce((s, r) => s + (r.confidence ?? 0), 0) / vRows.length;
+            const vSim = computeSimilarity(v, targetCanonical, canonical?.keywords || null);
+
+            mapToExisting.push({
+              discovered_intent_name: v,
+              count: vRows.length,
+              avg_confidence: parseFloat(avgConf.toFixed(3)),
+              suggested_canonical_intent: targetCanonical,
+              similarityScore: vSim.score,
+              matchMethod: vSim.method,
+              risk_flag: vSim.score >= 0.70 && vSim.score <= 0.78,
+              risk_reason: vSim.score >= 0.70 && vSim.score <= 0.78 ? `Mellomsone-score ${vSim.score}: manuell verifisering anbefales` : null,
+              example_questions: uniqueQuestions.slice(0, 3),
+              example_ticket_ids: uniqueIds.slice(0, 3),
+            });
+          }
+        }
+
+        if (newCandidateConfig[groupId]) {
+          const config = newCandidateConfig[groupId];
+          const avgConf = allRows.reduce((s, r) => s + (r.confidence ?? 0), 0) / allRows.length;
+          const autoCloseCount = allRows.filter(r => r.autoClose).length;
+
+          const allKw = allRows.flatMap(r => (r.keywords || '').split(',').map(k => k.trim().toLowerCase())).filter(Boolean);
+          const kwFreq = new Map<string, number>();
+          for (const kw of allKw) kwFreq.set(kw, (kwFreq.get(kw) || 0) + 1);
+          const topKeywords = Array.from(kwFreq.entries())
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 8)
+            .map(([k]) => k);
+
+          const uniqueQuestions: string[] = [];
+          const uniqueIds: number[] = [];
+          const seen = new Set<string>();
+          for (const r of allRows) {
+            const q = r.question || r.subject || '';
+            const short = q.substring(0, 80);
+            if (!seen.has(short) && uniqueQuestions.length < 5) {
+              seen.add(short);
+              uniqueQuestions.push(q);
+              uniqueIds.push(r.ticketId);
+            }
+          }
+
+          const hasEndpoint = endpointMap.has(groupId) ? "ja" : (config.type === "transactional" ? "TODO" : "nei");
+
+          newCandidates.push({
+            proposed_intentId: groupId,
+            cluster_size: allRows.length,
+            variant_labels: variants.filter(v => clusterMap.has(v)),
+            top_keywords: topKeywords,
+            example_questions: uniqueQuestions,
+            example_ticket_ids: uniqueIds,
+            suggested_category: config.category,
+            suggested_subcategory: config.subcategory,
+            type: config.type,
+            has_endpoint: hasEndpoint,
+            avg_confidence: parseFloat(avgConf.toFixed(3)),
+            auto_closeable_pct: parseFloat(((autoCloseCount / allRows.length) * 100).toFixed(1)),
+          });
+        }
+      }
+
+      mapToExisting.sort((a, b) => b.count - a.count);
+      newCandidates.sort((a, b) => b.cluster_size - a.cluster_size);
+
+      const totalUnmappedTickets = unmappedRows.length;
+      const totalUniqueVariants = clusterMap.size;
+      const coveredByMap = mapToExisting.reduce((s, c) => s + c.count, 0);
+      const coveredByNew = newCandidates.reduce((s, c) => s + c.cluster_size, 0);
+
+      const report = {
+        report_type: "Fragmentation Consolidation Proposal",
+        generated_at: new Date().toISOString(),
+        status: "READ_ONLY — Ingen auto-merge. Krever manuell godkjenning.",
+        summary: {
+          total_unmapped_tickets: totalUnmappedTickets,
+          total_unique_ai_labels: totalUniqueVariants,
+          existing_canonical_intents: canonicals.length,
+          map_to_existing_candidates: mapToExisting.length,
+          new_canonical_candidates: newCandidates.length,
+          tickets_covered_by_mapping: coveredByMap,
+          tickets_covered_by_new_canonicals: coveredByNew,
+          tickets_remaining_uncovered: totalUnmappedTickets - coveredByMap - coveredByNew,
+          risk_flagged_mappings: mapToExisting.filter(c => c.risk_flag).length,
+        },
+        A_MAP_TO_EXISTING: mapToExisting,
+        B_NEW_CANONICAL_CANDIDATES: newCandidates,
+        notes: [
+          "Alle similarityScore er beregnet via navnlikhet (Jaccard + substring + keyword-boost). Score 0.70–0.78 flagges som mellomsone og krever manuell verifisering.",
+          "Ingen endringer gjøres i databasen. Denne rapporten er kun et forslag til konsolidering.",
+          "Etter godkjenning vil varianter merkes med canonical_intent_id og is_new_intent settes til false.",
+          "NEW_CANONICAL_CANDIDATES med type 'transactional' og has_endpoint='TODO' trenger endepunkt-utvikling før produksjon.",
+        ],
+      };
+
+      res.setHeader("Content-Type", "application/json");
+      res.setHeader("Content-Disposition", "attachment; filename=fragmentation-consolidation-proposal.json");
+      res.json(report);
+    } catch (error: any) {
+      console.error("Consolidation report error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.get("/api/admin/health", async (req, res) => {
     try {
       const periodMonths = parseInt(req.query.period as string) || 12;

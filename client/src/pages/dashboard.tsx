@@ -876,6 +876,21 @@ export default function Dashboard() {
           <Button
             size="sm"
             variant="outline"
+            className="border-amber-500/50 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30"
+            onClick={() => {
+              const link = document.createElement("a");
+              link.href = "/api/reports/consolidation-proposal";
+              link.download = "fragmentation-consolidation-proposal.json";
+              link.click();
+            }}
+            data-testid="button-download-consolidation"
+          >
+            <Download className="h-4 w-4" />
+            Konsolideringsforslag
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
             onClick={() => {
               queryClient.invalidateQueries({ queryKey: ["/api/training/stats"] });
               queryClient.invalidateQueries({ queryKey: ["/api/playbook"] });
