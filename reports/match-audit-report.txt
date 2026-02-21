@@ -1,0 +1,641 @@
+═══════════════════════════════════════════════════════════════
+  MATCH CORRECTNESS AUDIT + PROMOTION PLAN
+  DyreID Support AI — Intent Coverage Analysis
+═══════════════════════════════════════════════════════════════
+
+╔═══════════════════════════════════════════════════════════════╗
+║  SUMMARY                                                     ║
+╚═══════════════════════════════════════════════════════════════╝
+  Total new intents in review queue: 99
+  Matched to existing canonical:     38
+  Unmatched (truly new):              61
+  ── Match Classifications ──
+  ✅ CORRECT:    7
+  ❌ INCORRECT:  23
+  ⚠️  AMBIGUOUS:  8
+
+╔═══════════════════════════════════════════════════════════════╗
+║  PART 1: MATCH CORRECTNESS AUDIT                             ║
+╚═══════════════════════════════════════════════════════════════╝
+
+❌ UpdateChipNumber → PhoneError
+   Classification: INCORRECT | Method: regex | Score: 1.000 | Tickets: 7
+   Reason: Regex overmatch: "UpdateChipNumber" queries caught by "PhoneError" regex (label similarity 0.075). Regex is too broad.
+   Playbook: "Feilmelding telefonnummer" — ...
+   Example queries:
+     • "Veterinæren registrerte feil chipnummer på katten min. Kan dette rettes?"
+     • "Jeg prøvde å registrere hunden min men betalingen gikk ikke gjennom. Hva gjør jeg?"
+     • "Veterinæren registrerte feil chipnummer på katten min. Kan dette rettes?"
+     • "Veterinæren registrerte feil chipnummer på katten min. Kan dette rettes?"
+     • "Veterinæren registrerte feil chipnummer på katten min. Kan dette rettes?"
+   ── Proposed Fix ──
+   Type: Tighten regex
+   Suggested: Add negative lookahead to PhoneError regex: (?!.*(?:update|chip|number)) — or add dedicated regex for UpdateChipNumber. Current regex: /(?:feilmelding|feil|problem).*(?:telefon|tlf|nummer)|ugyldig.*nummer|telefon.*(?:feil|vises feil|fungerer ikke)|(?:kan ikke|klarer ikke).*(?:endre.*)?/i
+
+❌ QRTagReplacement → FamilySharingPermissions
+   Classification: INCORRECT | Method: regex | Score: 1.000 | Tickets: 5
+   Reason: Regex overmatch: "QRTagReplacement" queries caught by "FamilySharingPermissions" regex (label similarity 0.067). Regex is too broad.
+   Playbook: "Kan jeg bruke familiedeling med noen som allerede har et kjæledyr?" — Når du deler tilgang til kjæledyret ditt via DyreID, kan familiemedlemmer få et godt overblikk over dyrets informasjon og helsebehov. Det er imidlerti...
+   Example queries:
+     • "QR-brikken min skannes ikke. Koden er slitt og uleselig."
+     • "QR-brikken min skannes ikke. Koden er slitt og uleselig."
+     • "QR-brikken min skannes ikke. Koden er slitt og uleselig."
+     • "QR-brikken min skannes ikke. Koden er slitt og uleselig."
+     • "QR-brikken min skannes ikke. Koden er slitt og uleselig."
+   ── Proposed Fix ──
+   Type: Tighten regex
+   Suggested: Add negative lookahead to FamilySharingPermissions regex: (?!.*(?:tag|replacement)) — or add dedicated regex for QRTagReplacement. Current regex: /(?:rettigheter|tillatelser|begrensninger).*(?:deling|familie|delt)|(?:kan|hva kan).*(?:de|den|delt.*(?:bruker|person)|familiemedlem).*(?:endre|gjøre|t/i
+
+❌ QRTagOrder → FamilySharingPermissions
+   Classification: INCORRECT | Method: regex | Score: 1.000 | Tickets: 3
+   Reason: Regex overmatch: "QRTagOrder" queries caught by "FamilySharingPermissions" regex (label similarity 0.050). Regex is too broad.
+   Playbook: "Kan jeg bruke familiedeling med noen som allerede har et kjæledyr?" — Når du deler tilgang til kjæledyret ditt via DyreID, kan familiemedlemmer få et godt overblikk over dyrets informasjon og helsebehov. Det er imidlerti...
+   Example queries:
+     • "Kan jeg bestille en ekstra QR-brikke til halsbåndet? Har allerede én på selen."
+     • "Kan jeg bestille en ekstra QR-brikke til halsbåndet? Har allerede én på selen."
+     • "Kan jeg bestille en ekstra QR-brikke til halsbåndet? Har allerede én på selen."
+   ── Proposed Fix ──
+   Type: Tighten regex
+   Suggested: Add negative lookahead to FamilySharingPermissions regex: (?!.*(?:tag|order)) — or add dedicated regex for QRTagOrder. Current regex: /(?:rettigheter|tillatelser|begrensninger).*(?:deling|familie|delt)|(?:kan|hva kan).*(?:de|den|delt.*(?:bruker|person)|familiemedlem).*(?:endre|gjøre|t/i
+
+❌ OrderExtraQR → FamilySharingPermissions
+   Classification: INCORRECT | Method: regex | Score: 1.000 | Tickets: 2
+   Reason: Regex overmatch: "OrderExtraQR" queries caught by "FamilySharingPermissions" regex (label similarity 0.050). Regex is too broad.
+   Playbook: "Kan jeg bruke familiedeling med noen som allerede har et kjæledyr?" — Når du deler tilgang til kjæledyret ditt via DyreID, kan familiemedlemmer få et godt overblikk over dyrets informasjon og helsebehov. Det er imidlerti...
+   Example queries:
+     • "Kan jeg bestille en ekstra QR-brikke til halsbåndet? Har allerede én på selen."
+     • "Kan jeg bestille en ekstra QR-brikke til halsbåndet? Har allerede én på selen."
+   ── Proposed Fix ──
+   Type: Tighten regex
+   Suggested: Add negative lookahead to FamilySharingPermissions regex: (?!.*(?:order|extra)) — or add dedicated regex for OrderExtraQR. Current regex: /(?:rettigheter|tillatelser|begrensninger).*(?:deling|familie|delt)|(?:kan|hva kan).*(?:de|den|delt.*(?:bruker|person)|familiemedlem).*(?:endre|gjøre|t/i
+
+❌ PasswordReset → LoginIssue
+   Classification: INCORRECT | Method: regex | Score: 1.000 | Tickets: 2
+   Reason: Regex overmatch: "PasswordReset" queries caught by "LoginIssue" regex (label similarity 0.031). Regex is too broad.
+   Playbook: "LoginIssue" — ...
+   Example queries:
+     • "Jeg har glemt passordet mitt til Min Side. Hvordan kan jeg tilbakestille det?"
+     • "Jeg har glemt passordet mitt til Min Side. Hvordan kan jeg tilbakestille det?"
+   ── Proposed Fix ──
+   Type: Tighten regex
+   Suggested: Add negative lookahead to LoginIssue regex: (?!.*(?:password|reset)) — or add dedicated regex for PasswordReset. Current regex: /logg.*inn|innlogg|login|passord|bankid.*(?:logg|inn)|hvordan.*komm.*inn|hjelp.*(?:med )?(?:å )?logg/i
+
+❌ CorrectRegisteredChip → PhoneError
+   Classification: INCORRECT | Method: regex | Score: 1.000 | Tickets: 2
+   Reason: Regex overmatch: "CorrectRegisteredChip" queries caught by "PhoneError" regex (label similarity 0.057). Regex is too broad.
+   Playbook: "Feilmelding telefonnummer" — ...
+   Example queries:
+     • "Veterinæren registrerte feil chipnummer på katten min. Kan dette rettes?"
+     • "Veterinæren registrerte feil chipnummer på katten min. Kan dette rettes?"
+   ── Proposed Fix ──
+   Type: Tighten regex
+   Suggested: Add negative lookahead to PhoneError regex: (?!.*(?:correct|registered|chip)) — or add dedicated regex for CorrectRegisteredChip. Current regex: /(?:feilmelding|feil|problem).*(?:telefon|tlf|nummer)|ugyldig.*nummer|telefon.*(?:feil|vises feil|fungerer ikke)|(?:kan ikke|klarer ikke).*(?:endre.*)?/i
+
+❌ QRTagReassign → QRScanResult
+   Classification: INCORRECT | Method: regex | Score: 1.000 | Tickets: 2
+   Reason: Regex overmatch: "QRTagReassign" queries caught by "QRScanResult" regex (label similarity 0.154). Regex is too broad.
+   Playbook: "Hva skjer når QR koden skannes?" — Når QR-koden på DyreIDs QR-brikke skannes, får personen tilgang til de kontaktopplysningene du har valgt å dele, eller mulighet til å sende deg en mel...
+   Example queries:
+     • "Når noen skanner QR-brikken vises feil dyr. Brikken var koblet til forrige hund."
+     • "Kan jeg bestille en ekstra QR-brikke til halsbåndet? Har allerede én på selen."
+   ── Proposed Fix ──
+   Type: Tighten regex
+   Suggested: Add negative lookahead to QRScanResult regex: (?!.*(?:tag|reassign)) — or add dedicated regex for QRTagReassign. Current regex: /hva (?:skjer|vises|kommer).*(?:skann|qr)|(?:skann|qr).*(?:resultat|hva)|(?:noen|når).*skann/i
+
+❌ OrderExtraQRTag → FamilySharingPermissions
+   Classification: INCORRECT | Method: regex | Score: 1.000 | Tickets: 2
+   Reason: Regex overmatch: "OrderExtraQRTag" queries caught by "FamilySharingPermissions" regex (label similarity 0.033). Regex is too broad.
+   Playbook: "Kan jeg bruke familiedeling med noen som allerede har et kjæledyr?" — Når du deler tilgang til kjæledyret ditt via DyreID, kan familiemedlemmer få et godt overblikk over dyrets informasjon og helsebehov. Det er imidlerti...
+   Example queries:
+     • "Kan jeg bestille en ekstra QR-brikke til halsbåndet? Har allerede én på selen."
+     • "Kan jeg bestille en ekstra QR-brikke til halsbåndet? Har allerede én på selen."
+   ── Proposed Fix ──
+   Type: Tighten regex
+   Suggested: Add negative lookahead to FamilySharingPermissions regex: (?!.*(?:order|extra|tag)) — or add dedicated regex for OrderExtraQRTag. Current regex: /(?:rettigheter|tillatelser|begrensninger).*(?:deling|familie|delt)|(?:kan|hva kan).*(?:de|den|delt.*(?:bruker|person)|familiemedlem).*(?:endre|gjøre|t/i
+
+❌ QRTagOrderExtra → QRScanResult
+   Classification: INCORRECT | Method: regex | Score: 1.000 | Tickets: 1
+   Reason: Regex overmatch: "QRTagOrderExtra" queries caught by "QRScanResult" regex (label similarity 0.133). Regex is too broad.
+   Playbook: "Hva skjer når QR koden skannes?" — Når QR-koden på DyreIDs QR-brikke skannes, får personen tilgang til de kontaktopplysningene du har valgt å dele, eller mulighet til å sende deg en mel...
+   Example queries:
+     • "Når noen skanner QR-brikken vises feil dyr. Brikken var koblet til forrige hund."
+   ── Proposed Fix ──
+   Type: Tighten regex
+   Suggested: Add negative lookahead to QRScanResult regex: (?!.*(?:tag|order|extra)) — or add dedicated regex for QRTagOrderExtra. Current regex: /hva (?:skjer|vises|kommer).*(?:skann|qr)|(?:skann|qr).*(?:resultat|hva)|(?:noen|når).*skann/i
+
+❌ QRTagRelink → QRScanResult
+   Classification: INCORRECT | Method: regex | Score: 1.000 | Tickets: 1
+   Reason: Regex overmatch: "QRTagRelink" queries caught by "QRScanResult" regex (label similarity 0.167). Regex is too broad.
+   Playbook: "Hva skjer når QR koden skannes?" — Når QR-koden på DyreIDs QR-brikke skannes, får personen tilgang til de kontaktopplysningene du har valgt å dele, eller mulighet til å sende deg en mel...
+   Example queries:
+     • "Når noen skanner QR-brikken vises feil dyr. Brikken var koblet til forrige hund."
+   ── Proposed Fix ──
+   Type: Tighten regex
+   Suggested: Add negative lookahead to QRScanResult regex: (?!.*(?:tag|relink)) — or add dedicated regex for QRTagRelink. Current regex: /hva (?:skjer|vises|kommer).*(?:skann|qr)|(?:skann|qr).*(?:resultat|hva)|(?:noen|når).*skann/i
+
+❌ RegistrationCorrection → PhoneError
+   Classification: INCORRECT | Method: regex | Score: 1.000 | Tickets: 1
+   Reason: Regex overmatch: "RegistrationCorrection" queries caught by "PhoneError" regex (label similarity 0.091). Regex is too broad.
+   Playbook: "Feilmelding telefonnummer" — ...
+   Example queries:
+     • "Veterinæren registrerte feil chipnummer på katten min. Kan dette rettes?"
+   ── Proposed Fix ──
+   Type: Tighten regex
+   Suggested: Add negative lookahead to PhoneError regex: (?!.*(?:registration|correction)) — or add dedicated regex for RegistrationCorrection. Current regex: /(?:feilmelding|feil|problem).*(?:telefon|tlf|nummer)|ugyldig.*nummer|telefon.*(?:feil|vises feil|fungerer ikke)|(?:kan ikke|klarer ikke).*(?:endre.*)?/i
+
+❌ ChipReplacement → PetNotInSystem
+   Classification: INCORRECT | Method: regex | Score: 1.000 | Tickets: 1
+   Reason: Regex overmatch: "ChipReplacement" queries caught by "PetNotInSystem" regex (label similarity 0.027). Regex is too broad.
+   Playbook: "PetNotInSystem" — ...
+   Example queries:
+     • "Chip i ustand/ finnner den ikke på dyre <br><br>Hei!<br>Lurte på hvordan man bytter chip nr på et dyr?<br>Vi finner ikke..."
+   ── Proposed Fix ──
+   Type: Tighten regex
+   Suggested: Add negative lookahead to PetNotInSystem regex: (?!.*(?:chip|replacement)) — or add dedicated regex for ChipReplacement. Current regex: /finnes ikke.*(?:system|register)|(?:dyr|hund|katt).*(?:finnes|dukker|er).*ikke|finner ikke.*(?:dyr|hund|katt)|ikke (?:i )?(?:registeret|systemet)|mang/i
+
+❌ CancelSubscriptionDueToDeceasedPet → OwnershipTransferDead
+   Classification: INCORRECT | Method: regex | Score: 1.000 | Tickets: 1
+   Reason: Regex overmatch: "CancelSubscriptionDueToDeceasedPet" queries caught by "OwnershipTransferDead" regex (label similarity 0.141). Regex is too broad.
+   Playbook: "Eierskifte når eier er død" — ...
+   Example queries:
+     • "Jeg ønsker å si opp abonnementet mitt. Hunden min har dessverre gått bort."
+   ── Proposed Fix ──
+   Type: Tighten regex
+   Suggested: Add negative lookahead to OwnershipTransferDead regex: (?!.*(?:cancel|subscription|due|deceased|pet)) — or add dedicated regex for CancelSubscriptionDueToDeceasedPet. Current regex: /(?:eier|person).*(?:er )?død|dødsfall.*eier|arv.*(?:dyr|hund|katt)|(?:eierskift|overf[øo]r).*(?:død|dødsfall|avdød)|avdød.*(?:person|eier)|tilhørte.*a/i
+
+❌ QRTagReplace → FamilySharingPermissions
+   Classification: INCORRECT | Method: regex | Score: 1.000 | Tickets: 1
+   Reason: Regex overmatch: "QRTagReplace" queries caught by "FamilySharingPermissions" regex (label similarity 0.050). Regex is too broad.
+   Playbook: "Kan jeg bruke familiedeling med noen som allerede har et kjæledyr?" — Når du deler tilgang til kjæledyret ditt via DyreID, kan familiemedlemmer få et godt overblikk over dyrets informasjon og helsebehov. Det er imidlerti...
+   Example queries:
+     • "QR-brikken min skannes ikke. Koden er slitt og uleselig."
+   ── Proposed Fix ──
+   Type: Tighten regex
+   Suggested: Add negative lookahead to FamilySharingPermissions regex: (?!.*(?:tag|replace)) — or add dedicated regex for QRTagReplace. Current regex: /(?:rettigheter|tillatelser|begrensninger).*(?:deling|familie|delt)|(?:kan|hva kan).*(?:de|den|delt.*(?:bruker|person)|familiemedlem).*(?:endre|gjøre|t/i
+
+❌ QRReassignTag → QRScanResult
+   Classification: INCORRECT | Method: regex | Score: 1.000 | Tickets: 1
+   Reason: Regex overmatch: "QRReassignTag" queries caught by "QRScanResult" regex (label similarity 0.092). Regex is too broad.
+   Playbook: "Hva skjer når QR koden skannes?" — Når QR-koden på DyreIDs QR-brikke skannes, får personen tilgang til de kontaktopplysningene du har valgt å dele, eller mulighet til å sende deg en mel...
+   Example queries:
+     • "Når noen skanner QR-brikken vises feil dyr. Brikken var koblet til forrige hund."
+   ── Proposed Fix ──
+   Type: Tighten regex
+   Suggested: Add negative lookahead to QRScanResult regex: (?!.*(?:reassign|tag)) — or add dedicated regex for QRReassignTag. Current regex: /hva (?:skjer|vises|kommer).*(?:skann|qr)|(?:skann|qr).*(?:resultat|hva)|(?:noen|når).*skann/i
+
+❌ QRTagPurchaseInfo → FamilySharingPermissions
+   Classification: INCORRECT | Method: regex | Score: 1.000 | Tickets: 1
+   Reason: Regex overmatch: "QRTagPurchaseInfo" queries caught by "FamilySharingPermissions" regex (label similarity 0.083). Regex is too broad.
+   Playbook: "Kan jeg bruke familiedeling med noen som allerede har et kjæledyr?" — Når du deler tilgang til kjæledyret ditt via DyreID, kan familiemedlemmer få et godt overblikk over dyrets informasjon og helsebehov. Det er imidlerti...
+   Example queries:
+     • "Kan jeg bestille en ekstra QR-brikke til halsbåndet? Har allerede én på selen."
+   ── Proposed Fix ──
+   Type: Tighten regex
+   Suggested: Add negative lookahead to FamilySharingPermissions regex: (?!.*(?:tag|purchase|info)) — or add dedicated regex for QRTagPurchaseInfo. Current regex: /(?:rettigheter|tillatelser|begrensninger).*(?:deling|familie|delt)|(?:kan|hva kan).*(?:de|den|delt.*(?:bruker|person)|familiemedlem).*(?:endre|gjøre|t/i
+
+❌ QRTagDamaged → FamilySharingPermissions
+   Classification: INCORRECT | Method: regex | Score: 1.000 | Tickets: 1
+   Reason: Regex overmatch: "QRTagDamaged" queries caught by "FamilySharingPermissions" regex (label similarity 0.050). Regex is too broad.
+   Playbook: "Kan jeg bruke familiedeling med noen som allerede har et kjæledyr?" — Når du deler tilgang til kjæledyret ditt via DyreID, kan familiemedlemmer få et godt overblikk over dyrets informasjon og helsebehov. Det er imidlerti...
+   Example queries:
+     • "QR-brikken min skannes ikke. Koden er slitt og uleselig."
+   ── Proposed Fix ──
+   Type: Tighten regex
+   Suggested: Add negative lookahead to FamilySharingPermissions regex: (?!.*(?:tag|damaged)) — or add dedicated regex for QRTagDamaged. Current regex: /(?:rettigheter|tillatelser|begrensninger).*(?:deling|familie|delt)|(?:kan|hva kan).*(?:de|den|delt.*(?:bruker|person)|familiemedlem).*(?:endre|gjøre|t/i
+
+❌ QRAssignCorrection → QRScanResult
+   Classification: INCORRECT | Method: regex | Score: 1.000 | Tickets: 1
+   Reason: Regex overmatch: "QRAssignCorrection" queries caught by "QRScanResult" regex (label similarity 0.133). Regex is too broad.
+   Playbook: "Hva skjer når QR koden skannes?" — Når QR-koden på DyreIDs QR-brikke skannes, får personen tilgang til de kontaktopplysningene du har valgt å dele, eller mulighet til å sende deg en mel...
+   Example queries:
+     • "Når noen skanner QR-brikken vises feil dyr. Brikken var koblet til forrige hund."
+   ── Proposed Fix ──
+   Type: Tighten regex
+   Suggested: Add negative lookahead to QRScanResult regex: (?!.*(?:assign|correction)) — or add dedicated regex for QRAssignCorrection. Current regex: /hva (?:skjer|vises|kommer).*(?:skann|qr)|(?:skann|qr).*(?:resultat|hva)|(?:noen|når).*skann/i
+
+❌ QRTagPurchase → FamilySharingPermissions
+   Classification: INCORRECT | Method: regex | Score: 1.000 | Tickets: 1
+   Reason: Regex overmatch: "QRTagPurchase" queries caught by "FamilySharingPermissions" regex (label similarity 0.083). Regex is too broad.
+   Playbook: "Kan jeg bruke familiedeling med noen som allerede har et kjæledyr?" — Når du deler tilgang til kjæledyret ditt via DyreID, kan familiemedlemmer få et godt overblikk over dyrets informasjon og helsebehov. Det er imidlerti...
+   Example queries:
+     • "Kan jeg bestille en ekstra QR-brikke til halsbåndet? Har allerede én på selen."
+   ── Proposed Fix ──
+   Type: Tighten regex
+   Suggested: Add negative lookahead to FamilySharingPermissions regex: (?!.*(?:tag|purchase)) — or add dedicated regex for QRTagPurchase. Current regex: /(?:rettigheter|tillatelser|begrensninger).*(?:deling|familie|delt)|(?:kan|hva kan).*(?:de|den|delt.*(?:bruker|person)|familiemedlem).*(?:endre|gjøre|t/i
+
+❌ BreederRegisterLitter → OwnershipTransferWeb
+   Classification: INCORRECT | Method: regex | Score: 1.000 | Tickets: 1
+   Reason: Regex overmatch: "BreederRegisterLitter" queries caught by "OwnershipTransferWeb" regex (label similarity 0.076). Regex is too broad.
+   Playbook: "Eierskifte på Web" — ...
+   Example queries:
+     • "Jeg er oppdretter og har et nytt valpekull. Hvordan registrerer jeg alle valpene og overfører til nye eiere?"
+   ── Proposed Fix ──
+   Type: Tighten regex
+   Suggested: Add negative lookahead to OwnershipTransferWeb regex: (?!.*(?:breeder|register|litter)) — or add dedicated regex for BreederRegisterLitter. Current regex: /eierskift.*min side|via min side|eierskift|selge|solgt|ny eier|overfør.*eier|bytte eier|overf[øo]re.*(?:hund|katt|dyr|eierskap)|eieroverføring/i
+
+❌ CancelSubscription → OwnershipTransferDead
+   Classification: INCORRECT | Method: regex | Score: 1.000 | Tickets: 1
+   Reason: Regex overmatch: "CancelSubscription" queries caught by "OwnershipTransferDead" regex (label similarity 0.057). Regex is too broad.
+   Playbook: "Eierskifte når eier er død" — ...
+   Example queries:
+     • "Jeg ønsker å si opp abonnementet mitt. Hunden min har dessverre gått bort."
+   ── Proposed Fix ──
+   Type: Tighten regex
+   Suggested: Add negative lookahead to OwnershipTransferDead regex: (?!.*(?:cancel|subscription)) — or add dedicated regex for CancelSubscription. Current regex: /(?:eier|person).*(?:er )?død|dødsfall.*eier|arv.*(?:dyr|hund|katt)|(?:eierskift|overf[øo]r).*(?:død|dødsfall|avdød)|avdød.*(?:person|eier)|tilhørte.*a/i
+
+❌ LostStatusCheck → ReportFoundPet
+   Classification: INCORRECT | Method: regex | Score: 1.000 | Tickets: 1
+   Reason: Regex overmatch: "LostStatusCheck" queries caught by "ReportFoundPet" regex (label similarity 0.080). Regex is too broad.
+   Playbook: "ReportFoundPet" — ...
+   Example queries:
+     • "Katten har vært savnet i 3 måneder nå. Er det noen som har funnet den?"
+   ── Proposed Fix ──
+   Type: Tighten regex
+   Suggested: Add negative lookahead to ReportFoundPet regex: (?!.*(?:lost|status|check)) — or add dedicated regex for LostStatusCheck. Current regex: /(?:funnet|kommet til rette|kommet hjem|funnet igjen|er tilbake|kom tilbake|kom hjem).*(?:dyr|hund|katt|kjæledyr)|(?:dyr|hund|katt|kjæledyr).*(?:funnet/i
+
+❌ QROrder_ExtraTag → FamilySharingPermissions
+   Classification: INCORRECT | Method: regex | Score: 1.000 | Tickets: 1
+   Reason: Regex overmatch: "QROrder_ExtraTag" queries caught by "FamilySharingPermissions" regex (label similarity 0.050). Regex is too broad.
+   Playbook: "Kan jeg bruke familiedeling med noen som allerede har et kjæledyr?" — Når du deler tilgang til kjæledyret ditt via DyreID, kan familiemedlemmer få et godt overblikk over dyrets informasjon og helsebehov. Det er imidlerti...
+   Example queries:
+     • "Kan jeg bestille en ekstra QR-brikke til halsbåndet? Har allerede én på selen."
+   ── Proposed Fix ──
+   Type: Tighten regex
+   Suggested: Add negative lookahead to FamilySharingPermissions regex: (?!.*(?:order_|extra|tag)) — or add dedicated regex for QROrder_ExtraTag. Current regex: /(?:rettigheter|tillatelser|begrensninger).*(?:deling|familie|delt)|(?:kan|hva kan).*(?:de|den|delt.*(?:bruker|person)|familiemedlem).*(?:endre|gjøre|t/i
+
+⚠️ AppCrash → AppAccess
+   Classification: AMBIGUOUS | Method: regex | Score: 1.000 | Tickets: 6
+   Reason: Regex match but weak label similarity (0.422): regex may be too broad, catching "AppCrash" queries under "AppAccess"
+   Playbook: "Hvem passer appen for?" — DyreID-appen er laget for hunde- og katteeiere som har registrert kjæledyret sitt i DyreID. For å få tilgang til appen, kan du laste den ned fra enten...
+   Example queries:
+     • "DyreID-appen krasjer hver gang jeg åpner den etter siste oppdatering. iPhone 13."
+     • "DyreID-appen krasjer hver gang jeg åpner den etter siste oppdatering. iPhone 13."
+     • "DyreID-appen krasjer hver gang jeg åpner den etter siste oppdatering. iPhone 13."
+     • "DyreID-appen krasjer hver gang jeg åpner den etter siste oppdatering. iPhone 13."
+     • "DyreID-appen krasjer hver gang jeg åpner den etter siste oppdatering. iPhone 13."
+   ── Proposed Fix ──
+   Type: Tighten regex
+   Suggested: Add negative lookahead to AppAccess regex: (?!.*(?:crash)) — or add dedicated regex for AppCrash. Current regex: /laste ned.*(?:app|dyreid)|installere.*(?:app|dyreid)|tilgang.*app|(?:app|dyreid).*nedlast|hente.*app|(?:app|dyreid).*(?:iphone|android)/i
+
+⚠️ FamilyAccessRemoval → FamilySharingNonFamily
+   Classification: AMBIGUOUS | Method: regex | Score: 1.000 | Tickets: 2
+   Reason: Regex match but weak label similarity (0.265): regex may be too broad, catching "FamilyAccessRemoval" queries under "FamilySharingNonFamily"
+   Playbook: "Kan jeg dele tilgang med andre enn familien?" — Ja, du kan dele tilgang med personer utenom familien for en bestemt tidsperiode. Dette kan være nyttig hvis kjæledyret ditt skal på et pensjonat eller...
+   Example queries:
+     • "Jeg og min eks har gått fra hverandre. Kan dere fjerne hans tilgang til katten?"
+     • "Jeg og min eks har gått fra hverandre. Kan dere fjerne hans tilgang til katten?"
+   ── Proposed Fix ──
+   Type: Tighten regex
+   Suggested: Add negative lookahead to FamilySharingNonFamily regex: (?!.*(?:access|removal)) — or add dedicated regex for FamilyAccessRemoval. Current regex: /(?:dele|deling|familiedeling).*(?:venn|nabo|hundelufter|ikke.*familie|bare.*for.*familie)|(?:dele|deling|familiedeling).*andre(?!.*(?:gjøre|endre|tilg/i
+
+⚠️ LostPetStatus → ReportFoundPet
+   Classification: AMBIGUOUS | Method: regex | Score: 1.000 | Tickets: 2
+   Reason: Regex match but weak label similarity (0.149): regex may be too broad, catching "LostPetStatus" queries under "ReportFoundPet"
+   Playbook: "ReportFoundPet" — ...
+   Example queries:
+     • "Katten har vært savnet i 3 måneder nå. Er det noen som har funnet den?"
+     • "Katten har vært savnet i 3 måneder nå. Er det noen som har funnet den?"
+   ── Proposed Fix ──
+   Type: Tighten regex
+   Suggested: Add negative lookahead to ReportFoundPet regex: (?!.*(?:lost|status)) — or add dedicated regex for LostPetStatus. Current regex: /(?:funnet|kommet til rette|kommet hjem|funnet igjen|er tilbake|kom tilbake|kom hjem).*(?:dyr|hund|katt|kjæledyr)|(?:dyr|hund|katt|kjæledyr).*(?:funnet/i
+
+⚠️ LostFoundResolved → ReportLostPet
+   Classification: AMBIGUOUS | Method: regex | Score: 1.000 | Tickets: 1
+   Reason: Regex match but weak label similarity (0.191): regex may be too broad, catching "LostFoundResolved" queries under "ReportLostPet"
+   Playbook: "Hvordan melde mitt kjæledyr savnet?" — ...
+   Example queries:
+     • "Vi fant hunden vår igjen! Kan dere fjerne savnet-meldingen?"
+   ── Proposed Fix ──
+   Type: Tighten regex
+   Suggested: Add negative lookahead to ReportLostPet regex: (?!.*(?:found|resolved)) — or add dedicated regex for LostFoundResolved. Current regex: /savnet|melde.*(?:savnet|borte)|(?:hund|katt|dyr|kjæledyr).*(?:borte|forsvunnet|rømte|stakk av|forsvant)|mistet.*(?:hund|katt|dyr)|rapportere.*(?:savne/i
+
+⚠️ AppCrashOnStartup → AppAccess
+   Classification: AMBIGUOUS | Method: regex | Score: 1.000 | Tickets: 1
+   Reason: Regex match but weak label similarity (0.268): regex may be too broad, catching "AppCrashOnStartup" queries under "AppAccess"
+   Playbook: "Hvem passer appen for?" — DyreID-appen er laget for hunde- og katteeiere som har registrert kjæledyret sitt i DyreID. For å få tilgang til appen, kan du laste den ned fra enten...
+   Example queries:
+     • "DyreID-appen krasjer hver gang jeg åpner den etter siste oppdatering. iPhone 13."
+   ── Proposed Fix ──
+   Type: Tighten regex
+   Suggested: Add negative lookahead to AppAccess regex: (?!.*(?:crash|startup)) — or add dedicated regex for AppCrashOnStartup. Current regex: /laste ned.*(?:app|dyreid)|installere.*(?:app|dyreid)|tilgang.*app|(?:app|dyreid).*nedlast|hente.*app|(?:app|dyreid).*(?:iphone|android)/i
+
+⚠️ LostFoundStatusInquiry → ReportFoundPet
+   Classification: AMBIGUOUS | Method: regex | Score: 1.000 | Tickets: 1
+   Reason: Regex match but weak label similarity (0.209): regex may be too broad, catching "LostFoundStatusInquiry" queries under "ReportFoundPet"
+   Playbook: "ReportFoundPet" — ...
+   Example queries:
+     • "Katten har vært savnet i 3 måneder nå. Er det noen som har funnet den?"
+   ── Proposed Fix ──
+   Type: Tighten regex
+   Suggested: Add negative lookahead to ReportFoundPet regex: (?!.*(?:lost|status|inquiry)) — or add dedicated regex for LostFoundStatusInquiry. Current regex: /(?:funnet|kommet til rette|kommet hjem|funnet igjen|er tilbake|kom tilbake|kom hjem).*(?:dyr|hund|katt|kjæledyr)|(?:dyr|hund|katt|kjæledyr).*(?:funnet/i
+
+⚠️ FamilyAccessRemove → FamilySharingNonFamily
+   Classification: AMBIGUOUS | Method: regex | Score: 1.000 | Tickets: 1
+   Reason: Regex match but weak label similarity (0.265): regex may be too broad, catching "FamilyAccessRemove" queries under "FamilySharingNonFamily"
+   Playbook: "Kan jeg dele tilgang med andre enn familien?" — Ja, du kan dele tilgang med personer utenom familien for en bestemt tidsperiode. Dette kan være nyttig hvis kjæledyret ditt skal på et pensjonat eller...
+   Example queries:
+     • "Jeg og min eks har gått fra hverandre. Kan dere fjerne <PERSON> tilgang til katten?"
+   ── Proposed Fix ──
+   Type: Tighten regex
+   Suggested: Add negative lookahead to FamilySharingNonFamily regex: (?!.*(?:access|remove)) — or add dedicated regex for FamilyAccessRemove. Current regex: /(?:dele|deling|familiedeling).*(?:venn|nabo|hundelufter|ikke.*familie|bare.*for.*familie)|(?:dele|deling|familiedeling).*andre(?!.*(?:gjøre|endre|tilg/i
+
+⚠️ RemoveFamilyMember → FamilySharingNonFamily
+   Classification: AMBIGUOUS | Method: regex | Score: 1.000 | Tickets: 1
+   Reason: Regex match but weak label similarity (0.193): regex may be too broad, catching "RemoveFamilyMember" queries under "FamilySharingNonFamily"
+   Playbook: "Kan jeg dele tilgang med andre enn familien?" — Ja, du kan dele tilgang med personer utenom familien for en bestemt tidsperiode. Dette kan være nyttig hvis kjæledyret ditt skal på et pensjonat eller...
+   Example queries:
+     • "Jeg og min eks har gått fra hverandre. Kan dere fjerne hans tilgang til katten?"
+   ── Proposed Fix ──
+   Type: Tighten regex
+   Suggested: Add negative lookahead to FamilySharingNonFamily regex: (?!.*(?:remove|member)) — or add dedicated regex for RemoveFamilyMember. Current regex: /(?:dele|deling|familiedeling).*(?:venn|nabo|hundelufter|ikke.*familie|bare.*for.*familie)|(?:dele|deling|familiedeling).*andre(?!.*(?:gjøre|endre|tilg/i
+
+✅ SmartTagTransfer → SmartTagActivation
+   Classification: CORRECT | Method: regex | Score: 1.000 | Tickets: 5
+   Reason: Regex match validated by label similarity (0.500): "SmartTagTransfer" → "SmartTagActivation"
+   Playbook: "SmartTagActivation" — ...
+   Example queries:
+     • "Kan jeg bruke Smart Tag fra gammel hund på ny valp?"
+     • "Kan jeg bruke Smart Tag fra gammel hund på ny valp?"
+     • "Kan jeg bruke Smart Tag fra gammel hund på ny valp?"
+     • "Kan jeg bruke Smart Tag fra gammel hund på ny valp?"
+     • "Kan jeg bruke Smart Tag fra gammel hund på ny valp?"
+
+✅ SmartTagReassign → SmartTagActivation
+   Classification: CORRECT | Method: regex | Score: 1.000 | Tickets: 3
+   Reason: Regex match validated by label similarity (0.522): "SmartTagReassign" → "SmartTagActivation"
+   Playbook: "SmartTagActivation" — ...
+   Example queries:
+     • "Kan jeg bruke Smart Tag fra gammel hund på ny valp?"
+     • "Kan jeg bruke Smart Tag fra gammel hund på ny valp?"
+     • "Kan jeg bruke Smart Tag fra gammel hund på ny valp?"
+
+✅ SmartTagTransferToNewPet → SmartTagActivation
+   Classification: CORRECT | Method: regex | Score: 1.000 | Tickets: 2
+   Reason: Regex match validated by label similarity (0.383): "SmartTagTransferToNewPet" → "SmartTagActivation"
+   Playbook: "SmartTagActivation" — ...
+   Example queries:
+     • "Kan jeg bruke Smart Tag fra gammel hund på ny valp?"
+     • "Kan jeg bruke Smart Tag fra gammel hund på ny valp?"
+
+✅ ForeignRegistrationStatus → ForeignRegistration
+   Classification: CORRECT | Method: regex | Score: 1.000 | Tickets: 1
+   Reason: Regex match validated by label similarity (0.704): "ForeignRegistrationStatus" → "ForeignRegistration"
+   Playbook: "Hvordan få dyret registrert i Norge?" — ...
+   Example queries:
+     • "Katt<br><br>Hei jeg har en katt som er chippet i utlandet (Kuwait) så jeg lurer på hvor lang tid det tar før hun blir om..."
+
+✅ OwnershipTransferDead → OwnershipTransferDead
+   Classification: CORRECT | Method: regex | Score: 1.000 | Tickets: 1
+   Reason: Regex match validated by label similarity (1.000): "OwnershipTransferDead" → "OwnershipTransferDead"
+   Playbook: "Eierskifte når eier er død" — ...
+   Example queries:
+     • "Min far har gått bort og etterlatt seg en hund. Hvordan overfører vi eierskapet?"
+
+✅ NewRegistration → NewRegistration
+   Classification: CORRECT | Method: fuzzy | Score: 1.000 | Tickets: 1
+   Reason: Strong fuzzy label match (1.000): naming variant of same intent
+   Playbook: "Registrere nytt dyr" — ...
+   Example queries:
+     • "Det ser ut som hunden min er registrert to ganger med ulike chipnumre. Kan dere rydde opp?"
+
+✅ SmartTagTransferToAnotherPet → SmartTagActivation
+   Classification: CORRECT | Method: regex | Score: 1.000 | Tickets: 1
+   Reason: Regex match validated by label similarity (0.357): "SmartTagTransferToAnotherPet" → "SmartTagActivation"
+   Playbook: "SmartTagActivation" — ...
+   Example queries:
+     • "Kan jeg bruke Smart Tag fra gammel hund på ny valp?"
+
+╔═══════════════════════════════════════════════════════════════╗
+║  PART 2: PRIORITIZED FIX LIST                                ║
+╚═══════════════════════════════════════════════════════════════╝
+
+  31 items need attention:
+
+  1. [INCORRECT] UpdateChipNumber → PhoneError (7 tickets)
+     Fix: tighten_regex
+  2. [INCORRECT] QRTagReplacement → FamilySharingPermissions (5 tickets)
+     Fix: tighten_regex
+  3. [INCORRECT] QRTagOrder → FamilySharingPermissions (3 tickets)
+     Fix: tighten_regex
+  4. [INCORRECT] OrderExtraQR → FamilySharingPermissions (2 tickets)
+     Fix: tighten_regex
+  5. [INCORRECT] PasswordReset → LoginIssue (2 tickets)
+     Fix: tighten_regex
+  6. [INCORRECT] CorrectRegisteredChip → PhoneError (2 tickets)
+     Fix: tighten_regex
+  7. [INCORRECT] QRTagReassign → QRScanResult (2 tickets)
+     Fix: tighten_regex
+  8. [INCORRECT] OrderExtraQRTag → FamilySharingPermissions (2 tickets)
+     Fix: tighten_regex
+  9. [INCORRECT] QRTagOrderExtra → QRScanResult (1 tickets)
+     Fix: tighten_regex
+  10. [INCORRECT] QRTagRelink → QRScanResult (1 tickets)
+     Fix: tighten_regex
+  11. [INCORRECT] RegistrationCorrection → PhoneError (1 tickets)
+     Fix: tighten_regex
+  12. [INCORRECT] ChipReplacement → PetNotInSystem (1 tickets)
+     Fix: tighten_regex
+  13. [INCORRECT] CancelSubscriptionDueToDeceasedPet → OwnershipTransferDead (1 tickets)
+     Fix: tighten_regex
+  14. [INCORRECT] QRTagReplace → FamilySharingPermissions (1 tickets)
+     Fix: tighten_regex
+  15. [INCORRECT] QRReassignTag → QRScanResult (1 tickets)
+     Fix: tighten_regex
+  16. [INCORRECT] QRTagPurchaseInfo → FamilySharingPermissions (1 tickets)
+     Fix: tighten_regex
+  17. [INCORRECT] QRTagDamaged → FamilySharingPermissions (1 tickets)
+     Fix: tighten_regex
+  18. [INCORRECT] QRAssignCorrection → QRScanResult (1 tickets)
+     Fix: tighten_regex
+  19. [INCORRECT] QRTagPurchase → FamilySharingPermissions (1 tickets)
+     Fix: tighten_regex
+  20. [INCORRECT] BreederRegisterLitter → OwnershipTransferWeb (1 tickets)
+     Fix: tighten_regex
+  21. [INCORRECT] CancelSubscription → OwnershipTransferDead (1 tickets)
+     Fix: tighten_regex
+  22. [INCORRECT] LostStatusCheck → ReportFoundPet (1 tickets)
+     Fix: tighten_regex
+  23. [INCORRECT] QROrder_ExtraTag → FamilySharingPermissions (1 tickets)
+     Fix: tighten_regex
+  24. [AMBIGUOUS] AppCrash → AppAccess (6 tickets)
+     Fix: tighten_regex
+  25. [AMBIGUOUS] FamilyAccessRemoval → FamilySharingNonFamily (2 tickets)
+     Fix: tighten_regex
+  26. [AMBIGUOUS] LostPetStatus → ReportFoundPet (2 tickets)
+     Fix: tighten_regex
+  27. [AMBIGUOUS] LostFoundResolved → ReportLostPet (1 tickets)
+     Fix: tighten_regex
+  28. [AMBIGUOUS] AppCrashOnStartup → AppAccess (1 tickets)
+     Fix: tighten_regex
+  29. [AMBIGUOUS] LostFoundStatusInquiry → ReportFoundPet (1 tickets)
+     Fix: tighten_regex
+  30. [AMBIGUOUS] FamilyAccessRemove → FamilySharingNonFamily (1 tickets)
+     Fix: tighten_regex
+  31. [AMBIGUOUS] RemoveFamilyMember → FamilySharingNonFamily (1 tickets)
+     Fix: tighten_regex
+
+╔═══════════════════════════════════════════════════════════════╗
+║  PART 3: PROMOTION PLAN (Top 15 Unmatched Intents)           ║
+╚═══════════════════════════════════════════════════════════════╝
+
+  Rank | Intent ID                      | Tickets | Category             | Type  | Endpoint | Action
+  ─────┼────────────────────────────────┼─────────┼──────────────────────┼───────┼──────────┼───────────────────────
+     1 | SmartTagNotifications          |      16 | Smart Tag            | INFO  | TODO     | CREATE NOW
+     2 | SmartTagBattery                |      14 | Smart Tag            | INFO  | TODO     | CREATE NOW
+     3 | AppLanguage                    |      10 | DyreID-appen         | INFO  | TODO     | CREATE NOW
+     4 | SubscriptionUpgrade            |       7 | Betaling/Abonnement  | INFO  | TODO     | CREATE NOW
+     5 | AppPushNotifications           |       6 | DyreID-appen         | INFO  | TODO     | CREATE NOW
+     6 | MergeDuplicateRegistrations    |       5 | Registrering         | TRANS | TODO     | CREATE NOW
+     7 | BillingInquiry                 |       5 | Betaling/Abonnement  | INFO  | TODO     | CREATE NOW
+     8 | AddPetsToSubscription          |       5 | Betaling/Abonnement  | TRANS | TODO     | CREATE NOW
+     9 | DuplicateRegistration          |       4 | Registrering         | INFO  | TODO     | WAIT
+    10 | DoubleChargeRefund             |       4 | Betaling/Abonnement  | TRANS | TODO     | WAIT
+    11 | AppNotifications               |       4 | DyreID-appen         | INFO  | TODO     | WAIT
+    12 | NonSupportedSpeciesInquiry     |       3 | Registrering         | INFO  | TODO     | WAIT
+    13 | UpgradeSubscription            |       3 | Betaling/Abonnement  | INFO  | TODO     | WAIT
+    14 | BillingRefund                  |       3 | Betaling/Abonnement  | TRANS | TODO     | WAIT
+    15 | PaymentRefund                  |       2 | Betaling/Abonnement  | TRANS | TODO     | WAIT
+
+  ── Detailed Promotion Candidates ──
+
+  1. SmartTagNotifications
+     Tickets: 16 | Confidence: 0.861 | Category: Smart Tag / Smart Tag Notifications
+     Type: Informational | Endpoint: TODO
+     Action: CREATE_CANONICAL_NOW
+     Reasoning: 16 tickets, high frequency—ready for canonical creation
+
+  2. SmartTagBattery
+     Tickets: 14 | Confidence: 0.866 | Category: Smart Tag / Smart Tag Battery
+     Type: Informational | Endpoint: TODO
+     Action: CREATE_CANONICAL_NOW
+     Reasoning: 14 tickets, high frequency—ready for canonical creation
+
+  3. AppLanguage
+     Tickets: 10 | Confidence: 0.895 | Category: DyreID-appen / App Language
+     Type: Informational | Endpoint: TODO
+     Action: CREATE_CANONICAL_NOW
+     Reasoning: 10 tickets, high frequency—ready for canonical creation
+
+  4. SubscriptionUpgrade
+     Tickets: 7 | Confidence: 0.847 | Category: Betaling/Abonnement / Subscription Upgrade
+     Type: Informational | Endpoint: TODO
+     Action: CREATE_CANONICAL_NOW
+     Reasoning: 7 tickets, high frequency—ready for canonical creation
+
+  5. AppPushNotifications
+     Tickets: 6 | Confidence: 0.883 | Category: DyreID-appen / App Push Notifications
+     Type: Informational | Endpoint: TODO
+     Action: CREATE_CANONICAL_NOW
+     Reasoning: 6 tickets, high frequency—ready for canonical creation
+
+  6. MergeDuplicateRegistrations
+     Tickets: 5 | Confidence: 0.872 | Category: Registrering / Merge Duplicate Registrations
+     Type: Transactional | Endpoint: TODO
+     Action: CREATE_CANONICAL_NOW
+     Reasoning: 5 tickets, high frequency—ready for canonical creation
+
+  7. BillingInquiry
+     Tickets: 5 | Confidence: 0.878 | Category: Betaling/Abonnement / Billing Inquiry
+     Type: Informational | Endpoint: TODO
+     Action: CREATE_CANONICAL_NOW
+     Reasoning: 5 tickets, high frequency—ready for canonical creation
+
+  8. AddPetsToSubscription
+     Tickets: 5 | Confidence: 0.874 | Category: Betaling/Abonnement / Add Pets To Subscription
+     Type: Transactional | Endpoint: TODO
+     Action: CREATE_CANONICAL_NOW
+     Reasoning: 5 tickets, high frequency—ready for canonical creation
+
+  9. DuplicateRegistration
+     Tickets: 4 | Confidence: 0.855 | Category: Registrering / Duplicate Registration
+     Type: Informational | Endpoint: TODO
+     Action: WAIT
+     Reasoning: Only 4 ticket(s)—wait for more data
+
+  10. DoubleChargeRefund
+     Tickets: 4 | Confidence: 0.950 | Category: Betaling/Abonnement / Double Charge Refund
+     Type: Transactional | Endpoint: TODO
+     Action: WAIT
+     Reasoning: Only 4 ticket(s)—wait for more data
+
+  11. AppNotifications
+     Tickets: 4 | Confidence: 0.850 | Category: DyreID-appen / App Notifications
+     Type: Informational | Endpoint: TODO
+     Action: WAIT
+     Reasoning: Only 4 ticket(s)—wait for more data
+
+  12. NonSupportedSpeciesInquiry
+     Tickets: 3 | Confidence: 0.937 | Category: Registrering / Non Supported Species Inquiry
+     Type: Informational | Endpoint: TODO
+     Action: WAIT
+     Reasoning: Only 3 ticket(s)—wait for more data
+
+  13. UpgradeSubscription
+     Tickets: 3 | Confidence: 0.847 | Category: Betaling/Abonnement / Upgrade Subscription
+     Type: Informational | Endpoint: TODO
+     Action: WAIT
+     Reasoning: Only 3 ticket(s)—wait for more data
+
+  14. BillingRefund
+     Tickets: 3 | Confidence: 0.913 | Category: Betaling/Abonnement / Billing Refund
+     Type: Transactional | Endpoint: TODO
+     Action: WAIT
+     Reasoning: Only 3 ticket(s)—wait for more data
+
+  15. PaymentRefund
+     Tickets: 2 | Confidence: 0.945 | Category: Betaling/Abonnement / Payment Refund
+     Type: Transactional | Endpoint: TODO
+     Action: WAIT
+     Reasoning: Only 2 ticket(s)—wait for more data
+
+  ── Remaining Unmatched (not in top 15) ──
+  · SmartTagBatteryInfo (2 tickets) — wait
+  · AddPetToSubscription (2 tickets) — wait
+  · CheckPaymentMethod (2 tickets) — wait
+  · PushNotificationsIssue (2 tickets) — wait
+  · FoundOtherSpecies (2 tickets) — wait
+  · SubscriptionRefund (2 tickets) — wait
+  · DuplicateRegistrationMerge (2 tickets) — wait
+  · PushNotifications (2 tickets) — wait
+  · MergeRegistrations (2 tickets) — wait
+  · AppLanguageChange (2 tickets) — wait
+  · RegistrationPaymentIssue (2 tickets) — wait
+  · SubscriptionChange (2 tickets) — wait
+  · NonSupportedSpecies (2 tickets) — wait
+  · PaymentMethodInquiry (1 tickets) — wait
+  · TwoFactorQuery (1 tickets) — wait
+  · RefundRequest (1 tickets) — wait
+  · PaymentInquiry (1 tickets) — wait
+  · DuplicateChargeRefund (1 tickets) — wait
+  · TwoFactorAuthQuestion (1 tickets) — wait
+  · PaymentIssue (1 tickets) — wait
+  · FoundNonDogCat (1 tickets) — wait
+  · SubscriptionAddPet (1 tickets) — wait
+  · BillingDoubleCharge (1 tickets) — wait
+  · PaymentFailureRegistration (1 tickets) — wait
+  · AppLanguageSetting (1 tickets) — wait
+  · SubscriptionBilling (1 tickets) — wait
+  · TwoFactorInfo (1 tickets) — wait
+  · FoundNonSupportedSpecies (1 tickets) — wait
+  · AddAnimalsToSubscription (1 tickets) — wait
+  · PushNotificationIssue (1 tickets) — wait
+  · InvoiceQuery (1 tickets) — wait
+  · AppSettings (1 tickets) — wait
+  · GeneralInquiry (1 tickets) — merge_with_existing → GeneralInquiry
+  · NewRegistration_SpeciesUnsupported (1 tickets) — wait
+  · RefundDoubleCharge (1 tickets) — wait
+  · PaymentFailureDuringRegistration (1 tickets) — wait
+  · InvoiceQuery_AvtaleGiro (1 tickets) — wait
+  · SubscriptionDoubleCharge (1 tickets) — wait
+  · DoubleCharge (1 tickets) — wait
+  · RegistrationPaymentFailure (1 tickets) — wait
+  · AppChangeLanguage (1 tickets) — wait
+  · TwoFactorAuth (1 tickets) — wait
+  · SubscriptionCoverage (1 tickets) — wait
+  · SubscriptionDoubleCharge_Refund (1 tickets) — wait
+  · FoundNonSupportedAnimal (1 tickets) — wait
+  · InvoiceNotReceived (1 tickets) — wait
+
+═══════════════════════════════════════════════════════════════
+  END OF REPORT
+═══════════════════════════════════════════════════════════════

@@ -432,6 +432,41 @@ export async function registerRoutes(
     res.json(lastDiscoveryResult);
   });
 
+  // ─── MATCH CORRECTNESS AUDIT ────────────────────────────────────
+  let lastAuditResult: any = null;
+
+  app.post("/api/admin/match-audit", async (req, res) => {
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+    });
+
+    try {
+      const { runMatchCorrectnessAudit, formatAuditReport } = await import("./match-audit");
+      const result = await runMatchCorrectnessAudit((message, progress) => {
+        res.write(`data: ${JSON.stringify({ message, progress })}\n\n`);
+      });
+
+      lastAuditResult = result;
+      const report = formatAuditReport(result);
+
+      res.write(`data: ${JSON.stringify({ done: true, result, report })}\n\n`);
+    } catch (error: any) {
+      res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+    }
+    res.end();
+  });
+
+  app.get("/api/admin/match-audit/results", async (_req, res) => {
+    if (!lastAuditResult) {
+      return res.json({ status: "no_results", message: "No match audit has been run yet." });
+    }
+    const { formatAuditReport } = await import("./match-audit");
+    const report = formatAuditReport(lastAuditResult);
+    res.json({ ...lastAuditResult, report });
+  });
+
   // ─── UNCATEGORIZED THEMES ────────────────────────────────────────
   app.get("/api/training/uncategorized-themes", async (_req, res) => {
     try {
