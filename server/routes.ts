@@ -1950,6 +1950,23 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/reports/pureservice-1000", async (_req, res) => {
+    try {
+      const fs = await import("fs");
+      const path = await import("path");
+      const filePath = path.default.join(process.cwd(), "client", "public", "reports", "pureservice-1000-cases-report.json");
+      if (!fs.default.existsSync(filePath)) {
+        return res.status(404).json({ error: "Report not found" });
+      }
+      res.setHeader("Content-Type", "application/json");
+      res.setHeader("Content-Disposition", "attachment; filename=pureservice-1000-cases-report.json");
+      const fileStream = fs.default.createReadStream(filePath);
+      fileStream.pipe(res);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.get("/api/admin/health", async (req, res) => {
     try {
       const periodMonths = parseInt(req.query.period as string) || 12;
