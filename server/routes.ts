@@ -467,6 +467,44 @@ export async function registerRoutes(
     res.json({ ...lastAuditResult, report });
   });
 
+  // ─── CASE ESCALATION ─────────────────────────────────────────────
+  app.get("/api/admin/escalations", async (_req, res) => {
+    try {
+      const { getEscalations } = await import("./case-escalation");
+      const limit = parseInt(String(_req.query.limit)) || 50;
+      const offset = parseInt(String(_req.query.offset)) || 0;
+      const items = await getEscalations(limit, offset);
+      res.json(items);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/admin/escalation-stats", async (_req, res) => {
+    try {
+      const { getEscalationStats } = await import("./case-escalation");
+      const stats = await getEscalationStats();
+      res.json(stats);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.patch("/api/admin/escalations/:id/status", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { status, errorMessage } = req.body;
+      if (!status || !["pending", "posted", "failed", "cancelled"].includes(status)) {
+        return res.status(400).json({ error: "Invalid status" });
+      }
+      const { updateEscalationStatus } = await import("./case-escalation");
+      await updateEscalationStatus(id, status, errorMessage);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // ─── UNCATEGORIZED THEMES ────────────────────────────────────────
   app.get("/api/training/uncategorized-themes", async (_req, res) => {
     try {

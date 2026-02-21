@@ -972,6 +972,9 @@ export default function Dashboard() {
           <TabsTrigger value="intent-discovery" data-testid="tab-intent-discovery">
             Intent Discovery
           </TabsTrigger>
+          <TabsTrigger value="escalations" data-testid="tab-escalations">
+            Case Escalation
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="pipeline" className="space-y-4 mt-4">
@@ -1755,6 +1758,10 @@ export default function Dashboard() {
 
         <TabsContent value="intent-discovery" className="mt-4">
           <IntentDiscoveryTab />
+        </TabsContent>
+
+        <TabsContent value="escalations" className="mt-4">
+          <CaseEscalationTab />
         </TabsContent>
       </Tabs>
     </div>
@@ -4872,6 +4879,197 @@ function IntentDiscoveryTab() {
           </CardContent>
         </Card>
       )}
+    </div>
+  );
+}
+
+function CaseEscalationTab() {
+  const statsQuery = useQuery<{
+    total: number;
+    pending: number;
+    posted: number;
+    failed: number;
+    today: number;
+    featureEnabled: boolean;
+    postEnabled: boolean;
+  }>({ queryKey: ["/api/admin/escalation-stats"] });
+
+  const escalationsQuery = useQuery<any[]>({ queryKey: ["/api/admin/escalations"] });
+
+  const stats = statsQuery.data;
+  const escalations = escalationsQuery.data || [];
+
+  const statusMutation = useMutation({
+    mutationFn: async ({ id, status }: { id: number; status: string }) => {
+      await apiRequest("PATCH", `/api/admin/escalations/${id}/status`, { status });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/escalations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/escalation-stats"] });
+    },
+  });
+
+  return (
+    <div className="space-y-4">
+      <Card className="border-2 border-amber-500/40 bg-amber-50/30 dark:bg-amber-950/10">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-amber-100 dark:bg-amber-900/30 rounded-lg">
+                <AlertTriangle className="h-5 w-5 text-amber-600" />
+              </div>
+              <div>
+                <CardTitle className="text-lg">Case Escalation — Fase A (Staging)</CardTitle>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  Funksjonen er aktiv i chatboten, men poster <strong>ikke</strong> til Pureservice.
+                  Alle eskaleringer lagres lokalt i outbox for inspeksjon.
+                </p>
+              </div>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="p-3 bg-background rounded-lg border">
+              <div className="flex items-center gap-2 mb-1">
+                <div className={`h-2 w-2 rounded-full ${stats?.featureEnabled ? "bg-green-500" : "bg-red-500"}`} />
+                <span className="text-xs text-muted-foreground">Escalation</span>
+              </div>
+              <span className="text-sm font-medium" data-testid="status-escalation-enabled">{stats?.featureEnabled ? "Aktiv" : "Deaktivert"}</span>
+            </div>
+            <div className="p-3 bg-background rounded-lg border">
+              <div className="flex items-center gap-2 mb-1">
+                <div className={`h-2 w-2 rounded-full ${stats?.postEnabled ? "bg-green-500" : "bg-amber-500"}`} />
+                <span className="text-xs text-muted-foreground">Pureservice POST</span>
+              </div>
+              <span className="text-sm font-medium" data-testid="status-pureservice-post">{stats?.postEnabled ? "Aktiv" : "Kun logging"}</span>
+            </div>
+            <div className="p-3 bg-background rounded-lg border">
+              <span className="text-xs text-muted-foreground block mb-1">Totalt i outbox</span>
+              <span className="text-lg font-bold" data-testid="text-total-escalations">{stats?.total || 0}</span>
+            </div>
+            <div className="p-3 bg-background rounded-lg border">
+              <span className="text-xs text-muted-foreground block mb-1">I dag</span>
+              <span className="text-lg font-bold">{stats?.today || 0}</span>
+            </div>
+          </div>
+
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            <div className="flex items-center gap-2 text-sm">
+              <Badge variant="outline" className="bg-yellow-50 text-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-400">Venter</Badge>
+              <span className="font-medium">{stats?.pending || 0}</span>
+            </div>
+            <div className="flex items-center gap-2 text-sm">
+              <Badge variant="outline" className="bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400">Postet</Badge>
+              <span className="font-medium">{stats?.posted || 0}</span>
+            </div>
+            <div className="flex items-center gap-2 text-sm">
+              <Badge variant="outline" className="bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400">Feilet</Badge>
+              <span className="font-medium">{stats?.failed || 0}</span>
+            </div>
+          </div>
+
+          <div className="mt-4 p-3 bg-muted/50 rounded-lg border border-dashed">
+            <p className="text-xs text-muted-foreground">
+              <strong>Fase-plan:</strong> Fase A (nå) = logg alt, ingen POST. → Fase B (etter pilotperiode) = slå på POST til Pureservice. → Fase C = full produksjon med auto-tagging.
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              <strong>ENV-flagg:</strong> ENABLE_CASE_ESCALATION={stats?.featureEnabled ? "true" : "false"} | ENABLE_PURESERVICE_POST={stats?.postEnabled ? "true" : "false"}
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base">Escalation Outbox</CardTitle>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                queryClient.invalidateQueries({ queryKey: ["/api/admin/escalations"] });
+                queryClient.invalidateQueries({ queryKey: ["/api/admin/escalation-stats"] });
+              }}
+              data-testid="btn-refresh-escalations"
+            >
+              <RefreshCw className="h-3.5 w-3.5 mr-1" />
+              Oppdater
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {escalationsQuery.isLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-5 w-5 animate-spin mr-2" />
+              <span className="text-sm text-muted-foreground">Laster...</span>
+            </div>
+          ) : escalations.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-40" />
+              <p className="text-sm">Ingen eskaleringer i outbox ennå.</p>
+              <p className="text-xs mt-1">Eskaleringer oppstår når en bruker svarer «Nei» på «Løste dette saken?»</p>
+            </div>
+          ) : (
+            <ScrollArea className="max-h-[600px]">
+              <div className="space-y-3">
+                {escalations.map((e: any) => (
+                  <Card key={e.id} className="border" data-testid={`escalation-item-${e.id}`}>
+                    <CardContent className="p-3">
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-mono text-muted-foreground">#{e.id}</span>
+                          <Badge variant={
+                            e.status === "pending" ? "secondary" :
+                            e.status === "posted" ? "default" :
+                            e.status === "failed" ? "destructive" : "outline"
+                          }>
+                            {e.status}
+                          </Badge>
+                          {e.intent_id && (
+                            <Badge variant="outline" className="text-xs">{e.intent_id}</Badge>
+                          )}
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                          {e.created_at ? new Date(e.created_at).toLocaleString("nb-NO") : ""}
+                        </span>
+                      </div>
+
+                      <p className="text-sm font-medium mb-1 truncate" title={e.subject}>{e.subject}</p>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                        <div>E-post: <span className="font-mono">{e.user_email}</span></div>
+                        <div>Match: {e.matched_by || "N/A"} ({e.semantic_score?.toFixed(3) || "–"})</div>
+                        <div>Kategori: {e.category1_id || "GeneralInquiry"}{e.category2_id ? ` > ${e.category2_id}` : ""}</div>
+                        <div>Samtale: #{e.conversation_id}</div>
+                      </div>
+
+                      {e.status === "pending" && (
+                        <div className="flex items-center gap-2 mt-2 pt-2 border-t">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-xs h-7"
+                            onClick={() => statusMutation.mutate({ id: e.id, status: "cancelled" })}
+                            disabled={statusMutation.isPending}
+                            data-testid={`btn-cancel-escalation-${e.id}`}
+                          >
+                            <XCircle className="h-3 w-3 mr-1" />
+                            Avbryt
+                          </Button>
+                        </div>
+                      )}
+
+                      {e.error_message && (
+                        <p className="text-xs text-red-500 mt-2">{e.error_message}</p>
+                      )}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </ScrollArea>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

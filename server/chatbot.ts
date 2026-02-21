@@ -10,6 +10,7 @@ import { findSemanticMatch, findTopNSemanticMatches, getApprovedIntentIds, getIn
 import { recordPilotMatch, isPilotEnabled } from "./pilot-stats";
 import { ensureRuntimeIntentsInCanonical, validateRuntimeIntents, getApprovedIntentSet } from "./canonical-intents";
 import { isNormalizationEnabled, normalizeInput, fuzzyLabelFallback, logFuzzyMatch } from "./input-normalization";
+import { isEscalationEnabled, validateEmail, createEscalation, detectFrustration } from "./case-escalation";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -54,6 +55,15 @@ interface SessionState {
   chipLookupResult?: ChipLookupResult;
   directIntentFlow?: string;
   loginHelpStep?: "awaiting_phone" | "awaiting_sms_confirm";
+  escalationFlow?: "awaiting_resolution_feedback" | "awaiting_email" | "completed";
+  escalationContext?: {
+    intentId: string | null;
+    matchedBy: string | null;
+    semanticScore: number | null;
+    triggerType: string;
+  };
+  consecutiveNoProgress?: number;
+  hasEscalated?: boolean;
 }
 
 const sessionStates = new Map<number, SessionState>();
@@ -2491,6 +2501,161 @@ export async function* streamChatResponse(
     }
   }
 
+  if (session.escalationFlow) {
+    const lowerMsg = userMessage.toLowerCase().trim();
+
+    if (session.escalationFlow === "awaiting_resolution_feedback") {
+      const isYes = /^(ja|yes|jep|japp|jepp|det stemmer|løst|takk|ok|👍)$/i.test(lowerMsg);
+      const isNo = /^(nei|no|nope|ikke|niks|👎)$/i.test(lowerMsg);
+      const isBlockTrigger = session.escalationContext?.triggerType === "block";
+
+      if (isBlockTrigger) {
+        if (isYes) {
+          session.escalationFlow = "awaiting_email";
+          const emailCtx = storedUserContext?.Email || storedUserContext?.email;
+          let emailPrompt: string;
+          if (emailCtx) {
+            emailPrompt = `Skal jeg bruke **${emailCtx}**? Skriv e-postadressen du vil bruke, eller bekreft med "ja".`;
+            session.collectedData["suggestedEmail"] = emailCtx;
+          } else {
+            emailPrompt = "Hvilken e-postadresse skal kobles til saken?";
+          }
+          await storage.createMessage({ conversationId, role: "assistant", content: emailPrompt, metadata: { model: "escalation-email-prompt" } });
+          yield emailPrompt;
+          return;
+        } else if (isNo) {
+          session.escalationFlow = undefined;
+          session.escalationContext = undefined;
+          const declineResponse = "Greit! Er det noe annet jeg kan hjelpe med?";
+          await storage.createMessage({ conversationId, role: "assistant", content: declineResponse, metadata: { model: "escalation-declined" } });
+          yield declineResponse;
+          return;
+        }
+      } else {
+        if (isYes) {
+          session.escalationFlow = undefined;
+          session.escalationContext = undefined;
+          const feedbackResponse = "Flott, glad jeg kunne hjelpe! Er det noe annet du lurer på?";
+          const msg = await storage.createMessage({
+            conversationId,
+            role: "assistant",
+            content: feedbackResponse,
+            metadata: { model: "escalation-feedback", resolved: true, intentId: session.intent },
+          });
+          await storage.logChatbotInteraction({
+            conversationId,
+            messageId: msg.id,
+            userQuestion: userMessage,
+            botResponse: feedbackResponse,
+            responseMethod: "escalation-resolved",
+            matchedIntent: session.intent || null,
+            actionsExecuted: null,
+            authenticated: isAuthenticated,
+            responseTimeMs: Date.now() - startTime,
+          });
+          yield feedbackResponse;
+          return;
+        } else if (isNo) {
+          if (!isEscalationEnabled()) {
+            session.escalationFlow = undefined;
+            const fallback = "Beklager at det ikke løste saken. Kontakt DyreID kundeservice på **support@dyreid.no** for videre hjelp.";
+            await storage.createMessage({ conversationId, role: "assistant", content: fallback, metadata: { model: "escalation-disabled" } });
+            yield fallback;
+            return;
+          }
+          session.escalationFlow = "awaiting_email";
+          const emailCtx = storedUserContext?.Email || storedUserContext?.email;
+          let emailPrompt: string;
+          if (emailCtx) {
+            emailPrompt = `Ok, jeg kan opprette en supportsak for deg.\n\nSkal jeg bruke **${emailCtx}**? Skriv e-postadressen du vil bruke, eller bekreft med "ja".`;
+            session.collectedData["suggestedEmail"] = emailCtx;
+          } else {
+            emailPrompt = "Ok, jeg kan opprette en supportsak for deg.\n\nHvilken e-postadresse skal kobles til saken?";
+          }
+          await storage.createMessage({ conversationId, role: "assistant", content: emailPrompt, metadata: { model: "escalation-email-prompt" } });
+          yield emailPrompt;
+          return;
+        }
+      }
+      session.escalationFlow = undefined;
+      session.escalationContext = undefined;
+    }
+
+    if (session.escalationFlow === "awaiting_email") {
+      const suggestedEmail = session.collectedData["suggestedEmail"];
+      let email: string;
+      const confirmsExisting = /^(ja|yes|ok|bekreft|stemmer)$/i.test(lowerMsg);
+      if (confirmsExisting && suggestedEmail) {
+        email = suggestedEmail;
+      } else {
+        const emailMatch = userMessage.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/);
+        if (emailMatch) {
+          email = emailMatch[0];
+        } else {
+          const retryPrompt = "Jeg trenger en gyldig e-postadresse for å opprette saken. Vennligst skriv e-postadressen din:";
+          await storage.createMessage({ conversationId, role: "assistant", content: retryPrompt, metadata: { model: "escalation-email-retry" } });
+          yield retryPrompt;
+          return;
+        }
+      }
+
+      if (!validateEmail(email)) {
+        const retryPrompt = "E-postadressen ser ikke riktig ut. Vennligst skriv en gyldig e-postadresse:";
+        await storage.createMessage({ conversationId, role: "assistant", content: retryPrompt, metadata: { model: "escalation-email-invalid" } });
+        yield retryPrompt;
+        return;
+      }
+
+      const ctx = session.escalationContext;
+      const result = await createEscalation({
+        conversationId,
+        intentId: ctx?.intentId || session.intent || null,
+        matchedBy: ctx?.matchedBy || null,
+        semanticScore: ctx?.semanticScore || null,
+        userEmail: email,
+        productContext: session.collectedData["petName"] ? `Dyr: ${session.collectedData["petName"]}` : undefined,
+      });
+
+      session.escalationFlow = "completed";
+      session.hasEscalated = true;
+      delete session.collectedData["suggestedEmail"];
+
+      let responseText: string;
+      if (result.success) {
+        responseText = `Supportsaken er opprettet (ref: #${result.escalationId}). Kundeservice vil kontakte deg på **${email}**.\n\nEr det noe annet jeg kan hjelpe med?`;
+      } else if (result.isDuplicate) {
+        responseText = `${result.error}\n\nKundeservice jobber allerede med saken din. Er det noe annet jeg kan hjelpe med?`;
+      } else {
+        responseText = result.error || "Beklager, noe gikk galt. Kontakt **support@dyreid.no** direkte.";
+      }
+
+      const msg = await storage.createMessage({
+        conversationId,
+        role: "assistant",
+        content: responseText,
+        metadata: {
+          model: "escalation-created",
+          escalationId: result.escalationId,
+          escalationSuccess: result.success,
+          isDuplicate: result.isDuplicate,
+        },
+      });
+      await storage.logChatbotInteraction({
+        conversationId,
+        messageId: msg.id,
+        userQuestion: userMessage,
+        botResponse: responseText,
+        responseMethod: "escalation-create",
+        matchedIntent: ctx?.intentId || session.intent || null,
+        actionsExecuted: result.success ? [{ action: "create_escalation", success: true, escalationId: result.escalationId }] : null,
+        authenticated: isAuthenticated,
+        responseTimeMs: Date.now() - startTime,
+      });
+      yield responseText;
+      return;
+    }
+  }
+
   if (session.chipLookupFlow) {
     const newTopicIntent = quickIntentMatch(userMessage);
     const isCategorySwitch = detectCategoryMenu(userMessage) !== null;
@@ -2805,6 +2970,21 @@ export async function* streamChatResponse(
         .set({ metadata: { ...metadata, interactionId: interaction.id } })
         .where(eq(messages.id, msg.id));
 
+      if (isEscalationEnabled() && !session.hasEscalated) {
+        const justCompleted = !!playbookResponse.actionExecuted;
+        const justAnswered = !playbookResponse.requiresLogin && !justCompleted;
+        if (justAnswered || justCompleted) {
+          session.escalationFlow = "awaiting_resolution_feedback";
+          session.escalationContext = {
+            intentId: intent || null,
+            matchedBy: method || null,
+            semanticScore: matchDebug?.semanticScore || null,
+            triggerType: justCompleted ? "post_action" : "post_answer",
+          };
+          responseText += "\n\n---\n**Løste dette saken?** (Ja / Nei)";
+        }
+      }
+
       yield responseText;
       return;
     }
@@ -2932,6 +3112,17 @@ export async function* streamChatResponse(
     .update(messages)
     .set({ metadata: { ...blockMetadata, interactionId: interaction.id } })
     .where(eq(messages.id, msg.id));
+
+  if (isEscalationEnabled() && !session.hasEscalated) {
+    session.escalationFlow = "awaiting_resolution_feedback";
+    session.escalationContext = {
+      intentId: matchDebug.topIntentId || null,
+      matchedBy: matchDebug.matchedBy || null,
+      semanticScore: matchDebug.semanticScore || null,
+      triggerType: "block",
+    };
+    blockResponse += "\n\n---\n**Vil du at jeg oppretter en supportsak?** (Ja / Nei)";
+  }
 
   yield blockResponse;
 }

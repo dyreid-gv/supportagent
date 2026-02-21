@@ -27,7 +27,7 @@ The client is a React single-page application with a sidebar navigation for Dash
 
 **Technical Implementations & Feature Specifications:**
 - **Training Agent Workflows**: Includes Pureservice ticket ingestion, GDPR scrubbing, AI-driven Help Center category mapping, uncategorized ticket analysis with an Intent Normalization Layer for semantic comparison and auto-mapping/new candidate flagging, intent classification, resolution extraction, uncertainty detection, and a Playbook Builder.
-- **Chatbot Features**: OTP authentication with session management, a modern chat UI, chip lookup with SMS functionality for ownership transfer contact (sandbox guarded), quick intent matching via regex, contextual understanding, action execution (e.g., marking lost/found pets), streaming responses, and a feedback system.
+- **Chatbot Features**: OTP authentication with session management, a modern chat UI, chip lookup with SMS functionality for ownership transfer contact (sandbox guarded), quick intent matching via regex, contextual understanding, action execution (e.g., marking lost/found pets), streaming responses, feedback system, and **Case Escalation** ("Løste dette saken?" flow with email collection, GDPR-scrubbed transcript, dedupe/rate-limit, and Pureservice outbox).
 - **System Design Choices**: Drizzle ORM manages 14 tables. Centralized intent definitions. Batch processing for efficiency. Combined API endpoints for analysis. Dynamic pricing via a `service_prices` table. Autoreply detection, dialog pattern analysis, reclassification, and resolution quality assessment. Real Min Side integration with HTML parsing and session caching.
 
 ## External Dependencies

@@ -47,3 +47,5 @@ integrations = ["javascript_anthropic_ai_integrations:2.0.0", "javascript_openai
 [userenv.shared]
 ENABLE_INPUT_NORMALIZATION = "true"
 RUNTIME_DEBUG = "true"
+ENABLE_CASE_ESCALATION = "true"
+ENABLE_PURESERVICE_POST = "false"

@@ -440,6 +440,30 @@ export const discoveredClusters = pgTable("discovered_clusters", {
 
 export const insertDiscoveredClusterSchema = createInsertSchema(discoveredClusters).omit({ id: true });
 
+export const escalationsOutbox = pgTable("escalations_outbox", {
+  id: serial("id").primaryKey(),
+  conversationId: integer("conversation_id").notNull(),
+  sessionId: text("session_id"),
+  intentId: text("intent_id"),
+  matchedBy: text("matched_by"),
+  semanticScore: real("semantic_score"),
+  userEmail: text("user_email").notNull(),
+  subject: text("subject").notNull(),
+  description: text("description").notNull(),
+  category1Id: text("category1_id"),
+  category2Id: text("category2_id"),
+  category3Id: text("category3_id"),
+  pureserviceTicketId: text("pureservice_ticket_id"),
+  status: text("status").default("pending").notNull(),
+  chatTranscript: text("chat_transcript"),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
+  postedAt: timestamp("posted_at"),
+  errorMessage: text("error_message"),
+});
+
+export const insertEscalationSchema = createInsertSchema(escalationsOutbox).omit({ id: true, createdAt: true, postedAt: true });
+
 export const insertChatbotInteractionSchema = createInsertSchema(chatbotInteractions).omit({ id: true });
 export const insertHelpCenterArticleSchema = createInsertSchema(helpCenterArticles).omit({ id: true });
 export const insertResponseTemplateSchema = createInsertSchema(responseTemplates).omit({ id: true });
@@ -499,3 +523,5 @@ export type CanonicalIntent = typeof canonicalIntents.$inferSelect;
 export type InsertCanonicalIntent = z.infer<typeof insertCanonicalIntentSchema>;
 export type DiscoveredCluster = typeof discoveredClusters.$inferSelect;
 export type InsertDiscoveredCluster = z.infer<typeof insertDiscoveredClusterSchema>;
+export type EscalationOutbox = typeof escalationsOutbox.$inferSelect;
+export type InsertEscalation = z.infer<typeof insertEscalationSchema>;
