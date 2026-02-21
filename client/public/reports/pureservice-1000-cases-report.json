@@ -1,0 +1,575 @@
+{
+  "report": {
+    "title": "DyreID Support AI — 1000 Pureservice Cases Analysis",
+    "generated": "2026-02-21",
+    "dataSource": "Pureservice API + OpenAI Combined Batch Analysis"
+  },
+  "processingSummary": {
+    "totalTickets": 1000,
+    "completed": 1000,
+    "pending": 0,
+    "failed": 0,
+    "completionRate": 100,
+    "uniquePureserviceCategories": 9,
+    "mappedHelpCenterCategories": 14
+  },
+  "healthScore": {
+    "overall": 60,
+    "maxScore": 100,
+    "confidenceIntervals": {
+      "coverage": { "value": 75.1, "lower": 72.3, "upper": 77.7, "margin": 2.7 },
+      "autoResolution": { "value": 0, "lower": 0, "upper": 0.4, "margin": 0.2 },
+      "escalation": { "value": 0, "lower": 0, "upper": 0.3, "margin": 0.2 }
+    },
+    "baseline": {
+      "sampleSize": 200,
+      "healthScore": 58,
+      "coverageScore": 64.6,
+      "autoResolutionRate": 0,
+      "escalationRate": 0
+    },
+    "delta": {
+      "healthScore": 2,
+      "coverageScore": 10.5,
+      "autoResolutionRate": 0,
+      "escalationRate": 0,
+      "additionalSamples": 800
+    },
+    "breakdown": {
+      "autoResolution": { "rate": 0, "score": 0, "weight": 0.35 },
+      "reopenRate": { "rate": 0, "score": 100, "weight": 0.25, "note": "Reopen-data ikke tilgjengelig ennå" },
+      "coverage": { "rate": 0.751, "score": 75, "weight": 0.2 },
+      "escalation": { "rate": 0, "score": 100, "weight": 0.2 }
+    }
+  },
+  "intentClassificationQuality": {
+    "averageConfidence": 0.906,
+    "highConfidence": { "count": 934, "threshold": ">=0.8", "percentage": 93.4 },
+    "mediumConfidence": { "count": 64, "threshold": "0.5-0.8", "percentage": 6.4 },
+    "lowConfidence": { "count": 2, "threshold": "<0.5", "percentage": 0.2 },
+    "resolutionExtracted": { "count": 1000, "percentage": 100 },
+    "paymentRequired": { "count": 107, "percentage": 10.7 },
+    "autoCloseable": { "count": 585, "percentage": 58.5 },
+    "newIntentsDiscovered": { "count": 219, "percentage": 21.9 }
+  },
+  "intentDistribution": [
+    { "intent": "OwnershipTransferWeb", "tickets": 68, "avgConfidence": 0.914, "isCanonical": true },
+    { "intent": "NewRegistration", "tickets": 61, "avgConfidence": 0.903, "isCanonical": true },
+    { "intent": "LoginProblem", "tickets": 42, "avgConfidence": 0.928, "isCanonical": true },
+    { "intent": "ReportLostPet", "tickets": 39, "avgConfidence": 0.970, "isCanonical": true },
+    { "intent": "FamilySharing", "tickets": 38, "avgConfidence": 0.930, "isCanonical": true },
+    { "intent": "GeneralInquiry", "tickets": 38, "avgConfidence": 0.720, "isCanonical": true },
+    { "intent": "ReportFoundPet", "tickets": 36, "avgConfidence": 0.954, "isCanonical": true },
+    { "intent": "AppAccess", "tickets": 33, "avgConfidence": 0.843, "isCanonical": true },
+    { "intent": "LoginIssue", "tickets": 32, "avgConfidence": 0.894, "isCanonical": true },
+    { "intent": "ForeignRegistration", "tickets": 30, "avgConfidence": 0.932, "isCanonical": true },
+    { "intent": "QRTagLost", "tickets": 27, "avgConfidence": 0.942, "isCanonical": true },
+    { "intent": "SubscriptionComparison", "tickets": 25, "avgConfidence": 0.862, "isCanonical": true },
+    { "intent": "AddContactInfo", "tickets": 23, "avgConfidence": 0.937, "isCanonical": true },
+    { "intent": "MissingPetProfile", "tickets": 22, "avgConfidence": 0.939, "isCanonical": true },
+    { "intent": "OwnershipTransferDead", "tickets": 21, "avgConfidence": 0.965, "isCanonical": true },
+    { "intent": "GDPRDelete", "tickets": 21, "avgConfidence": 0.936, "isCanonical": true },
+    { "intent": "SmartTagConnection", "tickets": 21, "avgConfidence": 0.928, "isCanonical": true },
+    { "intent": "QRTagActivation", "tickets": 21, "avgConfidence": 0.963, "isCanonical": true },
+    { "intent": "OwnershipTransferCost", "tickets": 19, "avgConfidence": 0.969, "isCanonical": true },
+    { "intent": "SmartTagPosition", "tickets": 19, "avgConfidence": 0.926, "isCanonical": true },
+    { "intent": "FamilySharingRequest", "tickets": 17, "avgConfidence": 0.914, "isCanonical": true },
+    { "intent": "SmartTagNotifications", "tickets": 16, "avgConfidence": 0.861, "isCanonical": false },
+    { "intent": "SmartTagBattery", "tickets": 14, "avgConfidence": 0.866, "isCanonical": false },
+    { "intent": "CancelSubscription", "tickets": 11, "avgConfidence": 0.966, "isCanonical": true },
+    { "intent": "LostFoundInfo", "tickets": 11, "avgConfidence": 0.886, "isCanonical": true },
+    { "intent": "AppLanguage", "tickets": 10, "avgConfidence": 0.895, "isCanonical": false },
+    { "intent": "WrongInfo", "tickets": 10, "avgConfidence": 0.884, "isCanonical": true },
+    { "intent": "QRUpdateContact", "tickets": 8, "avgConfidence": 0.910, "isCanonical": true },
+    { "intent": "QRTagReplacement", "tickets": 7, "avgConfidence": 0.904, "isCanonical": false },
+    { "intent": "OwnershipTransferApp", "tickets": 7, "avgConfidence": 0.861, "isCanonical": true },
+    { "intent": "InactiveRegistration", "tickets": 7, "avgConfidence": 0.883, "isCanonical": true },
+    { "intent": "SubscriptionUpgrade", "tickets": 7, "avgConfidence": 0.847, "isCanonical": false },
+    { "intent": "UpdateChipNumber", "tickets": 7, "avgConfidence": 0.887, "isCanonical": false },
+    { "intent": "AddPetsToSubscription", "tickets": 7, "avgConfidence": 0.896, "isCanonical": false },
+    { "intent": "AppCrash", "tickets": 6, "avgConfidence": 0.875, "isCanonical": false },
+    { "intent": "FamilySharingRequirement", "tickets": 6, "avgConfidence": 0.908, "isCanonical": true },
+    { "intent": "AppPushNotifications", "tickets": 6, "avgConfidence": 0.883, "isCanonical": false },
+    { "intent": "MergeDuplicateRegistrations", "tickets": 6, "avgConfidence": 0.877, "isCanonical": false },
+    { "intent": "QRPricingModel", "tickets": 5, "avgConfidence": 0.868, "isCanonical": true },
+    { "intent": "QRTagOrder", "tickets": 5, "avgConfidence": 0.914, "isCanonical": false },
+    { "intent": "BillingInquiry", "tickets": 5, "avgConfidence": 0.878, "isCanonical": false },
+    { "intent": "PetDeceased", "tickets": 5, "avgConfidence": 0.946, "isCanonical": true },
+    { "intent": "SmartTagTransfer", "tickets": 5, "avgConfidence": 0.878, "isCanonical": false },
+    { "intent": "SmartTagActivation", "tickets": 5, "avgConfidence": 0.842, "isCanonical": true }
+  ],
+  "helpCenterCategoryDistribution": [
+    { "category": "Min side", "tickets": 198, "share": 19.8 },
+    { "category": "Eierskifte", "tickets": 118, "share": 11.8 },
+    { "category": "DyreID-appen", "tickets": 105, "share": 10.5 },
+    { "category": "Savnet/Funnet", "tickets": 104, "share": 10.4 },
+    { "category": "Registrering", "tickets": 92, "share": 9.2 },
+    { "category": "QR-brikke", "tickets": 91, "share": 9.1 },
+    { "category": "Smart Tag", "tickets": 89, "share": 8.9 },
+    { "category": "Familiedeling", "tickets": 74, "share": 7.4 },
+    { "category": "Ukategorisert", "tickets": 43, "share": 4.3 },
+    { "category": "Abonnement", "tickets": 33, "share": 3.3 },
+    { "category": "Utenlandsregistrering", "tickets": 31, "share": 3.1 },
+    { "category": "ID-søk", "tickets": 16, "share": 1.6 },
+    { "category": "Min Side", "tickets": 4, "share": 0.4 },
+    { "category": "Generell", "tickets": 2, "share": 0.2 }
+  ],
+  "topHelpCenterSubcategories": [
+    { "category": "Eierskifte", "subcategory": "Eierskifte på Web", "tickets": 60 },
+    { "category": "Min side", "subcategory": "Hvorfor får jeg ikke logget meg inn?", "tickets": 43 },
+    { "category": "Registrering", "subcategory": "NewRegistration", "tickets": 42 },
+    { "category": "Min side", "subcategory": "Logg inn på Min side", "tickets": 32 },
+    { "category": "Savnet/Funnet", "subcategory": "Hvordan melde mitt kjæledyr savnet?", "tickets": 30 },
+    { "category": "Familiedeling", "subcategory": "Hvordan dele tilgang med familiemedlemmer?", "tickets": 27 },
+    { "category": "DyreID-appen", "subcategory": "Hva er forskjellen på DyreID basis og DyreID+ abonnement?", "tickets": 25 },
+    { "category": "DyreID-appen", "subcategory": "Hvordan får tilgang til DyreID-appen?", "tickets": 24 },
+    { "category": "Savnet/Funnet", "subcategory": "Kjæledyret har kommet til rette", "tickets": 24 },
+    { "category": "Utenlandsregistrering", "subcategory": "Hvordan få dyret registrert i Norge?", "tickets": 23 },
+    { "category": "Min side", "subcategory": "Legge til flere telefonnumre eller e-postadresser", "tickets": 22 },
+    { "category": "QR-brikke", "subcategory": "Jeg har mistet tag'en", "tickets": 21 },
+    { "category": "Min side", "subcategory": "Det mangler et kjæledyr på Min side", "tickets": 21 },
+    { "category": "Smart Tag", "subcategory": "Kan ikke koble til eller legge til taggen", "tickets": 21 },
+    { "category": "Registrering", "subcategory": "Registrere nytt dyr", "tickets": 21 }
+  ],
+  "coverageGapAnalysis": {
+    "totalUniqueIntentsClassified": 151,
+    "mappedToCanonical": 45,
+    "unmappedNewFragmented": 106,
+    "canonicalIntentsInSystem": 80,
+    "allCanonicalApproved": true,
+    "canonicalWithZeroMatches": 35,
+    "coveragePercentage": 75.1
+  },
+  "playbookStatus": {
+    "totalEntries": 57,
+    "activeEntries": 57,
+    "needsImprovement": 0,
+    "entriesWithRealUsage": 0,
+    "totalChatbotUses": 0,
+    "topEntries": [
+      { "intent": "GeneralInquiry", "ticketCount": 30, "autoCloseProbability": 83.3 },
+      { "intent": "ForeignRegistration", "ticketCount": 12, "autoCloseProbability": 58.3 },
+      { "intent": "InactiveRegistration", "ticketCount": 8, "autoCloseProbability": 0 },
+      { "intent": "ProfileVerification", "ticketCount": 7, "autoCloseProbability": 71.4 },
+      { "intent": "LoginProblem", "ticketCount": 7, "autoCloseProbability": 28.6 },
+      { "intent": "EmailError", "ticketCount": 6, "autoCloseProbability": 33.3 },
+      { "intent": "OwnershipTransferWeb", "ticketCount": 6, "autoCloseProbability": 0 },
+      { "intent": "SMSEmailNotification", "ticketCount": 4, "autoCloseProbability": 100 },
+      { "intent": "AddContactInfo", "ticketCount": 4, "autoCloseProbability": 0 },
+      { "intent": "WrongInfo", "ticketCount": 3, "autoCloseProbability": 0 }
+    ]
+  },
+  "reviewQueue": {
+    "totalItems": 232,
+    "pending": 232,
+    "reviewed": 0,
+    "sampleItems": [
+      {
+        "id": 13,
+        "intent": "ChipCorrection",
+        "ticketId": 10061,
+        "confidence": 0.9,
+        "category": "Registrering",
+        "subcategory": "Kjæledyret mitt er ikke søkbart",
+        "customerNeed": "Rettet chipnummer i registeret slik at dyret er korrekt søkbart.",
+        "autoClosePossible": false,
+        "paymentRequired": false
+      },
+      {
+        "id": 14,
+        "intent": "DuplicateRegistration",
+        "ticketId": 10063,
+        "confidence": 0.9,
+        "category": "Registrering",
+        "subcategory": "Kjæledyret mitt er ikke søkbart",
+        "customerNeed": "Én korrekt, konsolidert registrering for dyret (fjerne duplikat)",
+        "autoClosePossible": false,
+        "paymentRequired": false
+      },
+      {
+        "id": 15,
+        "intent": "RegistrationRequestUnsupportedSpecies",
+        "ticketId": 10093,
+        "confidence": 0.9,
+        "category": "Registrering",
+        "subcategory": "Hvordan få dyret registrert i Norge?",
+        "customerNeed": "Bekreftelse på om kaninen kan registreres og veiledning hvis ikke.",
+        "autoClosePossible": true,
+        "paymentRequired": false
+      },
+      {
+        "id": 16,
+        "intent": "ForeignRegistration_FollowUp",
+        "ticketId": 14,
+        "confidence": 0.9,
+        "category": "Utenlandsregistrering",
+        "subcategory": "Hvordan få dyret registrert i Norge?",
+        "customerNeed": "Konkrete statusopplysninger og videre handling for å få katten registrert i Norge.",
+        "autoClosePossible": false,
+        "paymentRequired": true
+      },
+      {
+        "id": 17,
+        "intent": "GeneralInquiry_InternalTest",
+        "ticketId": 16,
+        "confidence": 0.9,
+        "category": "Ukategorisert",
+        "subcategory": "Generell e-post / intern test",
+        "customerNeed": "Bekreftelse på hvordan systemet kategoriserer e-poster (internt).",
+        "autoClosePossible": true,
+        "paymentRequired": false
+      },
+      {
+        "id": 18,
+        "intent": "RoutingIssue",
+        "ticketId": 17,
+        "confidence": 0.9,
+        "category": "Ukategorisert",
+        "subcategory": "Routing / system-kategorisering (intern)",
+        "customerNeed": "Korrigering av kategoriseringsregler.",
+        "autoClosePossible": false,
+        "paymentRequired": false
+      },
+      {
+        "id": 19,
+        "intent": "WrongOwnerOnIDSearch",
+        "ticketId": 64,
+        "confidence": 0.9,
+        "category": "Eierskifte",
+        "subcategory": "Feil eier ved søk på ID-nr",
+        "customerNeed": "Rette opp eieropplysning slik at korrekt eier vises ved ID-søk.",
+        "autoClosePossible": false,
+        "paymentRequired": false
+      }
+    ]
+  },
+  "fragmentationAnalysis": {
+    "totalUniqueLabels": 151,
+    "canonicalIntents": 80,
+    "fragmentedVariants": 106,
+    "topFragmentedClusters": [
+      {
+        "suggestedCanonical": "SmartTagBatteryNotifications",
+        "combinedTickets": 32,
+        "variants": ["SmartTagNotifications (16)", "SmartTagBattery (14)", "SmartTagBatteryInfo (2)"],
+        "action": "CREATE_NEW"
+      },
+      {
+        "suggestedCanonical": "SubscriptionUpgrade",
+        "combinedTickets": 20,
+        "variants": ["SubscriptionUpgrade (7)", "AddPetsToSubscription (5)", "UpgradeSubscription (3)", "AddPetToSubscription (2)", "SubscriptionAddPet (1)", "AddMorePetsToSubscription (1)", "AddAnimalsToSubscription (1)"],
+        "action": "CREATE_NEW"
+      },
+      {
+        "suggestedCanonical": "AppPushNotifications",
+        "combinedTickets": 15,
+        "variants": ["AppPushNotifications (6)", "AppNotifications (4)", "PushNotifications (2)", "PushNotificationsIssue (2)", "PushNotificationIssue (1)"],
+        "action": "CREATE_NEW"
+      },
+      {
+        "suggestedCanonical": "AppLanguageSettings",
+        "combinedTickets": 14,
+        "variants": ["AppLanguage (10)", "AppLanguageChange (2)", "AppChangeLanguage (1)", "AppLanguageSetting (1)"],
+        "action": "CREATE_NEW"
+      },
+      {
+        "suggestedCanonical": "DuplicateRegistrationMerge",
+        "combinedTickets": 13,
+        "variants": ["MergeDuplicateRegistrations (5)", "DuplicateRegistration (4)", "DuplicateRegistrationMerge (2)", "MergeRegistrations (2)"],
+        "action": "CREATE_NEW"
+      },
+      {
+        "suggestedCanonical": "SmartTagTransfer",
+        "combinedTickets": 11,
+        "variants": ["SmartTagTransfer (5)", "SmartTagReassign (3)", "SmartTagTransferToNewPet (2)", "SmartTagTransferToAnotherPet (1)"],
+        "action": "CREATE_NEW"
+      },
+      {
+        "suggestedCanonical": "QRTagOrder",
+        "combinedTickets": 11,
+        "variants": ["QRTagOrder (3)", "OrderExtraQRTag (2)", "OrderExtraQR (2)", "QROrder_ExtraTag (1)", "QRTagOrderExtra (1)", "QRTagPurchase (1)", "QRTagPurchaseInfo (1)"],
+        "action": "CREATE_NEW"
+      },
+      {
+        "suggestedCanonical": "ChipCorrection",
+        "combinedTickets": 11,
+        "variants": ["UpdateChipNumber (7)", "CorrectRegisteredChip (2)", "ChipReplacement (1)", "RegistrationCorrection (1)"],
+        "action": "CREATE_NEW"
+      },
+      {
+        "suggestedCanonical": "UnsupportedSpeciesInquiry",
+        "combinedTickets": 11,
+        "variants": ["NonSupportedSpeciesInquiry (3)", "NonSupportedSpecies (2)", "FoundNonSupportedSpecies (1)", "FoundNonSupportedAnimal (1)", "FoundNonDogCat (1)", "FoundOtherSpecies (2)", "NewRegistration_SpeciesUnsupported (1)"],
+        "action": "CREATE_NEW"
+      },
+      {
+        "suggestedCanonical": "BillingInquiry",
+        "combinedTickets": 10,
+        "variants": ["BillingInquiry (5)", "BillingRefund (3)", "BillingDoubleCharge (1)", "SubscriptionBilling (1)"],
+        "action": "CREATE_NEW"
+      },
+      {
+        "suggestedCanonical": "DoubleChargeRefund",
+        "combinedTickets": 8,
+        "variants": ["DoubleChargeRefund (4)", "RefundDoubleCharge (1)", "SubscriptionDoubleCharge (1)", "SubscriptionDoubleCharge_Refund (1)", "DuplicateChargeRefund (1)"],
+        "action": "CREATE_NEW"
+      },
+      {
+        "suggestedCanonical": "AppCrash",
+        "combinedTickets": 7,
+        "variants": ["AppCrash (6)", "AppCrashOnStartup (1)"],
+        "action": "CREATE_NEW"
+      },
+      {
+        "suggestedCanonical": "QRTagReplacement",
+        "combinedTickets": 7,
+        "variants": ["QRTagReplacement (5)", "QRTagReplace (1)", "QRTagDamaged (1)"],
+        "action": "MAP_TO_EXISTING",
+        "mapTo": "QRTagLost"
+      },
+      {
+        "suggestedCanonical": "PaymentRefund",
+        "combinedTickets": 7,
+        "variants": ["PaymentRefund (2)", "RefundRequest (1)", "SubscriptionRefund (2)", "PaymentInquiry (1)", "PaymentMethodInquiry (1)"],
+        "action": "CREATE_NEW"
+      },
+      {
+        "suggestedCanonical": "PaymentFailure",
+        "combinedTickets": 6,
+        "variants": ["RegistrationPaymentIssue (2)", "RegistrationPaymentFailure (1)", "PaymentFailureRegistration (1)", "PaymentFailureDuringRegistration (1)", "PaymentIssue (1)"],
+        "action": "CREATE_NEW"
+      },
+      {
+        "suggestedCanonical": "QRTagReassign",
+        "combinedTickets": 5,
+        "variants": ["QRTagReassign (2)", "QRReassignTag (1)", "QRAssignCorrection (1)", "QRTagRelink (1)"],
+        "action": "MAP_TO_EXISTING",
+        "mapTo": "QRUpdateContact"
+      },
+      {
+        "suggestedCanonical": "LoginProblem",
+        "combinedTickets": 6,
+        "variants": ["PasswordReset (2)", "TwoFactorAuth (1)", "TwoFactorAuthQuestion (1)", "TwoFactorInfo (1)", "TwoFactorQuery (1)"],
+        "action": "MAP_TO_EXISTING",
+        "mapTo": "LoginProblem"
+      },
+      {
+        "suggestedCanonical": "FamilySharing",
+        "combinedTickets": 4,
+        "variants": ["FamilyAccessRemoval (2)", "FamilyAccessRemove (1)", "RemoveFamilyMember (1)"],
+        "action": "MAP_TO_EXISTING",
+        "mapTo": "FamilySharing"
+      },
+      {
+        "suggestedCanonical": "LostFoundInfo",
+        "combinedTickets": 5,
+        "variants": ["LostPetStatus (2)", "LostStatusCheck (1)", "LostFoundResolved (1)", "LostFoundStatusInquiry (1)"],
+        "action": "MAP_TO_EXISTING",
+        "mapTo": "LostFoundInfo"
+      },
+      {
+        "suggestedCanonical": "InvoiceInquiry",
+        "combinedTickets": 3,
+        "variants": ["InvoiceQuery (1)", "InvoiceQuery_AvtaleGiro (1)", "InvoiceNotReceived (1)"],
+        "action": "CREATE_NEW"
+      }
+    ]
+  },
+  "reviewQueueRecommendations": {
+    "estimatedConsolidateToExisting": 150,
+    "estimatedNewCanonicals": 15,
+    "estimatedReject": 20,
+    "suggestedNewCanonicals": [
+      {
+        "intentId": "SmartTagBatteryNotifications",
+        "category": "Smart Tag",
+        "subcategory": "Batteri og varsler",
+        "tickets": 32,
+        "priority": "high",
+        "rationale": "Genuine gap — battery issues and notification alerts are distinct from connection problems"
+      },
+      {
+        "intentId": "SubscriptionUpgrade",
+        "category": "Abonnement",
+        "subcategory": "Oppgradering og tillegg",
+        "tickets": 20,
+        "priority": "high",
+        "rationale": "Distinct from SubscriptionComparison — involves actionable upgrade/add-pet transactions"
+      },
+      {
+        "intentId": "AppPushNotifications",
+        "category": "DyreID-appen",
+        "subcategory": "Pushvarsler",
+        "tickets": 15,
+        "priority": "high",
+        "rationale": "App notification issues distinct from Smart Tag notifications"
+      },
+      {
+        "intentId": "AppLanguageSettings",
+        "category": "DyreID-appen",
+        "subcategory": "Språkinnstillinger",
+        "tickets": 14,
+        "priority": "high",
+        "rationale": "Common request about changing app language — simple informational response"
+      },
+      {
+        "intentId": "DuplicateRegistrationMerge",
+        "category": "Registrering",
+        "subcategory": "Sammenslåing av dobbeltregistreringer",
+        "tickets": 13,
+        "priority": "high",
+        "rationale": "Distinct procedural workflow requiring verification and manual merge"
+      },
+      {
+        "intentId": "SmartTagTransfer",
+        "category": "Smart Tag",
+        "subcategory": "Overføring av tag",
+        "tickets": 11,
+        "priority": "high",
+        "rationale": "Moving a tag between pets — distinct from connection issues"
+      },
+      {
+        "intentId": "QRTagOrder",
+        "category": "QR-brikke",
+        "subcategory": "Bestille ekstra QR-brikke",
+        "tickets": 11,
+        "priority": "high",
+        "rationale": "Transactional — ordering new/extra QR tags via Min Side"
+      },
+      {
+        "intentId": "ChipCorrection",
+        "category": "Registrering",
+        "subcategory": "Korrigere chipnummer",
+        "tickets": 11,
+        "priority": "high",
+        "rationale": "Requires veterinary verification — distinct procedural workflow"
+      },
+      {
+        "intentId": "UnsupportedSpeciesInquiry",
+        "category": "Registrering",
+        "subcategory": "Ikke-støttet dyreart",
+        "tickets": 11,
+        "priority": "high",
+        "rationale": "Questions about non-supported species (rabbits, birds, etc.) — informational auto-close candidate"
+      },
+      {
+        "intentId": "BillingInquiry",
+        "category": "Abonnement",
+        "subcategory": "Fakturaforespørsel",
+        "tickets": 10,
+        "priority": "medium",
+        "rationale": "General billing questions — distinct from ownership transfer costs"
+      },
+      {
+        "intentId": "DoubleChargeRefund",
+        "category": "Abonnement",
+        "subcategory": "Dobbeltbelastning og refusjon",
+        "tickets": 8,
+        "priority": "medium",
+        "rationale": "Financial impact — needs defined refund procedure"
+      },
+      {
+        "intentId": "AppCrash",
+        "category": "DyreID-appen",
+        "subcategory": "App krasjer",
+        "tickets": 7,
+        "priority": "medium",
+        "rationale": "Technical app issues — distinct from login or access problems"
+      },
+      {
+        "intentId": "PaymentRefund",
+        "category": "Abonnement",
+        "subcategory": "Refusjonsforespørsel",
+        "tickets": 7,
+        "priority": "medium",
+        "rationale": "General payment refund requests across different services"
+      },
+      {
+        "intentId": "PaymentFailure",
+        "category": "Registrering",
+        "subcategory": "Betalingsfeil ved registrering",
+        "tickets": 6,
+        "priority": "medium",
+        "rationale": "Payment failures blocking registration — transactional"
+      },
+      {
+        "intentId": "InvoiceInquiry",
+        "category": "Abonnement",
+        "subcategory": "Fakturaspørsmål",
+        "tickets": 3,
+        "priority": "low",
+        "rationale": "Invoice-specific questions including AvtaleGiro"
+      }
+    ],
+    "suggestedRejects": [
+      {
+        "intent": "GeneralInquiry_InternalTest",
+        "ticketId": 16,
+        "reason": "Internal system test — not a customer intent"
+      },
+      {
+        "intent": "RoutingIssue",
+        "ticketId": 17,
+        "reason": "System routing/categorization problem — internal operations, not customer-facing"
+      }
+    ],
+    "mapToExistingCanonical": [
+      { "variants": ["QRTagReplacement", "QRTagReplace", "QRTagDamaged"], "mapTo": "QRTagLost" },
+      { "variants": ["PasswordReset", "TwoFactorAuth", "TwoFactorAuthQuestion", "TwoFactorInfo", "TwoFactorQuery"], "mapTo": "LoginProblem" },
+      { "variants": ["FamilyAccessRemoval", "FamilyAccessRemove", "RemoveFamilyMember"], "mapTo": "FamilySharing" },
+      { "variants": ["LostPetStatus", "LostStatusCheck", "LostFoundResolved", "LostFoundStatusInquiry"], "mapTo": "LostFoundInfo" },
+      { "variants": ["QRTagReassign", "QRReassignTag", "QRAssignCorrection", "QRTagRelink"], "mapTo": "QRUpdateContact" },
+      { "variants": ["SubscriptionChange", "SubscriptionCoverage"], "mapTo": "SubscriptionComparison" },
+      { "variants": ["CancelSubscriptionDueToDeceasedPet", "CancelSubscription_PetDeceased"], "mapTo": "CancelSubscription" },
+      { "variants": ["CheckPaymentMethod"], "mapTo": "OwnershipTransferCost" },
+      { "variants": ["AppLoginIssue"], "mapTo": "LoginProblem" },
+      { "variants": ["WrongInfo_UpdateChip"], "mapTo": "WrongInfo" },
+      { "variants": ["LoginPasswordReset"], "mapTo": "LoginProblem" },
+      { "variants": ["ForeignRegistrationStatus"], "mapTo": "ForeignRegistration" },
+      { "variants": ["AddAnimalToSubscription", "AddMorePetsToSubscription"], "mapTo": "SubscriptionUpgrade" },
+      { "variants": ["ReportLostPetResolved", "UpdateLostStatus"], "mapTo": "ReportFoundPet" },
+      { "variants": ["FoundPetReport"], "mapTo": "ReportFoundPet" },
+      { "variants": ["AppSettings"], "mapTo": "AppAccess" },
+      { "variants": ["BreederRegisterLitter"], "mapTo": "NewRegistration" },
+      { "variants": ["PetNotInSystem"], "mapTo": "InactiveRegistration" }
+    ]
+  },
+  "canonicalIntentsWithZeroMatches": [
+    "AccountDeletion", "AppBenefits", "AppCost", "AppTargetAudience",
+    "DoIHaveMinSide", "FamilySharingBenefits", "FamilySharingExisting",
+    "FamilySharingNonFamily", "ForeignPedigree", "ForeignRegistrationCost",
+    "ForeignRegistrationProcess", "GDPRExport", "IDSearchHelp",
+    "MinSideHelp", "MissingPet", "NKKOwnership",
+    "OwnershipTransferProcess", "PetNotSearchable", "QRBenefits",
+    "QRCompatibility", "QRRequiresIDMark", "QRTagContactInfo",
+    "RegistrationError", "ReopenedTicket", "SMSEmailNotification",
+    "SearchableMisuse", "SmartTagMissing", "SmartTagQRActivation",
+    "SmartTagSound", "SurveyFeedback", "TagSubscriptionExpiry",
+    "UnregisteredChip578", "ViewMyPets", "WhyChipPet",
+    "WhyContactReceived"
+  ],
+  "summaryAndNextSteps": {
+    "strengths": [
+      "93.4% high-confidence classifications (>=0.8)",
+      "100% resolution extraction rate",
+      "Strong coverage of top support topics (Eierskifte, Min Side, Savnet/Funnet)",
+      "58.5% of tickets identified as auto-closeable",
+      "Average confidence 0.906 across 1000 tickets"
+    ],
+    "weaknesses": [
+      "106 fragmented intent labels need consolidation into ~15 new canonicals",
+      "232 review queue items all pending — 0 reviewed",
+      "35 canonical intents have zero ticket matches (potentially outdated)",
+      "0 playbook entries used in production yet",
+      "Coverage at 75.1% — needs consolidation to reach 85-90% target"
+    ],
+    "recommendedNextSteps": [
+      "1. Batch-consolidate fragmented intents into ~15 new canonical intents",
+      "2. Review and approve top-priority items in the review queue",
+      "3. Audit 35 zero-match canonicals — deactivate or merge where appropriate",
+      "4. Deploy chatbot to generate real playbook usage data",
+      "5. Re-run analysis after consolidation to validate coverage improvement"
+    ],
+    "projectedCoverageAfterConsolidation": "85-90%"
+  }
+}
