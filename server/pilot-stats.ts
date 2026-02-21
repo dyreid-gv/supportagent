@@ -1,6 +1,6 @@
 interface PilotMatchRecord {
   timestamp: number;
-  matchedBy: "session" | "regex" | "semantic" | "keyword" | "gpt" | "block";
+  matchedBy: "session" | "regex" | "semantic" | "keyword" | "gpt" | "fuzzy" | "block";
   semanticScore: number;
   gptConfidence: number;
   intentId: string | null;

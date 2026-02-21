@@ -9,6 +9,7 @@ import { messages, type PlaybookEntry, type ServicePrice, type ResponseTemplate 
 import { findSemanticMatch, findTopNSemanticMatches, getApprovedIntentIds, getIndexSize, isIndexReady, refreshIntentIndex } from "./intent-index";
 import { recordPilotMatch, isPilotEnabled } from "./pilot-stats";
 import { ensureRuntimeIntentsInCanonical, validateRuntimeIntents, getApprovedIntentSet } from "./canonical-intents";
+import { isNormalizationEnabled, normalizeInput, fuzzyLabelFallback, logFuzzyMatch } from "./input-normalization";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -2069,7 +2070,7 @@ ${originalText}`,
 }
 
 interface MatchDebugInfo {
-  matchedBy: "session" | "regex" | "semantic" | "keyword" | "gpt" | "block";
+  matchedBy: "session" | "regex" | "semantic" | "keyword" | "gpt" | "fuzzy" | "block";
   semanticScore: number;
   gptConfidence: number;
   finalIntentId: string | null;
@@ -2111,7 +2112,19 @@ async function matchUserIntent(
 
   const debugInfo: MatchDebugInfo = { matchedBy: "block", semanticScore: 0, gptConfidence: 0, finalIntentId: null, responseMethod: "BLOCK", blockReason: null, topIntentId: null, topSemanticScore: 0 };
 
-  const quickIntent = quickIntentMatch(message);
+  let effectiveMessage = message;
+  let normalizationApplied = false;
+  if (isNormalizationEnabled()) {
+    const normResult = normalizeInput(message);
+    effectiveMessage = normResult.normalized;
+    normalizationApplied = normResult.changed;
+    if (normalizationApplied) {
+      (debugInfo as any).originalMessage = message;
+      (debugInfo as any).normalizedMessage = effectiveMessage;
+    }
+  }
+
+  const quickIntent = quickIntentMatch(effectiveMessage);
   if (quickIntent) {
     const playbook = await storage.getPlaybookByIntent(quickIntent);
     session.intent = quickIntent;
@@ -2132,7 +2145,7 @@ async function matchUserIntent(
     }
     if (isIndexReady() && getIndexSize() > 0) {
       embeddingAvailable = true;
-      const { match: semanticResult, bestScore, bestIntentId } = await findSemanticMatch(message, 0.78);
+      const { match: semanticResult, bestScore, bestIntentId } = await findSemanticMatch(effectiveMessage, 0.78);
       semanticBestScore = bestScore;
       debugInfo.semanticScore = bestScore;
       debugInfo.topSemanticScore = bestScore;
@@ -2163,7 +2176,7 @@ async function matchUserIntent(
   }
 
   let hadKeywordMatch = false;
-  const keywordMatch = await storage.searchPlaybookByKeywords(message);
+  const keywordMatch = await storage.searchPlaybookByKeywords(effectiveMessage);
   if (keywordMatch) {
     hadKeywordMatch = true;
     session.intent = keywordMatch.intent;
@@ -2184,8 +2197,33 @@ async function matchUserIntent(
     return { intent: quickIntent, playbook: null, method: "quick-match-no-playbook", debug: debugInfo };
   }
 
-  // BETWEEN-ZONE: semanticScore >= 0.65 but below threshold (0.78)
-  // This zone must NOT leak to GPT — go directly to BLOCK with suggestions
+  // BETWEEN-ZONE: semanticScore >= 0.60 but below threshold (0.78)
+  // Try fuzzy label fallback before blocking (only when normalization enabled)
+  if (semanticBestScore >= 0.60 && semanticBestScore < 0.78 && !hadKeywordMatch && isNormalizationEnabled()) {
+    try {
+      const fuzzyResult = await fuzzyLabelFallback(effectiveMessage, semanticBestScore);
+      if (fuzzyResult && fuzzyResult.fuzzyScore >= 0.75) {
+        logFuzzyMatch(message, effectiveMessage, fuzzyResult);
+        const fuzzyPlaybook = await storage.getPlaybookByIntent(fuzzyResult.intentId);
+        debugInfo.matchedBy = "fuzzy";
+        debugInfo.finalIntentId = fuzzyResult.intentId;
+        if (fuzzyPlaybook) {
+          session.intent = fuzzyResult.intentId;
+          session.playbook = fuzzyPlaybook;
+          session.collectedData = {};
+          debugInfo.responseMethod = fuzzyPlaybook.actionType === "API_CALL" ? "API_CALL" : "INFO";
+          return { intent: fuzzyResult.intentId, playbook: fuzzyPlaybook, method: `fuzzy-match (${fuzzyResult.fuzzyScore})`, debug: debugInfo };
+        }
+        session.intent = fuzzyResult.intentId;
+        session.collectedData = {};
+        debugInfo.responseMethod = "INFO";
+        return { intent: fuzzyResult.intentId, playbook: null, method: `fuzzy-match-no-playbook (${fuzzyResult.fuzzyScore})`, debug: debugInfo };
+      }
+    } catch (err: any) {
+      console.warn("[FuzzyFallback] Error:", err.message);
+    }
+  }
+
   if (semanticBestScore >= 0.65) {
     debugInfo.blockReason = "lowSemanticZone";
     return { intent: null, playbook: null, method: "none", debug: debugInfo };
@@ -2193,7 +2231,7 @@ async function matchUserIntent(
 
   // GPT GATE: only if semanticScore < 0.65 AND no keyword match was found
   if (!hadKeywordMatch) {
-    const gptResult = await gptIntentInterpretation(message);
+    const gptResult = await gptIntentInterpretation(effectiveMessage);
     debugInfo.gptConfidence = gptResult.confidence;
     if (gptResult.intent && gptResult.confidence >= 0.7) {
       const gptPlaybook = await storage.getPlaybookByIntent(gptResult.intent);
@@ -2314,8 +2352,16 @@ export async function testIntentMatch(query: string): Promise<{
   semanticScore?: number;
   model: string;
   isCanonical?: boolean;
+  normalized?: string;
+  fuzzyMatch?: { intentId: string; score: number } | null;
 }> {
-  const normalized = query.trim().toLowerCase();
+  let normalized = query.trim().toLowerCase();
+  let normalizationApplied = false;
+  if (isNormalizationEnabled()) {
+    const normResult = normalizeInput(query);
+    normalized = normResult.normalized;
+    normalizationApplied = normResult.changed;
+  }
   let approvedSet: Set<string> | null = null;
   try { approvedSet = await getApprovedIntentSet(); } catch {}
   
@@ -2365,14 +2411,34 @@ export async function testIntentMatch(query: string): Promise<{
       }
     }
     
-    // 5. Return semantic result even below threshold if available
+    // 5. Fuzzy label fallback in gap zone (0.60–0.78)
+    if (isNormalizationEnabled() && semanticResult && semanticResult.bestScore >= 0.60 && semanticResult.bestScore < 0.78) {
+      try {
+        const fuzzyResult = await fuzzyLabelFallback(normalized, semanticResult.bestScore);
+        if (fuzzyResult && fuzzyResult.fuzzyScore >= 0.75) {
+          logFuzzyMatch(query, normalized, fuzzyResult);
+          return tagCanonical(fuzzyResult.intentId, {
+            matchedIntent: fuzzyResult.intentId,
+            method: "fuzzy-match",
+            semanticScore: semanticResult.bestScore,
+            model: "fuzzy-deterministic",
+            normalized: normalizationApplied ? normalized : undefined,
+            fuzzyMatch: { intentId: fuzzyResult.intentId, score: fuzzyResult.fuzzyScore },
+          });
+        }
+      } catch {}
+    }
+
+    // 6. Return semantic result even below threshold if available
     if (semanticResult && semanticResult.bestIntentId) {
-      return tagCanonical(semanticResult.bestIntentId, { 
+      const result: any = { 
         matchedIntent: semanticResult.bestIntentId, 
         method: "semantic-below-threshold", 
         semanticScore: semanticResult.bestScore,
-        model: "semantic-weak" 
-      });
+        model: "semantic-weak",
+      };
+      if (normalizationApplied) result.normalized = normalized;
+      return tagCanonical(semanticResult.bestIntentId, result);
     }
   }
   
