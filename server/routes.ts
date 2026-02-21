@@ -1932,6 +1932,279 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/admin/health", async (req, res) => {
+    try {
+      const periodMonths = parseInt(req.query.period as string) || 12;
+      const now = new Date();
+      const cutoff = new Date(now);
+      if (periodMonths < 999) {
+        cutoff.setMonth(cutoff.getMonth() - periodMonths);
+      } else {
+        cutoff.setFullYear(2000);
+      }
+      const cutoffStr = cutoff.toISOString();
+
+      const scrubbedTotal = await db.execute(sql`
+        SELECT count(*) as total,
+          count(*) FILTER (WHERE auto_closed = true) as auto_closed,
+          count(*) FILTER (WHERE auto_closed = false OR auto_closed IS NULL) as agent_handled,
+          count(*) FILTER (WHERE total_message_count <= 1 AND auto_closed = true) as auto_resolved_strict
+        FROM scrubbed_tickets WHERE scrubbed_at >= ${cutoffStr}::timestamp
+      `);
+      const st = scrubbedTotal.rows[0] || { total: 0, auto_closed: 0, agent_handled: 0, auto_resolved_strict: 0 };
+
+      const coverageQuery = await db.execute(sql`
+        SELECT 
+          count(*) as total,
+          count(*) FILTER (WHERE ci.intent_id IS NOT NULL) as mapped_to_canonical,
+          count(*) FILTER (WHERE ci.intent_id IS NULL) as unmapped
+        FROM intent_classifications ic
+        LEFT JOIN canonical_intents ci ON ci.intent_id = ic.intent AND ci.approved = true
+        WHERE ic.classified_at >= ${cutoffStr}::timestamp
+      `);
+      const cov = coverageQuery.rows[0] || { total: 0, mapped_to_canonical: 0, unmapped: 0 };
+
+      const intentBreakdown = await db.execute(sql`
+        SELECT 
+          ic.intent,
+          count(*) as total,
+          count(*) FILTER (WHERE st.auto_closed = true) as auto_resolved,
+          count(*) FILTER (WHERE st.auto_closed = false OR st.auto_closed IS NULL) as agent_handled,
+          avg(ic.intent_confidence) as avg_confidence,
+          count(*) FILTER (WHERE ic.auto_close_possible = true) as auto_close_possible,
+          CASE WHEN ci.intent_id IS NOT NULL THEN true ELSE false END as is_canonical
+        FROM intent_classifications ic
+        LEFT JOIN scrubbed_tickets st ON ic.ticket_id = st.ticket_id
+        LEFT JOIN canonical_intents ci ON ci.intent_id = ic.intent AND ci.approved = true
+        WHERE ic.classified_at >= ${cutoffStr}::timestamp
+        GROUP BY ic.intent, ci.intent_id
+        ORDER BY count(*) DESC
+      `);
+
+      const canonicalTotal = await db.execute(sql`
+        SELECT count(*) as total,
+          count(*) FILTER (WHERE approved = true) as approved
+        FROM canonical_intents
+      `);
+      const ct = canonicalTotal.rows[0] || { total: 0, approved: 0 };
+
+      const playbookTotal = await db.execute(sql`
+        SELECT count(*) as total,
+          count(*) FILTER (WHERE is_active = true) as active,
+          sum(total_uses) as total_uses,
+          sum(successful_resolutions) as successful,
+          sum(failed_resolutions) as failed
+        FROM playbook_entries
+      `);
+      const pt = playbookTotal.rows[0] || { total: 0, active: 0, total_uses: 0, successful: 0, failed: 0 };
+
+      const playbookPerIntent = await db.execute(sql`
+        SELECT 
+          pe.intent,
+          pe.ticket_count,
+          pe.auto_close_probability,
+          pe.total_uses,
+          pe.successful_resolutions,
+          pe.failed_resolutions,
+          pe.success_rate,
+          pe.avg_resolution_quality,
+          pe.avg_messages_after_autoreply,
+          pe.is_active
+        FROM playbook_entries pe
+        WHERE pe.is_active = true
+        ORDER BY pe.ticket_count DESC
+      `);
+
+      const chatbotTotal = await db.execute(sql`
+        SELECT count(*) as total,
+          count(DISTINCT matched_intent) as unique_intents,
+          count(*) FILTER (WHERE matched_intent IS NOT NULL AND matched_intent != '') as matched,
+          count(*) FILTER (WHERE matched_intent IS NULL OR matched_intent = '') as fallback,
+          count(*) FILTER (WHERE flagged_for_review = true) as flagged,
+          count(*) FILTER (WHERE feedback_result = 'positive') as positive_feedback,
+          count(*) FILTER (WHERE feedback_result = 'negative') as negative_feedback
+        FROM chatbot_interactions WHERE created_at >= ${cutoffStr}::timestamp
+      `);
+      const cbt = chatbotTotal.rows[0] || { total: 0, unique_intents: 0, matched: 0, fallback: 0, flagged: 0 };
+
+      const escalationQuery = await db.execute(sql`
+        SELECT 
+          count(*) as total,
+          count(*) FILTER (WHERE flagged_for_review = true) as flagged,
+          count(*) FILTER (WHERE response_method = 'block' OR response_method = 'escalation') as blocked
+        FROM chatbot_interactions WHERE created_at >= ${cutoffStr}::timestamp
+      `);
+      const esc = escalationQuery.rows[0] || { total: 0, flagged: 0, blocked: 0 };
+
+      const categoryDist = await db.execute(sql`
+        SELECT 
+          COALESCE(st.hjelpesenter_category, 'Ukategorisert') as category,
+          count(*) as total,
+          count(*) FILTER (WHERE st.auto_closed = true) as auto_resolved
+        FROM scrubbed_tickets st
+        WHERE st.scrubbed_at >= ${cutoffStr}::timestamp
+        GROUP BY st.hjelpesenter_category
+        ORDER BY count(*) DESC
+      `);
+
+      const chatbotByIntent = await db.execute(sql`
+        SELECT 
+          COALESCE(matched_intent, 'Uklassifisert') as intent,
+          count(*) as total,
+          count(*) FILTER (WHERE feedback_result = 'positive') as positive,
+          count(*) FILTER (WHERE feedback_result = 'negative') as negative,
+          count(*) FILTER (WHERE flagged_for_review = true) as flagged,
+          count(*) FILTER (WHERE response_method = 'block' OR response_method = 'escalation') as blocked
+        FROM chatbot_interactions
+        WHERE created_at >= ${cutoffStr}::timestamp
+        GROUP BY matched_intent
+        ORDER BY count(*) DESC
+        LIMIT 30
+      `);
+
+      const trendMonthly = await db.execute(sql`
+        SELECT 
+          date_trunc('month', created_at)::date as month,
+          count(*) as total,
+          count(*) FILTER (WHERE matched_intent IS NOT NULL AND matched_intent != '') as matched,
+          count(*) FILTER (WHERE matched_intent IS NULL OR matched_intent = '') as fallback,
+          count(*) FILTER (WHERE flagged_for_review = true) as flagged,
+          count(*) FILTER (WHERE response_method = 'block' OR response_method = 'escalation') as blocked
+        FROM chatbot_interactions
+        WHERE created_at >= ${cutoffStr}::timestamp
+        GROUP BY date_trunc('month', created_at)
+        ORDER BY month
+      `);
+
+      const trendDaily = await db.execute(sql`
+        SELECT 
+          date_trunc('day', created_at)::date as day,
+          count(*) as total,
+          count(*) FILTER (WHERE matched_intent IS NOT NULL AND matched_intent != '') as matched,
+          count(*) FILTER (WHERE matched_intent IS NULL OR matched_intent = '') as fallback
+        FROM chatbot_interactions
+        WHERE created_at >= ${cutoffStr}::timestamp
+        GROUP BY date_trunc('day', created_at)
+        ORDER BY day
+      `);
+
+      const totalTickets = Number(st.total) || 0;
+      const autoResolvedStrict = Number(st.auto_resolved_strict) || 0;
+      const autoResolved = Number(st.auto_closed) || 0;
+      const autoResolutionRate = totalTickets > 0 ? autoResolvedStrict / totalTickets : 0;
+
+      const covTotal = Number(cov.total) || 0;
+      const covMapped = Number(cov.mapped_to_canonical) || 0;
+      const coverageScore = covTotal > 0 ? covMapped / covTotal : 0;
+
+      const chatbotTotalN = Number(cbt.total) || 0;
+      const chatbotMatched = Number(cbt.matched) || 0;
+      const chatbotFallback = Number(cbt.fallback) || 0;
+
+      const escTotal = Number(esc.total) || 0;
+      const escFlagged = Number(esc.flagged) || 0;
+      const escBlocked = Number(esc.blocked) || 0;
+      const escalationRate = escTotal > 0 ? (escFlagged + escBlocked) / escTotal : 0;
+
+      const reopenRate = 0;
+
+      const healthScore = Math.round(
+        (0.35 * Math.min(autoResolutionRate, 1)) * 100 +
+        (0.25 * (1 - Math.min(reopenRate, 1))) * 100 +
+        (0.20 * Math.min(coverageScore, 1)) * 100 +
+        (0.20 * (1 - Math.min(escalationRate, 1))) * 100
+      );
+
+      res.json({
+        period: periodMonths,
+        healthScore,
+        breakdown: {
+          autoResolution: { rate: autoResolutionRate, score: Math.round(autoResolutionRate * 100), weight: 0.35 },
+          reopenRate: { rate: reopenRate, score: Math.round((1 - reopenRate) * 100), weight: 0.25, note: "Reopen-data ikke tilgjengelig ennå" },
+          coverage: { rate: coverageScore, score: Math.round(coverageScore * 100), weight: 0.20 },
+          escalation: { rate: escalationRate, score: Math.round((1 - escalationRate) * 100), weight: 0.20 },
+        },
+        kpi: {
+          totalTickets,
+          autoResolved,
+          autoResolvedStrict: autoResolvedStrict,
+          agentHandled: Number(st.agent_handled) || 0,
+          autoResolutionRate: Math.round(autoResolutionRate * 1000) / 10,
+          coverageScore: Math.round(coverageScore * 1000) / 10,
+          coverageMapped: covMapped,
+          coverageTotal: covTotal,
+          escalationRate: Math.round(escalationRate * 1000) / 10,
+          escalationCount: escFlagged + escBlocked,
+          reopenRate: 0,
+          canonicalIntents: Number(ct.approved) || 0,
+          canonicalTotal: Number(ct.total) || 0,
+          playbookEntries: Number(pt.active) || 0,
+          playbookTotalUses: Number(pt.total_uses) || 0,
+          playbookSuccessful: Number(pt.successful) || 0,
+          chatbotTotal: chatbotTotalN,
+          chatbotMatched,
+          chatbotFallback,
+          chatbotFlagged: Number(cbt.flagged) || 0,
+        },
+        intentBreakdown: intentBreakdown.rows.map((r: any) => ({
+          intent: r.intent,
+          total: Number(r.total),
+          autoResolved: Number(r.auto_resolved),
+          agentHandled: Number(r.agent_handled),
+          avgConfidence: Math.round((Number(r.avg_confidence) || 0) * 100) / 100,
+          autoClosePossible: Number(r.auto_close_possible),
+          isCanonical: r.is_canonical,
+        })),
+        playbookUtilization: playbookPerIntent.rows.map((r: any) => ({
+          intent: r.intent,
+          ticketCount: Number(r.ticket_count) || 0,
+          autoCloseProbability: Math.round((Number(r.auto_close_probability) || 0) * 100),
+          totalUses: Number(r.total_uses) || 0,
+          successfulResolutions: Number(r.successful_resolutions) || 0,
+          failedResolutions: Number(r.failed_resolutions) || 0,
+          successRate: Math.round((Number(r.success_rate) || 0) * 100),
+          avgMessages: Number(r.avg_messages_after_autoreply) || 0,
+          qualityLevel: r.avg_resolution_quality || 'N/A',
+          isActive: r.is_active,
+        })),
+        categoryDistribution: categoryDist.rows.map((r: any) => ({
+          category: r.category,
+          total: Number(r.total),
+          autoResolved: Number(r.auto_resolved),
+          autoRate: Number(r.total) > 0 ? Math.round((Number(r.auto_resolved) / Number(r.total)) * 1000) / 10 : 0,
+        })),
+        chatbotByIntent: chatbotByIntent.rows.map((r: any) => ({
+          intent: r.intent,
+          total: Number(r.total),
+          positive: Number(r.positive),
+          negative: Number(r.negative),
+          flagged: Number(r.flagged),
+          blocked: Number(r.blocked),
+        })),
+        trendMonthly: trendMonthly.rows.map((r: any) => ({
+          month: r.month,
+          total: Number(r.total),
+          matched: Number(r.matched),
+          fallback: Number(r.fallback),
+          flagged: Number(r.flagged),
+          blocked: Number(r.blocked),
+          matchRate: Number(r.total) > 0 ? Math.round((Number(r.matched) / Number(r.total)) * 1000) / 10 : 0,
+          escalationRate: Number(r.total) > 0 ? Math.round(((Number(r.flagged) + Number(r.blocked)) / Number(r.total)) * 1000) / 10 : 0,
+        })),
+        trendDaily: trendDaily.rows.map((r: any) => ({
+          day: r.day,
+          total: Number(r.total),
+          matched: Number(r.matched),
+          fallback: Number(r.fallback),
+          matchRate: Number(r.total) > 0 ? Math.round((Number(r.matched) / Number(r.total)) * 1000) / 10 : 0,
+        })),
+      });
+    } catch (error: any) {
+      console.error("Health endpoint error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.post("/api/chat/test-intent", async (req, res) => {
     try {
       const { query } = req.body;
