@@ -52,6 +52,7 @@ import {
   Clock,
   XCircle,
   Lock,
+  Download,
 } from "lucide-react";
 import { useState, useCallback } from "react";
 import { useToast } from "@/hooks/use-toast";
@@ -858,6 +859,20 @@ export default function Dashboard() {
               Legg inn 100 test-saker
             </Button>
           )}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              const link = document.createElement("a");
+              link.href = "/api/reports/pureservice-1000";
+              link.download = "pureservice-1000-cases-report.json";
+              link.click();
+            }}
+            data-testid="button-download-report"
+          >
+            <Download className="h-4 w-4" />
+            Last ned rapport
+          </Button>
           <Button
             size="sm"
             variant="outline"
