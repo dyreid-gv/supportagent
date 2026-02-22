@@ -53,8 +53,8 @@ export async function runStagingIngest(
 
   while (result.totalStored < TARGET) {
     const url = lastMinId === null
-      ? `${API_BASE}/ticket?sort=-id&limit=${BATCH_SIZE}`
-      : `${API_BASE}/ticket?sort=-id&limit=${BATCH_SIZE}&filter=id<${lastMinId}`;
+      ? `${API_BASE}/ticket?sort=-id&limit=${BATCH_SIZE}&include=communications`
+      : `${API_BASE}/ticket?sort=-id&limit=${BATCH_SIZE}&include=communications&filter=id<${lastMinId}`;
 
     const batchNum = result.batchesProcessed + 1;
     notify(`Batch #${batchNum}: Fetching (lastMinId=${lastMinId ?? "none"})...`, Math.round((result.totalStored / TARGET) * 100));
