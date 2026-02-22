@@ -1,0 +1,68 @@
+PROMPT: Extract agent answers for 8 new canonical intents
+
+For each cluster below, query scrubbed_tickets where ai_intent matches 
+any of the variant labels. Extract agent_answer, strip HTML/greetings/
+signatures, and produce a draft combinedResponse.
+
+Same rules as before:
+- Use ONLY actual agent_answer content
+- GDPR scrub output
+- Flag conflicts with [KONFLIKT]
+- Flag missing data with [MANGLER]
+- Do NOT invent content
+
+=== CLUSTER 1: RefundRequest ===
+Variants: DoubleChargeRefund, BillingRefund, PaymentRefund, 
+SubscriptionRefund, BillingDoubleCharge, DoubleCharge, 
+DuplicateChargeRefund, RefundDoubleCharge, RefundRequest,
+SubscriptionDoubleCharge, SubscriptionDoubleCharge_Refund
+
+=== CLUSTER 2: BillingInquiry ===
+Variants: BillingInquiry, CheckPaymentMethod, SubscriptionBilling,
+InvoiceQuery, InvoiceQuery_AvtaleGiro, InvoiceNotReceived,
+PaymentInquiry, PaymentMethodInquiry
+
+=== CLUSTER 3: MergeDuplicateRegistrations ===
+Variants: MergeDuplicateRegistrations, DuplicateRegistration,
+DuplicateRegistrationMerge, MergeRegistrations
+
+=== CLUSTER 4: ChipCorrection ===
+Variants: UpdateChipNumber, CorrectRegisteredChip, ChipReplacement
+
+=== CLUSTER 5: QRTagDamaged ===
+Variants: QRTagReplacement, QRTagReplace, QRTagDamaged
+
+=== CLUSTER 6: QRTagReassign ===
+Variants: QRTagReassign, QRReassignTag, QRAssignCorrection, QRTagRelink
+
+=== CLUSTER 7: AppTechnicalIssue ===
+Variants: AppCrash, AppCrashOnStartup
+
+=== CLUSTER 8: CancelSubscription ===
+Variants: CancelSubscription
+
+=== OUTPUT per cluster ===
+{
+  "intent": "...",
+  "tickets_found": N,
+  "tickets_with_agent_answer": N,
+  "draft_combinedResponse": "...",
+  "conflicts": [],
+  "missing_flags": []
+}
+
+After all 8: also run the 11 GODKJENN aliases as simple DB updates 
+(no Playbook needed – these are pure alias mappings):
+
+FamilyAccessRemoval     → FamilySharing
+FamilyAccessRemove      → FamilySharing  
+RemoveFamilyMember      → FamilySharing
+LostPetStatus           → ReportLostPet
+LostStatusCheck         → ReportLostPet
+LostFoundResolved       → ReportFoundPet
+LostFoundStatusInquiry  → ReportLostPet
+PasswordReset           → LoginProblem
+RegistrationCorrection  → RegistrationError
+CancelSubscriptionDueToDeceasedPet → PetDeceased
+
+Do NOT write Playbook entries yet. Return drafts only.

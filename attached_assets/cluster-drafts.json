@@ -1,0 +1,116 @@
+{
+  "document_type": "Intent Cluster Draft Extraction",
+  "source": "scrubbed_tickets × intent_classifications",
+  "rules_applied": "ONLY actual agent_answer content. GDPR scrubbed. No invented content.",
+  
+  "clusters": [
+    {
+      "intent": "RefundRequest",
+      "variants": ["DoubleChargeRefund","BillingRefund","PaymentRefund","SubscriptionRefund","BillingDoubleCharge","DoubleCharge","DuplicateChargeRefund","RefundDoubleCharge","RefundRequest","SubscriptionDoubleCharge","SubscriptionDoubleCharge_Refund"],
+      "tickets_found": 18,
+      "tickets_with_agent_answer": 18,
+      "draft_combinedResponse": "Jeg ser at det er trukket to ganger. Vi krediterer det ekstra beløpet innen 3-5 virkedager til kontoen din.",
+      "conflicts": [],
+      "missing_flags": [],
+      "notes": "100% konsistent svar på tvers av alle 18 tickets. Opprinnelig GDPR-scrubbet <PAYMENT_REF>-tag erstattet med 'krediterer' basert på kontekst."
+    },
+    {
+      "intent": "BillingInquiry",
+      "variants": ["BillingInquiry","CheckPaymentMethod","SubscriptionBilling","InvoiceQuery","InvoiceQuery_AvtaleGiro","InvoiceNotReceived","PaymentInquiry","PaymentMethodInquiry"],
+      "tickets_found": 14,
+      "tickets_with_agent_answer": 14,
+      "draft_combinedResponse": "Ditt abonnement betales via AvtaleGiro. Neste trekk er den 15. i måneden. Du finner alle fakturaer under Min Side > Betalingshistorikk.",
+      "conflicts": [],
+      "missing_flags": ["[MANGLER] Svaret dekker kun AvtaleGiro-kunder. Kunder med kort/Vipps er ikke representert i datagrunnlaget."],
+      "notes": "100% konsistent svar. Men alle 14 tickets gjelder AvtaleGiro – mangler varianter for andre betalingsmetoder."
+    },
+    {
+      "intent": "MergeDuplicateRegistrations",
+      "variants": ["MergeDuplicateRegistrations","DuplicateRegistration","DuplicateRegistrationMerge","MergeRegistrations"],
+      "tickets_found": 14,
+      "tickets_with_agent_answer": 14,
+      "draft_combinedResponse": "Jeg kan se overlappende registreringer. Send oss chipnumrene og vi slår sammen registreringene til én.",
+      "conflicts": [],
+      "missing_flags": [],
+      "notes": "100% konsistent svar på tvers av alle 14 tickets."
+    },
+    {
+      "intent": "ChipCorrection",
+      "variants": ["UpdateChipNumber","CorrectRegisteredChip","ChipReplacement"],
+      "tickets_found": 10,
+      "tickets_with_agent_answer": 10,
+      "draft_combinedResponse": "Be veterinæren sende oss en bekreftelse på riktig chipnummer med dyrets signalement. Vi oppdaterer registreringen.",
+      "conflicts": [
+        "[KONFLIKT] ticket 10309 (UpdateChipNumber): Svaret handler om betalingsproblem ('Prøv igjen med et annet betalingskort'), ikke chipkorrigering. Feilklassifisert ticket.",
+        "[KONFLIKT] ticket 95 (ChipReplacement): Svaret er en rå HTML-tråd med veterinærkorrespondanse, ikke et standardsvar. Inneholder PII-rester (navn, adresse, telefon, e-post) som er delvis scrubbet."
+      ],
+      "missing_flags": [],
+      "notes": "8 av 10 tickets har konsistent svar. 2 tickets er problematiske: 1 feilklassifisert (betalingsproblem), 1 rå HTML-tråd. Draft basert på de 8 konsistente svarene."
+    },
+    {
+      "intent": "QRTagDamaged",
+      "variants": ["QRTagReplacement","QRTagReplace","QRTagDamaged"],
+      "tickets_found": 9,
+      "tickets_with_agent_answer": 9,
+      "draft_combinedResponse": "Vi sender deg en ny QR-brikke kostnadsfritt. Oppgi adressen din og dyrets chipnummer så sender vi ny brikke i posten.",
+      "conflicts": [],
+      "missing_flags": [],
+      "notes": "100% konsistent svar på tvers av alle 9 tickets."
+    },
+    {
+      "intent": "QRTagReassign",
+      "variants": ["QRTagReassign","QRReassignTag","QRAssignCorrection","QRTagRelink"],
+      "tickets_found": 5,
+      "tickets_with_agent_answer": 5,
+      "draft_combinedResponse": "Gå til Min Side og koble brikken til riktig dyr under 'QR-brikker'. Du kan flytte brikken mellom dine registrerte dyr.",
+      "conflicts": [
+        "[KONFLIKT] ticket 10756 (QRTagReassign): Svaret handler om å bestille ekstra brikke ('Gå til Min Side > Dine dyr > velg dyret > Bestill QR-brikke. Ekstra brikker koster 99 kr.'), ikke om å reassigne eksisterende brikke. Feilklassifisert ticket."
+      ],
+      "missing_flags": [],
+      "notes": "4 av 5 tickets har konsistent svar om reassign-flyten. 1 ticket handler egentlig om å bestille ny brikke (feilklassifisert). Draft basert på de 4 konsistente svarene."
+    },
+    {
+      "intent": "AppTechnicalIssue",
+      "variants": ["AppCrash","AppCrashOnStartup"],
+      "tickets_found": 7,
+      "tickets_with_agent_answer": 7,
+      "draft_combinedResponse": "Prøv å slette appen og installere den på nytt fra App Store. Hvis det ikke hjelper, sjekk at du har iOS 16 eller nyere.",
+      "conflicts": [],
+      "missing_flags": ["[MANGLER] Svaret dekker kun iOS/App Store. Android-brukere (Google Play) er ikke representert i datagrunnlaget."],
+      "notes": "100% konsistent svar. GDPR-scrub har erstattet 'slette' med <PERSON> i 6 av 7 tickets (falsk positiv i scrubbing). Ticket 10039 har originalteksten intakt. Draft bruker korrekt versjon fra ticket 10039."
+    },
+    {
+      "intent": "CancelSubscription",
+      "variants": ["CancelSubscription"],
+      "tickets_found": 11,
+      "tickets_with_agent_answer": 11,
+      "draft_combinedResponse": "Vi har sagt opp abonnementet med umiddelbar virkning og krediterer gjenstående periode.",
+      "conflicts": [
+        "[KONFLIKT] Alle 11 tickets inneholder 'Kondolerer' – noe som tyder på at samtlige oppsigelser i datasettet er knyttet til dødsfall. Generell oppsigelse (ikke-dødsfall) er IKKE representert i agent-svarene."
+      ],
+      "missing_flags": ["[MANGLER] Ingen agent-svar for generell oppsigelse uten dødsfall-kontekst. Denne intenten trenger manuelt forfattet svar for ikke-dødsfall-scenarioer."],
+      "notes": "Alle 11 svar er identiske og inkluderer 'Kondolerer'. For en generell CancelSubscription-intent må svaret omformuleres uten dødsfall-forutsetning. Merk: <PAYMENT_REF>-tag erstattet med 'krediterer'."
+    }
+  ],
+
+  "alias_mappings": [
+    {"discovered_intent": "FamilyAccessRemoval", "maps_to": "FamilySharing", "tickets": 3},
+    {"discovered_intent": "FamilyAccessRemove", "maps_to": "FamilySharing", "tickets": 1},
+    {"discovered_intent": "RemoveFamilyMember", "maps_to": "FamilySharing", "tickets": 1},
+    {"discovered_intent": "LostPetStatus", "maps_to": "ReportLostPet", "tickets": 2},
+    {"discovered_intent": "LostStatusCheck", "maps_to": "ReportLostPet", "tickets": 1},
+    {"discovered_intent": "LostFoundResolved", "maps_to": "ReportFoundPet", "tickets": 1},
+    {"discovered_intent": "LostFoundStatusInquiry", "maps_to": "ReportLostPet", "tickets": 1},
+    {"discovered_intent": "PasswordReset", "maps_to": "LoginProblem", "tickets": 2},
+    {"discovered_intent": "RegistrationCorrection", "maps_to": "RegistrationError", "tickets": 1},
+    {"discovered_intent": "CancelSubscriptionDueToDeceasedPet", "maps_to": "PetDeceased", "tickets": 1}
+  ],
+
+  "quality_flags_summary": {
+    "total_conflicts": 4,
+    "total_missing": 3,
+    "clusters_clean": ["RefundRequest", "MergeDuplicateRegistrations", "QRTagDamaged"],
+    "clusters_with_conflicts": ["ChipCorrection", "QRTagReassign", "CancelSubscription"],
+    "clusters_with_missing_coverage": ["BillingInquiry", "AppTechnicalIssue", "CancelSubscription"]
+  }
+}
