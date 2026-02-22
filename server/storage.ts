@@ -52,6 +52,7 @@ export interface IStorage {
   getUnprocessedRawTickets(limit: number): Promise<typeof rawTickets.$inferSelect[]>;
   markRawTicketProcessed(ticketId: number): Promise<void>;
 
+  findStagingTicketId(subject: string | null, categoryId: number | null): Promise<number | null>;
   insertScrubbedTicket(ticket: InsertScrubbedTicket): Promise<void>;
   getScrubbedTicketCount(): Promise<number>;
   getUnmappedScrubbedTickets(limit: number): Promise<typeof scrubbedTickets.$inferSelect[]>;
@@ -271,6 +272,24 @@ export class DatabaseStorage implements IStorage {
       .update(rawTickets)
       .set({ processingStatus: "processed", processedAt: new Date() })
       .where(eq(rawTickets.ticketId, ticketId));
+  }
+
+  async findStagingTicketId(subject: string | null, categoryId: number | null): Promise<number | null> {
+    if (!subject) return null;
+    try {
+      const result = await db.execute(sql`
+        SELECT ticket_id FROM staging_tickets
+        WHERE subject = ${subject}
+        ${categoryId ? sql`AND category1_id = ${categoryId}` : sql``}
+        LIMIT 1
+      `);
+      const rows = result as any;
+      if (rows?.rows?.[0]?.ticket_id) return rows.rows[0].ticket_id;
+      if (Array.isArray(rows) && rows[0]?.ticket_id) return rows[0].ticket_id;
+      return null;
+    } catch {
+      return null;
+    }
   }
 
   async insertScrubbedTicket(ticket: InsertScrubbedTicket): Promise<void> {

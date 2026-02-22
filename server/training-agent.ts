@@ -196,8 +196,10 @@ export async function runGdprScrubbing(
     for (const ticket of unprocessed) {
       try {
         const scrubbed = scrubTicket(ticket);
+        const pureserviceId = await storage.findStagingTicketId(ticket.subject, ticket.categoryId);
         await storage.insertScrubbedTicket({
           ticketId: ticket.ticketId,
+          sourcePureserviceId: pureserviceId ?? undefined,
           category: ticket.category,
           categoryId: ticket.categoryId,
           subject: scrubbed.subject,

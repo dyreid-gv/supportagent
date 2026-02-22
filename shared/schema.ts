@@ -34,6 +34,7 @@ export const rawTickets = pgTable("raw_tickets", {
 export const scrubbedTickets = pgTable("scrubbed_tickets", {
   id: serial("id").primaryKey(),
   ticketId: integer("ticket_id").notNull().unique(),
+  sourcePureserviceId: integer("source_pureservice_id"),
   category: text("category"),
   categoryId: integer("category_id"),
   subject: text("subject"),
