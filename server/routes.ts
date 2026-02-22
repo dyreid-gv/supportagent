@@ -505,6 +505,17 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/admin/escalation-qc", async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 200;
+      const { generateQCReport } = await import("./case-escalation");
+      const report = await generateQCReport(Math.min(limit, 500));
+      res.json(report);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // ─── UNCATEGORIZED THEMES ────────────────────────────────────────
   app.get("/api/training/uncategorized-themes", async (_req, res) => {
     try {

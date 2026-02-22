@@ -53,6 +53,7 @@ import {
   XCircle,
   Lock,
   Download,
+  ClipboardCheck,
 } from "lucide-react";
 import { useState, useCallback } from "react";
 import { useToast } from "@/hooks/use-toast";
@@ -4896,8 +4897,15 @@ function CaseEscalationTab() {
 
   const escalationsQuery = useQuery<any[]>({ queryKey: ["/api/admin/escalations"] });
 
+  const [showQC, setShowQC] = useState(false);
+  const qcQuery = useQuery<any>({
+    queryKey: ["/api/admin/escalation-qc"],
+    enabled: showQC,
+  });
+
   const stats = statsQuery.data;
   const escalations = escalationsQuery.data || [];
+  const qc = qcQuery.data;
 
   const statusMutation = useMutation({
     mutationFn: async ({ id, status }: { id: number; status: string }) => {
@@ -4977,6 +4985,194 @@ function CaseEscalationTab() {
               <strong>ENV-flagg:</strong> ENABLE_CASE_ESCALATION={stats?.featureEnabled ? "true" : "false"} | ENABLE_PURESERVICE_POST={stats?.postEnabled ? "true" : "false"}
             </p>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base">Phase B Readiness — QC Report</CardTitle>
+            <Button
+              variant={showQC ? "default" : "outline"}
+              size="sm"
+              onClick={() => {
+                if (showQC) {
+                  queryClient.invalidateQueries({ queryKey: ["/api/admin/escalation-qc"] });
+                }
+                setShowQC(true);
+              }}
+              disabled={qcQuery.isLoading}
+              data-testid="btn-run-qc"
+            >
+              {qcQuery.isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <ClipboardCheck className="h-3.5 w-3.5 mr-1" />}
+              {showQC ? "Oppdater rapport" : "Kjør QC-rapport"}
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {!showQC ? (
+            <div className="text-center py-6 text-muted-foreground">
+              <ClipboardCheck className="h-7 w-7 mx-auto mb-2 opacity-40" />
+              <p className="text-sm">Kjør QC-rapporten for å se Phase B readiness-status.</p>
+              <p className="text-xs mt-1">Analyserer siste 200 outbox-elementer (read-only, ingen DB-endringer).</p>
+            </div>
+          ) : qcQuery.isLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-5 w-5 animate-spin mr-2" />
+              <span className="text-sm text-muted-foreground">Genererer QC-rapport...</span>
+            </div>
+          ) : qc ? (
+            <div className="space-y-4">
+              <div className={`p-3 rounded-lg border-2 flex items-center gap-3 ${qc.overallVerdict === "PASS" ? "border-green-500/40 bg-green-50/30 dark:bg-green-950/10" : "border-red-500/40 bg-red-50/30 dark:bg-red-950/10"}`}>
+                <div className={`p-2 rounded-lg ${qc.overallVerdict === "PASS" ? "bg-green-100 dark:bg-green-900/30" : "bg-red-100 dark:bg-red-900/30"}`}>
+                  {qc.overallVerdict === "PASS" ? <CheckCircle className="h-5 w-5 text-green-600" /> : <XCircle className="h-5 w-5 text-red-600" />}
+                </div>
+                <div>
+                  <p className="font-semibold" data-testid="text-qc-verdict">Phase B Readiness: {qc.overallVerdict}</p>
+                  <p className="text-xs text-muted-foreground">{qc.itemCount} elementer analysert • {qc.generatedAt ? new Date(qc.generatedAt).toLocaleString("nb-NO") : ""}</p>
+                </div>
+              </div>
+
+              {qc.blockingIssues?.length > 0 && (
+                <div className="p-3 bg-red-50/50 dark:bg-red-950/10 rounded-lg border border-red-200 dark:border-red-800">
+                  <p className="text-sm font-medium text-red-700 dark:text-red-400 mb-1">Blokkerende problemer:</p>
+                  {qc.blockingIssues.map((issue: string, i: number) => (
+                    <p key={i} className="text-xs text-red-600 dark:text-red-400">• {issue}</p>
+                  ))}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className={`p-3 rounded-lg border ${qc.readinessGates?.gate1?.pass ? "border-green-300 dark:border-green-700" : "border-red-300 dark:border-red-700"}`}>
+                  <div className="flex items-center gap-2 mb-1">
+                    {qc.readinessGates?.gate1?.pass ? <CheckCircle className="h-3.5 w-3.5 text-green-500" /> : <XCircle className="h-3.5 w-3.5 text-red-500" />}
+                    <span className="text-xs font-medium">Gate 1: Kategori-dekning</span>
+                  </div>
+                  <p className="text-lg font-bold">{qc.readinessGates?.gate1?.value || 0}%</p>
+                  <p className="text-xs text-muted-foreground">Terskel: ≥{qc.readinessGates?.gate1?.threshold || 90}% gyldig category1Id</p>
+                </div>
+
+                <div className={`p-3 rounded-lg border ${qc.readinessGates?.gate2?.pass ? "border-green-300 dark:border-green-700" : "border-red-300 dark:border-red-700"}`}>
+                  <div className="flex items-center gap-2 mb-1">
+                    {qc.readinessGates?.gate2?.pass ? <CheckCircle className="h-3.5 w-3.5 text-green-500" /> : <XCircle className="h-3.5 w-3.5 text-red-500" />}
+                    <span className="text-xs font-medium">Gate 2: Dedupe</span>
+                  </div>
+                  <p className="text-lg font-bold">{qc.dedupe?.multiplePerSession || 0} slipped</p>
+                  <p className="text-xs text-muted-foreground">Duplikat-par: {qc.dedupe?.duplicateEmailIntentPairs || 0}</p>
+                </div>
+
+                <div className={`p-3 rounded-lg border ${qc.readinessGates?.gate3?.pass ? "border-green-300 dark:border-green-700" : "border-red-300 dark:border-red-700"}`}>
+                  <div className="flex items-center gap-2 mb-1">
+                    {qc.readinessGates?.gate3?.pass ? <CheckCircle className="h-3.5 w-3.5 text-green-500" /> : <XCircle className="h-3.5 w-3.5 text-red-500" />}
+                    <span className="text-xs font-medium">Gate 3: Innhold</span>
+                  </div>
+                  <p className="text-lg font-bold">{qc.readinessGates?.gate3?.emptyOrShort || 0}/{qc.readinessGates?.gate3?.total || 0}</p>
+                  <p className="text-xs text-muted-foreground">Tomme/korte transkripsjoner (≤10%)</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <Card className="border">
+                  <CardHeader className="pb-2 pt-3 px-3">
+                    <CardTitle className="text-sm">Intent-fordeling</CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-3 pb-3">
+                    {qc.distribution?.topIntents?.length > 0 ? (
+                      <div className="space-y-1">
+                        {qc.distribution.topIntents.map((i: any) => (
+                          <div key={i.intentId} className="flex items-center justify-between text-xs">
+                            <span className="font-mono truncate max-w-[180px]" title={i.intentId}>{i.intentId}</span>
+                            <span className="text-muted-foreground">{i.count} ({i.pct}%)</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : <p className="text-xs text-muted-foreground">Ingen data</p>}
+                    <div className="mt-2 pt-2 border-t text-xs text-muted-foreground">
+                      Fallback-rate: <strong>{qc.distribution?.fallbackCategoryRate || 0}%</strong>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border">
+                  <CardHeader className="pb-2 pt-3 px-3">
+                    <CardTitle className="text-sm">Kategori-fordeling</CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-3 pb-3">
+                    {qc.distribution?.topCategories?.length > 0 ? (
+                      <div className="space-y-1">
+                        {qc.distribution.topCategories.map((c: any) => (
+                          <div key={c.category} className="flex items-center justify-between text-xs">
+                            <span className="truncate max-w-[180px]" title={c.category}>{c.category}</span>
+                            <span className="text-muted-foreground">{c.count} ({c.pct}%)</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : <p className="text-xs text-muted-foreground">Ingen data</p>}
+                    <div className="mt-2 pt-2 border-t text-xs text-muted-foreground">
+                      Manglende underkategori: <strong>{qc.distribution?.missingSubcategoryRate || 0}%</strong>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <Card className="border">
+                <CardHeader className="pb-2 pt-3 px-3">
+                  <CardTitle className="text-sm">Payload-design verifisering</CardTitle>
+                </CardHeader>
+                <CardContent className="px-3 pb-3">
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="flex items-center gap-2">
+                      {qc.payloadDesign?.emailInDedicatedField ? <CheckCircle className="h-3.5 w-3.5 text-green-500" /> : <XCircle className="h-3.5 w-3.5 text-red-500" />}
+                      <span>E-post i dedikert felt (userEmail)</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {qc.payloadDesign?.transcriptContainsEmail === 0 ? <CheckCircle className="h-3.5 w-3.5 text-green-500" /> : <XCircle className="h-3.5 w-3.5 text-red-500" />}
+                      <span>Scrubbet transcript uten e-post ({qc.payloadDesign?.transcriptContainsEmail || 0} brudd)</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {qc.payloadDesign?.subjectMissingIntent === 0 ? <CheckCircle className="h-3.5 w-3.5 text-green-500" /> : <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />}
+                      <span>Subject inkluderer intentId ({qc.payloadDesign?.subjectMissingIntent || 0} mangler)</span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {qc.contentQuality?.samples?.length > 0 && (
+                <Card className="border">
+                  <CardHeader className="pb-2 pt-3 px-3">
+                    <CardTitle className="text-sm">Innholds-stikkprøver ({qc.contentQuality.samples.length} av {qc.itemCount})</CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-3 pb-3">
+                    <ScrollArea className="max-h-[400px]">
+                      <div className="space-y-2">
+                        {qc.contentQuality.samples.map((s: any) => (
+                          <div key={s.id} className={`p-2 rounded border text-xs ${s.isEmpty ? "border-red-300 dark:border-red-700 bg-red-50/30 dark:bg-red-950/10" : s.transcriptLength < 50 ? "border-amber-300 dark:border-amber-700 bg-amber-50/30 dark:bg-amber-950/10" : ""}`}>
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="font-mono text-muted-foreground">#{s.id}</span>
+                              <div className="flex items-center gap-2">
+                                {s.intentId && <Badge variant="outline" className="text-xs">{s.intentId}</Badge>}
+                                {s.category && <Badge variant="secondary" className="text-xs">{s.category}</Badge>}
+                                {s.isEmpty && <Badge variant="destructive" className="text-xs">TOM</Badge>}
+                                {!s.isEmpty && s.transcriptLength < 50 && <Badge variant="secondary" className="text-xs">KORT</Badge>}
+                              </div>
+                            </div>
+                            <p className="font-medium mb-1 truncate" title={s.subject}>{s.subject}</p>
+                            {!s.isEmpty && (
+                              <p className="text-muted-foreground whitespace-pre-wrap break-words">{s.transcriptPreview}{s.transcriptLength > 300 ? "…" : ""}</p>
+                            )}
+                            <p className="text-muted-foreground mt-1">Transkript-lengde: {s.transcriptLength} tegn</p>
+                          </div>
+                        ))}
+                      </div>
+                    </ScrollArea>
+                    <div className="mt-2 pt-2 border-t text-xs text-muted-foreground">
+                      Tomme: {qc.contentQuality.emptyTranscriptCount} • Korte (&lt;50 tegn): {qc.contentQuality.shortTranscriptCount}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 

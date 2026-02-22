@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { eq, and, gte, sql } from "drizzle-orm";
+import { eq, and, gte, desc, sql } from "drizzle-orm";
 import { escalationsOutbox, messages, canonicalIntents } from "@shared/schema";
 import { scrubText } from "./gdpr-scrubber";
 
@@ -313,4 +313,174 @@ export async function updateEscalationStatus(id: number, status: string, errorMe
       ...(status === "posted" ? { postedAt: new Date() } : {}),
     })
     .where(eq(escalationsOutbox.id, id));
+}
+
+export interface QCReport {
+  generatedAt: string;
+  itemCount: number;
+  distribution: {
+    topIntents: { intentId: string; count: number; pct: number }[];
+    topCategories: { category: string; count: number; pct: number }[];
+    fallbackCategoryRate: number;
+    missingSubcategoryRate: number;
+  };
+  dedupe: {
+    duplicateEmailIntentPairs: number;
+    multiplePerSession: number;
+    dedupeWorking: boolean;
+  };
+  contentQuality: {
+    samples: {
+      id: number;
+      subject: string;
+      transcriptPreview: string;
+      intentId: string | null;
+      category: string | null;
+      transcriptLength: number;
+      isEmpty: boolean;
+    }[];
+    emptyTranscriptCount: number;
+    shortTranscriptCount: number;
+  };
+  payloadDesign: {
+    emailInDedicatedField: boolean;
+    transcriptContainsEmail: number;
+    subjectIncludesIntent: number;
+    subjectMissingIntent: number;
+  };
+  readinessGates: {
+    gate1: { label: string; value: number; threshold: number; pass: boolean };
+    gate2: { label: string; dedupeActive: boolean; slippedDuplicates: number; pass: boolean };
+    gate3: { label: string; emptyOrShort: number; total: number; pass: boolean };
+  };
+  overallVerdict: "PASS" | "FAIL";
+  blockingIssues: string[];
+}
+
+export async function generateQCReport(limit = 200): Promise<QCReport> {
+  const rows = await db
+    .select()
+    .from(escalationsOutbox)
+    .orderBy(desc(escalationsOutbox.createdAt))
+    .limit(limit);
+
+  const n = rows.length;
+  const blockingIssues: string[] = [];
+
+  const intentCounts = new Map<string, number>();
+  const categoryCounts = new Map<string, number>();
+  let fallbackCount = 0;
+  let missingSubcatCount = 0;
+
+  for (const row of rows) {
+    const intent = row.intentId || "(null)";
+    intentCounts.set(intent, (intentCounts.get(intent) || 0) + 1);
+
+    const cat = row.category1Id || "(null)";
+    categoryCounts.set(cat, (categoryCounts.get(cat) || 0) + 1);
+
+    if (!row.category1Id || row.category1Id === "GeneralInquiry") fallbackCount++;
+    if (!row.category2Id) missingSubcatCount++;
+  }
+
+  const topIntents = Array.from(intentCounts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 15)
+    .map(([intentId, count]) => ({ intentId, count, pct: n > 0 ? Math.round((count / n) * 1000) / 10 : 0 }));
+
+  const topCategories = Array.from(categoryCounts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 15)
+    .map(([category, count]) => ({ category, count, pct: n > 0 ? Math.round((count / n) * 1000) / 10 : 0 }));
+
+  const sessionCounts = new Map<number, number>();
+  const emailIntentPairs = new Map<string, number>();
+
+  for (const row of rows) {
+    sessionCounts.set(row.conversationId, (sessionCounts.get(row.conversationId) || 0) + 1);
+
+    const key = `${row.userEmail}||${row.intentId || "null"}`;
+    emailIntentPairs.set(key, (emailIntentPairs.get(key) || 0) + 1);
+  }
+
+  const multiplePerSession = Array.from(sessionCounts.values()).filter(c => c > 1).length;
+  const duplicateEmailIntentPairs = Array.from(emailIntentPairs.values()).filter(c => c > 1).length;
+
+  const EMAIL_PATTERN = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
+  let transcriptContainsEmail = 0;
+  let subjectIncludesIntent = 0;
+  let subjectMissingIntent = 0;
+  let emptyTranscriptCount = 0;
+  let shortTranscriptCount = 0;
+
+  for (const row of rows) {
+    if (row.chatTranscript && EMAIL_PATTERN.test(row.chatTranscript)) transcriptContainsEmail++;
+    if (row.subject && row.intentId && row.subject.includes(row.intentId)) subjectIncludesIntent++;
+    if (row.subject && row.intentId && !row.subject.includes(row.intentId)) subjectMissingIntent++;
+    if (!row.chatTranscript || row.chatTranscript.trim().length === 0) emptyTranscriptCount++;
+    else if (row.chatTranscript.trim().length < 50) shortTranscriptCount++;
+  }
+
+  const shuffled = [...rows].sort(() => Math.random() - 0.5);
+  const sampleRows = shuffled.slice(0, Math.min(20, n));
+  const samples = sampleRows.map(row => ({
+    id: row.id,
+    subject: row.subject || "",
+    transcriptPreview: (row.chatTranscript || "").slice(0, 300),
+    intentId: row.intentId,
+    category: row.category1Id,
+    transcriptLength: (row.chatTranscript || "").length,
+    isEmpty: !row.chatTranscript || row.chatTranscript.trim().length === 0,
+  }));
+
+  const validCat1Pct = n > 0 ? Math.round(((n - fallbackCount) / n) * 1000) / 10 : 0;
+  const gate1Pass = n === 0 || validCat1Pct >= 90;
+  if (!gate1Pass) blockingIssues.push(`Gate 1 FAIL: Valid category1Id rate ${validCat1Pct}% < 90% threshold`);
+
+  const gate2Pass = n === 0 || (multiplePerSession === 0);
+  if (!gate2Pass) blockingIssues.push(`Gate 2 FAIL: ${multiplePerSession} sessions have >1 escalation (dedupe bypass)`);
+  if (duplicateEmailIntentPairs > 0) blockingIssues.push(`Gate 2 WARNING: ${duplicateEmailIntentPairs} email+intent pairs appear multiple times (may be within different 24h windows)`);
+
+  const emptyOrShort = emptyTranscriptCount + shortTranscriptCount;
+  const gate3Pass = n === 0 || emptyOrShort <= Math.ceil(n * 0.1);
+  if (!gate3Pass) blockingIssues.push(`Gate 3 FAIL: ${emptyOrShort}/${n} items have empty/too-short transcripts (>${Math.ceil(n * 0.1)} threshold)`);
+
+  if (transcriptContainsEmail > 0) blockingIssues.push(`PAYLOAD ISSUE: ${transcriptContainsEmail} scrubbed transcripts still contain email addresses`);
+  if (n > 0 && subjectMissingIntent > 0) blockingIssues.push(`PAYLOAD ISSUE: ${subjectMissingIntent} subjects missing intentId`);
+
+  const overallVerdict = (gate1Pass && gate2Pass && gate3Pass && transcriptContainsEmail === 0) ? "PASS" : "FAIL";
+
+  return {
+    generatedAt: new Date().toISOString(),
+    itemCount: n,
+    distribution: {
+      topIntents,
+      topCategories,
+      fallbackCategoryRate: n > 0 ? Math.round((fallbackCount / n) * 1000) / 10 : 0,
+      missingSubcategoryRate: n > 0 ? Math.round((missingSubcatCount / n) * 1000) / 10 : 0,
+    },
+    dedupe: {
+      duplicateEmailIntentPairs,
+      multiplePerSession,
+      dedupeWorking: multiplePerSession === 0,
+    },
+    contentQuality: {
+      samples,
+      emptyTranscriptCount,
+      shortTranscriptCount,
+    },
+    payloadDesign: {
+      emailInDedicatedField: true,
+      transcriptContainsEmail,
+      subjectIncludesIntent,
+      subjectMissingIntent,
+    },
+    readinessGates: {
+      gate1: { label: "Valid category1Id >= 90%", value: validCat1Pct, threshold: 90, pass: gate1Pass },
+      gate2: { label: "Dedupe prevention working", dedupeActive: multiplePerSession === 0, slippedDuplicates: duplicateEmailIntentPairs, pass: gate2Pass },
+      gate3: { label: "Content usefulness (empty/short <= 10%)", emptyOrShort, total: n, pass: gate3Pass },
+    },
+    overallVerdict,
+    blockingIssues,
+  };
 }
