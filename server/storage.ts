@@ -42,6 +42,8 @@ import {
   type InsertCanonicalIntent,
   discoveredClusters,
   type InsertDiscoveredCluster,
+  playbookCandidates,
+  type InsertPlaybookCandidate,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -236,6 +238,13 @@ export interface IStorage {
   insertDiscoveredCluster(cluster: InsertDiscoveredCluster): Promise<number>;
   getDiscoveredClusters(runId?: number): Promise<typeof discoveredClusters.$inferSelect[]>;
   clearDiscoveredClusters(): Promise<void>;
+
+  getPlaybookCandidates(): Promise<typeof playbookCandidates.$inferSelect[]>;
+  getPlaybookCandidateById(id: number): Promise<typeof playbookCandidates.$inferSelect | undefined>;
+  getPlaybookCandidateByIntentId(intentId: string): Promise<typeof playbookCandidates.$inferSelect | undefined>;
+  upsertPlaybookCandidate(candidate: InsertPlaybookCandidate): Promise<typeof playbookCandidates.$inferSelect>;
+  updatePlaybookCandidate(id: number, data: Partial<InsertPlaybookCandidate>): Promise<void>;
+  deletePlaybookCandidate(id: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1600,6 +1609,42 @@ export class DatabaseStorage implements IStorage {
 
   async clearDiscoveredClusters(): Promise<void> {
     await db.delete(discoveredClusters);
+  }
+
+  async getPlaybookCandidates(): Promise<typeof playbookCandidates.$inferSelect[]> {
+    return db.select().from(playbookCandidates).orderBy(desc(playbookCandidates.updatedAt));
+  }
+
+  async getPlaybookCandidateById(id: number): Promise<typeof playbookCandidates.$inferSelect | undefined> {
+    const [row] = await db.select().from(playbookCandidates).where(eq(playbookCandidates.id, id));
+    return row;
+  }
+
+  async getPlaybookCandidateByIntentId(intentId: string): Promise<typeof playbookCandidates.$inferSelect | undefined> {
+    const [row] = await db.select().from(playbookCandidates).where(eq(playbookCandidates.intentId, intentId));
+    return row;
+  }
+
+  async upsertPlaybookCandidate(candidate: InsertPlaybookCandidate): Promise<typeof playbookCandidates.$inferSelect> {
+    const existing = await this.getPlaybookCandidateByIntentId(candidate.intentId);
+    if (existing) {
+      await db.update(playbookCandidates)
+        .set({ ...candidate, updatedAt: new Date() })
+        .where(eq(playbookCandidates.id, existing.id));
+      return (await this.getPlaybookCandidateById(existing.id))!;
+    }
+    const [row] = await db.insert(playbookCandidates).values(candidate).returning();
+    return row;
+  }
+
+  async updatePlaybookCandidate(id: number, data: Partial<InsertPlaybookCandidate>): Promise<void> {
+    await db.update(playbookCandidates)
+      .set({ ...data, updatedAt: new Date() } as any)
+      .where(eq(playbookCandidates.id, id));
+  }
+
+  async deletePlaybookCandidate(id: number): Promise<void> {
+    await db.delete(playbookCandidates).where(eq(playbookCandidates.id, id));
   }
 }
 

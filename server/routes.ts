@@ -516,6 +516,149 @@ export async function registerRoutes(
     }
   });
 
+  // ─── PLAYBOOK CANDIDATES (Manuell forfatter) ────────────────────
+  app.get("/api/admin/playbook-candidates", async (_req, res) => {
+    try {
+      const candidates = await storage.getPlaybookCandidates();
+      res.json(candidates);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/admin/playbook-candidates/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const candidate = await storage.getPlaybookCandidateById(id);
+      if (!candidate) return res.status(404).json({ error: "Candidate not found" });
+      res.json(candidate);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put("/api/admin/playbook-candidates/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const allowedFields = ["combinedResponse", "resolutionSteps", "keywords", "category", "subcategory", "actionType", "requiresLogin", "notesForReviewer"];
+      const update: Record<string, any> = {};
+      for (const key of allowedFields) {
+        if (req.body[key] !== undefined) update[key] = req.body[key];
+      }
+      await storage.updatePlaybookCandidate(id, update);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/admin/playbook-candidates/:id/approve", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const candidate = await storage.getPlaybookCandidateById(id);
+      if (!candidate) return res.status(404).json({ error: "Candidate not found" });
+      if (!candidate.combinedResponse || candidate.combinedResponse.trim().length === 0) {
+        return res.status(400).json({ error: "combinedResponse er påkrevd for godkjenning" });
+      }
+
+      const authoredBy = req.body.authoredBy || "admin";
+
+      await storage.upsertPlaybookEntry({
+        intent: candidate.intentId,
+        hjelpesenterCategory: candidate.category || undefined,
+        hjelpesenterSubcategory: candidate.subcategory || undefined,
+        keywords: candidate.keywords || undefined,
+        resolutionSteps: candidate.resolutionSteps || undefined,
+        combinedResponse: candidate.combinedResponse,
+        actionType: candidate.actionType || "INFO_ONLY",
+        requiresLogin: candidate.requiresLogin || false,
+        ticketCount: candidate.ticketsBasis || 0,
+        isActive: true,
+      });
+
+      await storage.upsertCanonicalIntent({
+        intentId: candidate.intentId,
+        category: candidate.category || "Ukategorisert",
+        subcategory: candidate.subcategory || undefined,
+        source: "MANUAL_AUTHORED",
+        actionable: candidate.requiresLogin || false,
+        approved: true,
+        keywords: candidate.keywords || undefined,
+        description: candidate.combinedResponse.substring(0, 200),
+        infoText: candidate.combinedResponse,
+      });
+
+      try {
+        await generateAndStoreEmbedding(candidate.intentId);
+        await refreshIntentIndex();
+      } catch (embErr: any) {
+        console.error(`[PlaybookCandidate] Embedding failed for ${candidate.intentId}:`, embErr.message);
+      }
+
+      await storage.updatePlaybookCandidate(id, {
+        status: "APPROVED",
+        authoredBy,
+        authoredAt: new Date(),
+      } as any);
+
+      res.json({ success: true, intentId: candidate.intentId });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/admin/playbook-candidates/:id/reject", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const candidate = await storage.getPlaybookCandidateById(id);
+      if (!candidate) return res.status(404).json({ error: "Candidate not found" });
+
+      await storage.updatePlaybookCandidate(id, {
+        status: "REJECTED",
+        rejectionReason: req.body.reason || null,
+      } as any);
+
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/admin/playbook-candidates/seed", async (_req, res) => {
+    try {
+      const seeds = [
+        {
+          intentId: "SmartTagBatteryInfo",
+          category: "Smart Tag",
+          subcategory: "Batteriinformasjon",
+          status: "NEEDS_MANUAL_AUTHORING",
+          ticketsBasis: 0,
+          source: "FLAGGED_INCORRECT",
+          notesForReviewer: "Historiske tickets inneholder feil info om at batteriet IKKE kan byttes. Faktisk produkt: batteriet ER utbyttbart. Krever manuell verifisering med produkteier før aktivering.",
+        },
+        {
+          intentId: "SmartTagNotificationIssue",
+          category: "Smart Tag",
+          subcategory: "Varsler",
+          status: "NEEDS_MANUAL_AUTHORING",
+          ticketsBasis: 0,
+          source: "DEPRECATED_CLUSTER",
+          notesForReviewer: "Mitt Spor-funksjon (geofence) eksisterer ikke i Smart Tag. Avklar med produkteier hva gjeldende Smart Tag-varsler faktisk støtter.",
+        },
+      ];
+
+      const results = [];
+      for (const seed of seeds) {
+        const result = await storage.upsertPlaybookCandidate(seed as any);
+        results.push(result);
+      }
+
+      res.json({ success: true, count: results.length, candidates: results });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // ─── UNCATEGORIZED THEMES ────────────────────────────────────────
   app.get("/api/training/uncategorized-themes", async (_req, res) => {
     try {

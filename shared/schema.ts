@@ -464,6 +464,29 @@ export const escalationsOutbox = pgTable("escalations_outbox", {
 
 export const insertEscalationSchema = createInsertSchema(escalationsOutbox).omit({ id: true, createdAt: true, postedAt: true });
 
+export const playbookCandidates = pgTable("playbook_candidates", {
+  id: serial("id").primaryKey(),
+  intentId: text("intent_id").notNull().unique(),
+  category: text("category"),
+  subcategory: text("subcategory"),
+  status: text("status").notNull().default("DRAFT_READY"),
+  combinedResponse: text("combined_response"),
+  resolutionSteps: text("resolution_steps"),
+  keywords: text("keywords"),
+  actionType: text("action_type").default("INFO_ONLY"),
+  requiresLogin: boolean("requires_login").default(false),
+  notesForReviewer: text("notes_for_reviewer"),
+  ticketsBasis: integer("tickets_basis").default(0),
+  source: text("source").default("AUTO_EXTRACTED"),
+  authoredBy: text("authored_by"),
+  authoredAt: timestamp("authored_at"),
+  rejectionReason: text("rejection_reason"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const insertPlaybookCandidateSchema = createInsertSchema(playbookCandidates).omit({ id: true, createdAt: true, updatedAt: true });
+
 export const insertChatbotInteractionSchema = createInsertSchema(chatbotInteractions).omit({ id: true });
 export const insertHelpCenterArticleSchema = createInsertSchema(helpCenterArticles).omit({ id: true });
 export const insertResponseTemplateSchema = createInsertSchema(responseTemplates).omit({ id: true });
@@ -525,3 +548,5 @@ export type DiscoveredCluster = typeof discoveredClusters.$inferSelect;
 export type InsertDiscoveredCluster = z.infer<typeof insertDiscoveredClusterSchema>;
 export type EscalationOutbox = typeof escalationsOutbox.$inferSelect;
 export type InsertEscalation = z.infer<typeof insertEscalationSchema>;
+export type PlaybookCandidate = typeof playbookCandidates.$inferSelect;
+export type InsertPlaybookCandidate = z.infer<typeof insertPlaybookCandidateSchema>;
