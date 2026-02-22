@@ -1,0 +1,724 @@
+{
+  "document_type": "Mapping Decision Document",
+  "generated_from": "Fragmentation Consolidation Proposal 2026-02-21",
+  "summary": {
+    "total_mappings": 46,
+    "godkjenn": 11,
+    "avvis": 1,
+    "ny_intent_needed": 34,
+    "new_intents_to_create": 8
+  },
+  "decisions": [
+    {
+      "discovered_intent": "UpdateChipNumber",
+      "suggested_canonical": "RegistrationError",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "ChipCorrection",
+      "begrunnelse": "Endre/bytte chipnr er en spesifikk handling, ikke en generell registreringsfeil",
+      "example_questions": [
+        "Veterinæren registrerte feil chipnummer på katten min. Kan dette rettes?",
+        "Jeg prøvde å registrere hunden min men betalingen gikk ikke gjennom. Hva gjør jeg?",
+        "Chip i ustand/ finnner den ikke på dyre  Hei! Lurte på hvordan man bytter chip nr på et dyr? Vi finner ikke den første chip som ble satt på dyret. Har satt inn en ny chip og registrert den hos dere allerede. men vil gjerne fjerne den <PERSON>. Er det mulig? Ny chip nr er <CHIP_ID> ;MVh <PERSON>  Chip nr: <CHIP_ID>"
+      ],
+      "ticket_count": 7
+    },
+    {
+      "discovered_intent": "AppCrash",
+      "suggested_canonical": "AppLoginIssue",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "AppTechnicalIssue",
+      "begrunnelse": "Krasj er ikke innloggingsproblem. Helt ulik feilsøking og løsning",
+      "example_questions": [
+        "DyreID-appen krasjer hver gang jeg åpner den etter siste oppdatering. iPhone 13."
+      ],
+      "ticket_count": 6
+    },
+    {
+      "discovered_intent": "BillingInquiry",
+      "suggested_canonical": "SubscriptionComparison",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "BillingInquiry",
+      "begrunnelse": "Fakturaspørsmål er ikke sammenligning av abonnement",
+      "example_questions": [
+        "Jeg har ikke mottatt faktura for abonnementet. Betaler jeg via AvtaleGiro?"
+      ],
+      "ticket_count": 5
+    },
+    {
+      "discovered_intent": "MergeDuplicateRegistrations",
+      "suggested_canonical": "RegistrationError",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "MergeDuplicateRegistrations",
+      "begrunnelse": "Sammenslåing av duplikater er en egen prosess, ikke en feilretting",
+      "example_questions": [
+        "Det ser ut som hunden min er registrert to ganger med ulike chipnumre. Kan dere rydde opp?"
+      ],
+      "ticket_count": 5
+    },
+    {
+      "discovered_intent": "QRTagReplacement",
+      "suggested_canonical": "QRTagLost",
+      "match_method": "semantic",
+      "risk_flag": true,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "QRTagDamaged",
+      "begrunnelse": "Skadet/uleselig brikke er ikke det samme som mistet. Kan kreve foto som dokumentasjon",
+      "example_questions": [
+        "QR-brikken min skannes ikke. Koden er slitt og uleselig."
+      ],
+      "ticket_count": 5
+    },
+    {
+      "discovered_intent": "DoubleChargeRefund",
+      "suggested_canonical": "SubscriptionComparison",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "RefundRequest",
+      "begrunnelse": "Dobbeltbelastning/refusjon er en egen prosess, ikke abonnementssammenligning",
+      "example_questions": [
+        "Jeg er trukket dobbelt for abonnementet denne måneden. Kan dere sjekke?"
+      ],
+      "ticket_count": 4
+    },
+    {
+      "discovered_intent": "DuplicateRegistration",
+      "suggested_canonical": "RegistrationError",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "MergeDuplicateRegistrations",
+      "begrunnelse": "Duplikat av MergeDuplicateRegistrations",
+      "example_questions": [
+        "Det ser ut som hunden min er registrert to ganger med ulike chipnumre. Kan dere rydde opp?"
+      ],
+      "ticket_count": 4
+    },
+    {
+      "discovered_intent": "BillingRefund",
+      "suggested_canonical": "SubscriptionComparison",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "RefundRequest",
+      "begrunnelse": "Refusjon er ikke abonnementssammenligning",
+      "example_questions": [
+        "Jeg er trukket dobbelt for abonnementet denne måneden. Kan dere sjekke?"
+      ],
+      "ticket_count": 3
+    },
+    {
+      "discovered_intent": "PaymentRefund",
+      "suggested_canonical": "SubscriptionComparison",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "RefundRequest",
+      "begrunnelse": "Refusjon er ikke abonnementssammenligning",
+      "example_questions": [
+        "Jeg er trukket dobbelt for abonnementet denne måneden. Kan dere sjekke?"
+      ],
+      "ticket_count": 2
+    },
+    {
+      "discovered_intent": "SubscriptionRefund",
+      "suggested_canonical": "SubscriptionComparison",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "RefundRequest",
+      "begrunnelse": "Refusjon er ikke abonnementssammenligning",
+      "example_questions": [
+        "Jeg er trukket dobbelt for abonnementet denne måneden. Kan dere sjekke?"
+      ],
+      "ticket_count": 2
+    },
+    {
+      "discovered_intent": "CheckPaymentMethod",
+      "suggested_canonical": "SubscriptionComparison",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "BillingInquiry",
+      "begrunnelse": "Betalingsmetode-spørsmål er ikke abonnementssammenligning",
+      "example_questions": [
+        "Jeg har ikke mottatt faktura for abonnementet. Betaler jeg via AvtaleGiro?"
+      ],
+      "ticket_count": 2
+    },
+    {
+      "discovered_intent": "DuplicateRegistrationMerge",
+      "suggested_canonical": "RegistrationError",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "MergeDuplicateRegistrations",
+      "begrunnelse": "Duplikat av MergeDuplicateRegistrations",
+      "example_questions": [
+        "Det ser ut som hunden min er registrert to ganger med ulike chipnumre. Kan dere rydde opp?"
+      ],
+      "ticket_count": 2
+    },
+    {
+      "discovered_intent": "MergeRegistrations",
+      "suggested_canonical": "RegistrationError",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "MergeDuplicateRegistrations",
+      "begrunnelse": "Duplikat av MergeDuplicateRegistrations",
+      "example_questions": [
+        "Det ser ut som hunden min er registrert to ganger med ulike chipnumre. Kan dere rydde opp?"
+      ],
+      "ticket_count": 2
+    },
+    {
+      "discovered_intent": "CorrectRegisteredChip",
+      "suggested_canonical": "RegistrationError",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "ChipCorrection",
+      "begrunnelse": "Korrigere chipnr er samme som UpdateChipNumber",
+      "example_questions": [
+        "Veterinæren registrerte feil chipnummer på katten min. Kan dette rettes?",
+        "Jeg prøvde å registrere hunden min men betalingen gikk ikke gjennom. Hva gjør jeg?",
+        "Chip i ustand/ finnner den ikke på dyre  Hei! Lurte på hvordan man bytter chip nr på et dyr? Vi finner ikke den første chip som ble satt på dyret. Har satt inn en ny chip og registrert den hos dere allerede. men vil gjerne fjerne den <PERSON>. Er det mulig? Ny chip nr er <CHIP_ID> ;MVh <PERSON>  Chip nr: <CHIP_ID>"
+      ],
+      "ticket_count": 2
+    },
+    {
+      "discovered_intent": "FamilyAccessRemoval",
+      "suggested_canonical": "FamilySharing",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "GODKJENN",
+      "ny_intent": null,
+      "begrunnelse": "Fjerne familietilgang er en del av FamilySharing-flyten",
+      "example_questions": [
+        "Jeg og min eks har gått fra hverandre. Kan dere fjerne hans tilgang til katten?",
+        "Jeg og min eks har gått fra hverandre. Kan dere fjerne <PERSON> tilgang til katten?"
+      ],
+      "ticket_count": 2
+    },
+    {
+      "discovered_intent": "LostPetStatus",
+      "suggested_canonical": "ReportLostPet",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "GODKJENN",
+      "ny_intent": null,
+      "begrunnelse": "Statussjekk på savnet dyr hører naturlig inn under ReportLostPet",
+      "example_questions": [
+        "Katten har vært savnet i 3 måneder nå. Er det noen som har funnet den?",
+        "Vi fant hunden vår igjen! Kan dere fjerne savnet-meldingen?"
+      ],
+      "ticket_count": 2
+    },
+    {
+      "discovered_intent": "QRTagReassign",
+      "suggested_canonical": "QRTagActivation",
+      "match_method": "semantic",
+      "risk_flag": true,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "QRTagReassign",
+      "begrunnelse": "Flytte brikke til annet dyr er ikke det samme som aktivere ny brikke. Krever deaktivering av gammel kobling",
+      "example_questions": [
+        "Når noen skanner QR-brikken vises feil dyr. Brikken var koblet til forrige hund.",
+        "Kan jeg bestille en ekstra QR-brikke til halsbåndet? Har allerede én på selen."
+      ],
+      "ticket_count": 2
+    },
+    {
+      "discovered_intent": "PasswordReset",
+      "suggested_canonical": "LoginProblem",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "GODKJENN",
+      "ny_intent": null,
+      "begrunnelse": "Glemt passord er en naturlig del av LoginProblem",
+      "example_questions": [
+        "Jeg har glemt passordet mitt til Min Side. Hvordan kan jeg tilbakestille det?"
+      ],
+      "ticket_count": 2
+    },
+    {
+      "discovered_intent": "AppCrashOnStartup",
+      "suggested_canonical": "AppLoginIssue",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "AppTechnicalIssue",
+      "begrunnelse": "Krasj er ikke innloggingsproblem",
+      "example_questions": [
+        "DyreID-appen krasjer hver gang jeg åpner den etter siste oppdatering. iPhone 13."
+      ],
+      "ticket_count": 1
+    },
+    {
+      "discovered_intent": "BillingDoubleCharge",
+      "suggested_canonical": "SubscriptionComparison",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "RefundRequest",
+      "begrunnelse": "Dobbeltbelastning er ikke abonnementssammenligning",
+      "example_questions": [
+        "Jeg er trukket dobbelt for abonnementet denne måneden. Kan dere sjekke?"
+      ],
+      "ticket_count": 1
+    },
+    {
+      "discovered_intent": "DoubleCharge",
+      "suggested_canonical": "SubscriptionComparison",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "RefundRequest",
+      "begrunnelse": "Dobbeltbelastning er ikke abonnementssammenligning",
+      "example_questions": [
+        "Jeg er trukket dobbelt for abonnementet denne måneden. Kan dere sjekke?"
+      ],
+      "ticket_count": 1
+    },
+    {
+      "discovered_intent": "DuplicateChargeRefund",
+      "suggested_canonical": "SubscriptionComparison",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "RefundRequest",
+      "begrunnelse": "Dobbeltbelastning/refusjon er ikke abonnementssammenligning",
+      "example_questions": [
+        "Jeg er trukket dobbelt for abonnementet denne måneden. Kan dere sjekke?"
+      ],
+      "ticket_count": 1
+    },
+    {
+      "discovered_intent": "RefundDoubleCharge",
+      "suggested_canonical": "SubscriptionComparison",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "RefundRequest",
+      "begrunnelse": "Dobbeltbelastning/refusjon er ikke abonnementssammenligning",
+      "example_questions": [
+        "Jeg er trukket dobbelt for abonnementet denne måneden. Kan dere sjekke?"
+      ],
+      "ticket_count": 1
+    },
+    {
+      "discovered_intent": "RefundRequest",
+      "suggested_canonical": "SubscriptionComparison",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "RefundRequest",
+      "begrunnelse": "Refusjon er ikke abonnementssammenligning",
+      "example_questions": [
+        "Jeg er trukket dobbelt for abonnementet denne måneden. Kan dere sjekke?"
+      ],
+      "ticket_count": 1
+    },
+    {
+      "discovered_intent": "SubscriptionDoubleCharge",
+      "suggested_canonical": "SubscriptionComparison",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "RefundRequest",
+      "begrunnelse": "Dobbeltbelastning er ikke abonnementssammenligning",
+      "example_questions": [
+        "Jeg er trukket dobbelt for abonnementet denne måneden. Kan dere sjekke?"
+      ],
+      "ticket_count": 1
+    },
+    {
+      "discovered_intent": "SubscriptionDoubleCharge_Refund",
+      "suggested_canonical": "SubscriptionComparison",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "RefundRequest",
+      "begrunnelse": "Dobbeltbelastning/refusjon er ikke abonnementssammenligning",
+      "example_questions": [
+        "Jeg er trukket dobbelt for abonnementet denne måneden. Kan dere sjekke?"
+      ],
+      "ticket_count": 1
+    },
+    {
+      "discovered_intent": "SubscriptionBilling",
+      "suggested_canonical": "SubscriptionComparison",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "BillingInquiry",
+      "begrunnelse": "Fakturaspørsmål er ikke abonnementssammenligning",
+      "example_questions": [
+        "Jeg har ikke mottatt faktura for abonnementet. Betaler jeg via AvtaleGiro?"
+      ],
+      "ticket_count": 1
+    },
+    {
+      "discovered_intent": "InvoiceQuery",
+      "suggested_canonical": "SubscriptionComparison",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "BillingInquiry",
+      "begrunnelse": "Fakturaspørsmål er ikke abonnementssammenligning",
+      "example_questions": [
+        "Jeg har ikke mottatt faktura for abonnementet. Betaler jeg via AvtaleGiro?"
+      ],
+      "ticket_count": 1
+    },
+    {
+      "discovered_intent": "InvoiceQuery_AvtaleGiro",
+      "suggested_canonical": "SubscriptionComparison",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "BillingInquiry",
+      "begrunnelse": "Fakturaspørsmål er ikke abonnementssammenligning",
+      "example_questions": [
+        "Jeg har ikke mottatt faktura for abonnementet. Betaler jeg via AvtaleGiro?"
+      ],
+      "ticket_count": 1
+    },
+    {
+      "discovered_intent": "InvoiceNotReceived",
+      "suggested_canonical": "SubscriptionComparison",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "BillingInquiry",
+      "begrunnelse": "Fakturaspørsmål er ikke abonnementssammenligning",
+      "example_questions": [
+        "Jeg har ikke mottatt faktura for abonnementet. Betaler jeg via AvtaleGiro?"
+      ],
+      "ticket_count": 1
+    },
+    {
+      "discovered_intent": "PaymentInquiry",
+      "suggested_canonical": "SubscriptionComparison",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "BillingInquiry",
+      "begrunnelse": "Betalingsspørsmål er ikke abonnementssammenligning",
+      "example_questions": [
+        "Jeg har ikke mottatt faktura for abonnementet. Betaler jeg via AvtaleGiro?"
+      ],
+      "ticket_count": 1
+    },
+    {
+      "discovered_intent": "PaymentMethodInquiry",
+      "suggested_canonical": "SubscriptionComparison",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "BillingInquiry",
+      "begrunnelse": "Betalingsmetode-spørsmål er ikke abonnementssammenligning",
+      "example_questions": [
+        "Jeg har ikke mottatt faktura for abonnementet. Betaler jeg via AvtaleGiro?"
+      ],
+      "ticket_count": 1
+    },
+    {
+      "discovered_intent": "ChipReplacement",
+      "suggested_canonical": "RegistrationError",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "ChipCorrection",
+      "begrunnelse": "Bytte chip er samme som UpdateChipNumber",
+      "example_questions": [
+        "Veterinæren registrerte feil chipnummer på katten min. Kan dette rettes?",
+        "Jeg prøvde å registrere hunden min men betalingen gikk ikke gjennom. Hva gjør jeg?",
+        "Chip i ustand/ finnner den ikke på dyre  Hei! Lurte på hvordan man bytter chip nr på et dyr? Vi finner ikke den første chip som ble satt på dyret. Har satt inn en ny chip og registrert den hos dere allerede. men vil gjerne fjerne den <PERSON>. Er det mulig? Ny chip nr er <CHIP_ID> ;MVh <PERSON>  Chip nr: <CHIP_ID>"
+      ],
+      "ticket_count": 1
+    },
+    {
+      "discovered_intent": "RegistrationCorrection",
+      "suggested_canonical": "RegistrationError",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "GODKJENN",
+      "ny_intent": null,
+      "begrunnelse": "Generisk rette registrering passer til RegistrationError",
+      "example_questions": [
+        "Veterinæren registrerte feil chipnummer på katten min. Kan dette rettes?",
+        "Jeg prøvde å registrere hunden min men betalingen gikk ikke gjennom. Hva gjør jeg?",
+        "Chip i ustand/ finnner den ikke på dyre  Hei! Lurte på hvordan man bytter chip nr på et dyr? Vi finner ikke den første chip som ble satt på dyret. Har satt inn en ny chip og registrert den hos dere allerede. men vil gjerne fjerne den <PERSON>. Er det mulig? Ny chip nr er <CHIP_ID> ;MVh <PERSON>  Chip nr: <CHIP_ID>"
+      ],
+      "ticket_count": 1
+    },
+    {
+      "discovered_intent": "QRTagReplace",
+      "suggested_canonical": "QRTagLost",
+      "match_method": "semantic",
+      "risk_flag": true,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "QRTagDamaged",
+      "begrunnelse": "Skadet brikke er ikke mistet brikke",
+      "example_questions": [
+        "QR-brikken min skannes ikke. Koden er slitt og uleselig."
+      ],
+      "ticket_count": 1
+    },
+    {
+      "discovered_intent": "QRTagDamaged",
+      "suggested_canonical": "QRTagLost",
+      "match_method": "semantic",
+      "risk_flag": true,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "QRTagDamaged",
+      "begrunnelse": "Skadet brikke er ikke mistet brikke",
+      "example_questions": [
+        "QR-brikken min skannes ikke. Koden er slitt og uleselig."
+      ],
+      "ticket_count": 1
+    },
+    {
+      "discovered_intent": "FamilyAccessRemove",
+      "suggested_canonical": "FamilySharing",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "GODKJENN",
+      "ny_intent": null,
+      "begrunnelse": "Fjerne familietilgang er en del av FamilySharing-flyten",
+      "example_questions": [
+        "Jeg og min eks har gått fra hverandre. Kan dere fjerne hans tilgang til katten?",
+        "Jeg og min eks har gått fra hverandre. Kan dere fjerne <PERSON> tilgang til katten?"
+      ],
+      "ticket_count": 1
+    },
+    {
+      "discovered_intent": "RemoveFamilyMember",
+      "suggested_canonical": "FamilySharing",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "GODKJENN",
+      "ny_intent": null,
+      "begrunnelse": "Fjerne familiemedlem er en del av FamilySharing-flyten",
+      "example_questions": [
+        "Jeg og min eks har gått fra hverandre. Kan dere fjerne hans tilgang til katten?",
+        "Jeg og min eks har gått fra hverandre. Kan dere fjerne <PERSON> tilgang til katten?"
+      ],
+      "ticket_count": 1
+    },
+    {
+      "discovered_intent": "LostStatusCheck",
+      "suggested_canonical": "ReportLostPet",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "GODKJENN",
+      "ny_intent": null,
+      "begrunnelse": "Statussjekk savnet dyr hører under ReportLostPet",
+      "example_questions": [
+        "Katten har vært savnet i 3 måneder nå. Er det noen som har funnet den?",
+        "Vi fant hunden vår igjen! Kan dere fjerne savnet-meldingen?"
+      ],
+      "ticket_count": 1
+    },
+    {
+      "discovered_intent": "LostFoundResolved",
+      "suggested_canonical": "ReportLostPet",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "GODKJENN",
+      "ny_intent": null,
+      "begrunnelse": "Fjerne savnet-status er del av ReportLostPet-flyten",
+      "example_questions": [
+        "Katten har vært savnet i 3 måneder nå. Er det noen som har funnet den?",
+        "Vi fant hunden vår igjen! Kan dere fjerne savnet-meldingen?"
+      ],
+      "ticket_count": 1
+    },
+    {
+      "discovered_intent": "LostFoundStatusInquiry",
+      "suggested_canonical": "ReportLostPet",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "GODKJENN",
+      "ny_intent": null,
+      "begrunnelse": "Statusspørsmål savnet dyr hører under ReportLostPet",
+      "example_questions": [
+        "Katten har vært savnet i 3 måneder nå. Er det noen som har funnet den?",
+        "Vi fant hunden vår igjen! Kan dere fjerne savnet-meldingen?"
+      ],
+      "ticket_count": 1
+    },
+    {
+      "discovered_intent": "QRReassignTag",
+      "suggested_canonical": "QRTagActivation",
+      "match_method": "semantic",
+      "risk_flag": true,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "QRTagReassign",
+      "begrunnelse": "Flytte brikke mellom dyr er ikke aktivering av ny brikke",
+      "example_questions": [
+        "Når noen skanner QR-brikken vises feil dyr. Brikken var koblet til forrige hund.",
+        "Kan jeg bestille en ekstra QR-brikke til halsbåndet? Har allerede én på selen."
+      ],
+      "ticket_count": 1
+    },
+    {
+      "discovered_intent": "QRAssignCorrection",
+      "suggested_canonical": "QRTagActivation",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "QRTagReassign",
+      "begrunnelse": "Korrigere brikketilknytning er ikke aktivering",
+      "example_questions": [
+        "Når noen skanner QR-brikken vises feil dyr. Brikken var koblet til forrige hund.",
+        "Kan jeg bestille en ekstra QR-brikke til halsbåndet? Har allerede én på selen."
+      ],
+      "ticket_count": 1
+    },
+    {
+      "discovered_intent": "QRTagRelink",
+      "suggested_canonical": "QRTagActivation",
+      "match_method": "semantic",
+      "risk_flag": true,
+      "anbefaling": "NY INTENT",
+      "ny_intent": "QRTagReassign",
+      "begrunnelse": "Relinke brikke er ikke aktivering",
+      "example_questions": [
+        "Når noen skanner QR-brikken vises feil dyr. Brikken var koblet til forrige hund.",
+        "Kan jeg bestille en ekstra QR-brikke til halsbåndet? Har allerede én på selen."
+      ],
+      "ticket_count": 1
+    },
+    {
+      "discovered_intent": "CancelSubscription",
+      "suggested_canonical": "PetDeceased",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "AVVIS",
+      "ny_intent": "CancelSubscription",
+      "begrunnelse": "Ikke alle oppsigelser skyldes dødsfall. Trenger egen CancelSubscription-intent",
+      "example_questions": [
+        "Jeg ønsker å si opp abonnementet mitt. Hunden min har dessverre gått bort."
+      ],
+      "ticket_count": 1
+    },
+    {
+      "discovered_intent": "CancelSubscriptionDueToDeceasedPet",
+      "suggested_canonical": "PetDeceased",
+      "match_method": "keyword",
+      "risk_flag": false,
+      "anbefaling": "GODKJENN",
+      "ny_intent": null,
+      "begrunnelse": "Eksplisitt koblet til dødsfall, riktig mapping til PetDeceased",
+      "example_questions": [
+        "Jeg ønsker å si opp abonnementet mitt. Hunden min har dessverre gått bort."
+      ],
+      "ticket_count": 1
+    }
+  ],
+  "new_intents": [
+    {
+      "intent_id": "ChipCorrection",
+      "beskrivelse": "Endre, bytte eller korrigere chipnummer på registrert dyr",
+      "konsoliderer": [
+        "UpdateChipNumber",
+        "CorrectRegisteredChip",
+        "ChipReplacement"
+      ],
+      "antall_varianter": 3
+    },
+    {
+      "intent_id": "MergeDuplicateRegistrations",
+      "beskrivelse": "Slå sammen duplikate registreringer av samme dyr",
+      "konsoliderer": [
+        "MergeDuplicateRegistrations",
+        "DuplicateRegistration",
+        "DuplicateRegistrationMerge",
+        "MergeRegistrations"
+      ],
+      "antall_varianter": 4
+    },
+    {
+      "intent_id": "AppTechnicalIssue",
+      "beskrivelse": "App-krasj, tekniske feil og ytelsesproblemer (ikke innlogging)",
+      "konsoliderer": [
+        "AppCrash",
+        "AppCrashOnStartup"
+      ],
+      "antall_varianter": 2
+    },
+    {
+      "intent_id": "BillingInquiry",
+      "beskrivelse": "Spørsmål om faktura, betalingsmetode, AvtaleGiro og betalingsstatus",
+      "konsoliderer": [
+        "BillingInquiry",
+        "CheckPaymentMethod",
+        "SubscriptionBilling",
+        "InvoiceQuery",
+        "InvoiceQuery_AvtaleGiro",
+        "InvoiceNotReceived",
+        "PaymentInquiry",
+        "PaymentMethodInquiry"
+      ],
+      "antall_varianter": 8
+    },
+    {
+      "intent_id": "RefundRequest",
+      "beskrivelse": "Dobbeltbelastning, refusjonskrav og feilaktige trekk",
+      "konsoliderer": [
+        "DoubleChargeRefund",
+        "BillingRefund",
+        "PaymentRefund",
+        "SubscriptionRefund",
+        "BillingDoubleCharge",
+        "DoubleCharge",
+        "DuplicateChargeRefund",
+        "RefundDoubleCharge",
+        "RefundRequest",
+        "SubscriptionDoubleCharge",
+        "SubscriptionDoubleCharge_Refund"
+      ],
+      "antall_varianter": 11
+    },
+    {
+      "intent_id": "QRTagDamaged",
+      "beskrivelse": "QR-brikke som er skadet, slitt eller uleselig (ikke mistet)",
+      "konsoliderer": [
+        "QRTagReplacement",
+        "QRTagReplace",
+        "QRTagDamaged"
+      ],
+      "antall_varianter": 3
+    },
+    {
+      "intent_id": "QRTagReassign",
+      "beskrivelse": "Flytte QR-brikke fra ett dyr til et annet, korrigere feil kobling",
+      "konsoliderer": [
+        "QRTagReassign",
+        "QRReassignTag",
+        "QRAssignCorrection",
+        "QRTagRelink"
+      ],
+      "antall_varianter": 4
+    },
+    {
+      "intent_id": "CancelSubscription",
+      "beskrivelse": "Si opp abonnement (generell oppsigelse, ikke knyttet til dødsfall)",
+      "konsoliderer": [
+        "CancelSubscription"
+      ],
+      "antall_varianter": 1
+    }
+  ]
+}
