@@ -1,0 +1,399 @@
+ULL IMPLEMENTATION PROMPT – DISCOVERY + CONTINUOUS LEARNING + SAFETY
+
+We are upgrading the Discovery + Intent Normalization system to support:
+
+Canonical intent registry (dynamic, not hardcoded)
+
+Controlled continuous learning
+
+Embedding-based clustering
+
+Deterministic runtime safety (no GPT resolution generation)
+
+Pilot batch testing before full import
+
+Implement the following in order.
+
+STEP 0 — Introduce Canonical Intent Registry (Core Change)
+
+Create a new authoritative table:
+
+canonical_intents
+
+Fields:
+
+intentId (PK)
+
+category
+
+subcategory
+
+source (TEMPLATE | DISCOVERY | MANUAL | HELPCENTER)
+
+actionable (boolean)
+
+requiredFields (jsonb)
+
+endpoint (nullable)
+
+infoText (nullable)
+
+approved (boolean)
+
+embedding (vector)
+
+createdAt
+
+updatedAt
+
+Rules:
+
+Runtime must ONLY use canonical_intents where approved=true.
+
+normalizeDiscoveredIntent() must compare against canonical_intents dynamically (not hardcoded arrays).
+
+TEMPLATE_CATEGORY_MAPPING intents must be inserted into canonical_intents (source=TEMPLATE).
+
+Existing Playbook intents must be inserted into canonical_intents (source=MANUAL or DISCOVERY).
+
+Help Center intents must also be inserted (source=HELPCENTER, informational only).
+
+STEP 1 — Lock Definition of “Uncategorized”
+
+Define uncategorized tickets as:
+
+category1Id NOT in TEMPLATE_CATEGORY_MAPPING
+OR
+
+mapped intent is "GeneralInquiry" or "Ukategorisert"
+
+Add:
+
+explicit predicate function isUncategorized(ticket)
+
+optional table uncategorized_tickets OR boolean flag in tickets table
+
+Output:
+
+Discovery pipeline must only process tickets where isUncategorized(ticket)=true.
+
+STEP 2 — Deterministic Cluster Input Text
+
+For each uncategorized ticket:
+
+cluster_text =
+
+subject
+
+description
+
+first 1–2 customer messages (communications where direction=IN)
+
+optional first agent reply (if resolution mining desired)
+
+Mandatory:
+
+Run GDPR scrubber BEFORE constructing cluster_text.
+
+Store:
+
+ticket.clusterText
+
+STEP 3 — Embeddings + HDBSCAN Clustering
+
+Replace GPT-based clustering with embedding-based clustering.
+
+Implement:
+
+Generate embeddings for cluster_text (training only)
+
+Use HDBSCAN
+
+Fallback: k-means if HDBSCAN unavailable
+
+minClusterSize = max(5, round(totalUncategorized * 0.005))
+
+Rules:
+
+Clusters smaller than threshold → noise bucket
+
+Assign cluster_id to each ticket
+
+Add env toggle:
+
+CLUSTERING_MODE=embeddings|gpt
+
+Default: embeddings
+
+Output:
+
+cluster_id per ticket
+
+noise bucket
+
+STEP 4 — Cluster Summary Cards
+
+For each cluster:
+
+Generate:
+
+ticketCount
+
+top_keywords (TF-IDF or n-grams)
+
+example_subjects (5)
+
+sample_snippets (scrubbed)
+
+Store as:
+
+discovered_clusters table.
+
+STEP 5 — GPT Intent Suggestion (Cluster-Level Only)
+
+For each cluster (NOT per ticket):
+
+Send to GPT:
+
+keywords
+
+5 example snippets
+
+sample subjects
+
+Ask for:
+
+suggestedIntentId (PascalCase)
+
+type (informational | transactional)
+
+shortDescription
+
+requiredFields (only suggestion if transactional)
+
+confidence (0–1)
+
+Guardrail:
+
+GPT MUST NOT:
+
+define procedures
+
+define endpoints
+
+suggest pricing
+
+describe step-by-step flows
+
+It may ONLY suggest labels and type.
+
+Store as:
+
+discovered_intents.
+
+STEP 6 — Normalization Against Canonical Intents
+
+Update normalizeDiscoveredIntent():
+
+Compare cluster suggestion against:
+
+canonical_intents where approved=true
+
+Use embedding similarity + keyword overlap.
+
+If similarityScore > 0.75:
+
+normalizedIntent = matched canonical intent
+
+isNewIntentCandidate = false
+
+inherit actionable/requiredFields/endpoint/category
+
+If similarityScore <= 0.75:
+
+isNewIntentCandidate = true
+
+send to Pending Review
+
+IMPORTANT:
+
+This comparison must include TEMPLATE, PLAYBOOK, and HELPCENTER intents (all inside canonical_intents).
+
+STEP 7 — Review UI Enhancements
+
+For New Intent Candidates:
+
+Admin must set before Promote:
+
+intentId (editable)
+
+category
+
+subcategory
+
+actionable (boolean)
+
+If actionable=true:
+
+requiredFields must be defined
+
+endpoint must be defined
+
+endpointStatus = READY
+
+If endpointStatus != READY → block Promote.
+
+If informational:
+
+infoText must be filled before Promote.
+
+Add provenance fields:
+
+source=DISCOVERY
+
+clusterId
+
+ticketCount
+
+approvedBy
+
+approvedAt
+
+STEP 8 — Promote to Playbook + Continuous Learning
+
+When Promote clicked:
+
+Insert/Update canonical_intents (approved=true)
+
+Insert PlaybookEntry
+
+Recompute embedding for this intent
+
+Refresh canonical embedding index
+
+Implement:
+
+refreshCanonicalIntentIndex()
+
+This ensures:
+
+Future clustering auto-maps to newly approved intents.
+
+Runtime must ignore:
+
+approved=false intents
+
+STEP 9 — Pilot Batch Test (Mandatory Before Full Import)
+
+Add Test Run button.
+
+Run pipeline on 1000 closed tickets.
+
+Return report:
+
+total tickets processed
+
+uncategorized count
+
+cluster count
+
+noise bucket size
+
+auto-mapped count
+
+new candidate count
+
+top 10 clusters by volume
+
+% auto-mapped
+
+Success criteria (pilot acceptable range):
+
+40–80% auto-mapped
+<50% new candidates
+Clear cluster themes
+
+STEP 10 — Runtime Safety Verification
+
+Add automated runtime safety check:
+
+Test 30 queries:
+
+10 transactional
+
+10 informational
+
+10 random/edge
+
+Verify:
+
+Transactional:
+
+→ collectRequiredData → executeEndpoint
+→ NO GPT resolution generation
+
+Informational:
+
+→ respond using infoText
+→ GPT allowed only for paraphrasing
+
+Unmatched:
+
+→ BLOCK + category suggestions
+→ NO GPT-generated procedures
+
+Add assertion:
+
+No GPT resolution call allowed in runtime.
+
+STEP 11 — Continuous Learning Rules
+
+Each time a new intent is approved:
+
+Insert into canonical_intents
+
+Regenerate embedding
+
+Refresh similarity index
+
+Use it in future normalization
+
+System must never:
+
+Auto-promote new intents
+
+Auto-update canonical mapping
+
+Allow GPT to update canonical intents
+
+All learning must pass human review.
+
+FINAL REQUIREMENTS
+
+After implementation:
+
+Provide:
+
+Schema changes summary
+
+normalizeDiscoveredIntent() updated logic
+
+Clustering implementation summary
+
+Pilot test report
+
+Runtime safety validation result
+
+Important Architecture Principle
+
+Training Phase = AI-assisted
+Runtime Phase = Deterministic + Guarded
+
+System must behave as:
+
+✔ Handlingsagent when actionable
+✔ Support-bot when informational
+✔ Register-safe
+✔ Payment-safe
+✔ Continuously improving
+✔ Never hallucinating

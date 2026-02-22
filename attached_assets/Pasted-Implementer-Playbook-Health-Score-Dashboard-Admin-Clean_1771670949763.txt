@@ -1,0 +1,266 @@
+Implementer “Playbook Health Score” Dashboard + Admin Cleanup
+
+Vi skal implementere et nytt, separat analyse-dashboard:
+Playbook Health Score
+
+Dette skal være read-only analyse.
+Ingen påvirkning på runtime eller training pipeline.
+
+DEL 1 – NYT ANALYSE-DASHBOARD
+
+Opprett ny seksjon i admin:
+
+/admin/health
+
+Ikke legg dette under pipeline.
+Lag en egen top-level meny:
+
+Pipeline
+
+Playbook
+
+Discovery
+
+Health
+
+Settings
+
+DEL 2 – PLAYBOOK HEALTH SCORE
+
+Lag en aggregert score basert på objektive KPI-er.
+
+Datagrunnlag:
+
+Bruk siste 12 måneder (default filter), med mulighet for:
+
+3 mnd
+
+6 mnd
+
+12 mnd
+
+All time
+
+A) KPI 1 – Auto Resolution Rate
+
+Definer autoResolved slik:
+
+1 innkommende melding
+
+0 manuelle agent replies
+
+Ticket closed
+
+Closed within X timer
+
+Vis:
+
+Total tickets
+
+% autoResolved
+
+% agentHandled
+
+B) KPI 2 – Reopen Rate per Intent
+
+Vis tabell:
+
+Intent	Total	Auto	Agent	Reopen %	Health
+
+Health scoring:
+
+<5% reopen → 🟢
+
+5–10% → 🟡
+
+10% → 🔴
+
+C) KPI 3 – Coverage Score
+
+Hvor stor andel av tickets matcher canonical intent?
+
+Vis:
+
+% mapped to canonical
+
+% fallback
+
+% block
+
+D) KPI 4 – Escalation Rate
+
+% tickets som:
+
+Går til agent
+
+Krever mer enn 2 replies
+
+Har reopen
+
+E) KPI 5 – Playbook Utilization
+
+For hver canonical intent:
+
+tickets
+
+% auto-resolved
+
+avg. messages
+
+avg. time to close
+
+reopen %
+
+DEL 3 – HISTORISK FORDELING PER KATEGORI
+
+Lag separat view:
+
+1️⃣ Category Distribution
+
+Vis:
+
+| Category | Total | % | Auto % | Reopen % |
+
+Mulighet for drill-down til intent.
+
+2️⃣ Auto vs Agent Split
+
+Pie chart:
+
+Auto-resolved
+
+Agent-handled
+
+3️⃣ Trend over tid
+
+Linje:
+
+Auto resolution rate måned for måned
+
+Reopen rate måned for måned
+
+DEL 4 – ADMIN CLEANUP
+
+Admin fremstår nå rotete fordi:
+
+Pipeline
+
+Discovery
+
+Autosvar
+
+Canonical
+
+Review
+
+Historikk
+
+Priser
+
+Artikkel-match
+
+er blandet.
+
+Vi restrukturerer slik:
+
+🧭 Ny Struktur
+1️⃣ Operations
+
+Runtime logs
+
+Pilot mode
+
+Health Dashboard
+
+2️⃣ Training
+
+Ticket ingestion
+
+GDPR
+
+Mapping
+
+Clustering
+
+Review
+
+Playbook Builder
+
+3️⃣ Knowledge
+
+Canonical Intents
+
+Playbook
+
+Autosvar
+
+Artikler
+
+4️⃣ Analytics
+
+Health
+
+Trends
+
+Discovery results
+
+Flytt eksisterende komponenter til riktig seksjon.
+Ikke endre logikk. Kun UI-organisering.
+
+DEL 5 – PLAYBOOK HEALTH SCORE FORMEL
+
+Lag samlet score 0–100:
+
+Health Score =
+(0.35 * AutoResolutionScore)
++ (0.25 * (1 - ReopenRate))
++ (0.20 * CanonicalCoverage)
++ (0.20 * (1 - EscalationRate))
+
+Normaliser alle til 0–1 før vekting.
+
+Vis:
+
+Total Health Score
+
+Trend (↑ ↓ vs forrige periode)
+
+Breakdown pr komponent
+
+DEL 6 – SAFETY
+
+Dette dashboardet skal:
+
+Ikke skrive til DB
+
+Ikke trigge embedding
+
+Ikke trigge training
+
+Ikke påvirke runtime
+
+Kun analyse.
+
+DEL 7 – OUTPUT
+
+Når implementert, returner:
+
+Struktur over nye endpoints
+
+Hvilke DB-spørringer brukes
+
+Hvilke indekser som trengs for performance
+
+Eventuelle anbefalinger
+
+🎯 Mål
+
+Dette skal gi:
+
+Objektiv måling av Playbook-helse
+
+Separert analyse av auto-close
+
+Tydelig innsikt i hvor dere må forbedre
+
+Ryddet admin som kan skaleres

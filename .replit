@@ -41,3 +41,11 @@ waitForPort = 5000
 
 [agent]
 integrations = ["javascript_anthropic_ai_integrations:2.0.0", "javascript_openai_ai_integrations:2.0.0", "github:1.0.0"]
+
+[userenv]
+
+[userenv.shared]
+ENABLE_INPUT_NORMALIZATION = "true"
+RUNTIME_DEBUG = "true"
+ENABLE_CASE_ESCALATION = "true"
+ENABLE_PURESERVICE_POST = "false"

@@ -1,0 +1,213 @@
+Steg 1 — Lås hva som er “ukategorisert”
+
+Definer “ukategorisert” som:
+
+category1Id ikke finnes i TEMPLATE_CATEGORY_MAPPING
+
+eller category1Id finnes men intent er “GeneralInquiry” / “Ukategorisert” (hvis dere bruker det)
+
+Legg disse i en egen kø/tabell (f.eks. uncategorized_tickets eller via flagg i tickets).
+
+Output: En tydelig liste over tickets som skal inn i discovery pipeline.
+
+Steg 2 — Bygg “cluster input text” deterministisk
+
+For hver ukategorisert ticket, lag en standard streng:
+
+subject
+
+description
+
+første 1–2 kunde-meldinger (fra communications[] der direction=IN)
+
+(valgfritt) første agent-svar dersom dere vil ekstrahere resolution senere
+
+Viktig: Kjør GDPR-scrubber før dette (dere har den allerede).
+
+Output: cluster_text per ticket.
+
+Steg 3 — Embeddings + clustering
+
+Lag embedding for cluster_text (training-only).
+
+Kjør clustering:
+
+HDBSCAN (best for “ukjent antall tema”)
+
+fallback: k-means hvis dere vil ha stabilt antall klynger
+
+Sett regler:
+
+Klynger < 5 tickets → “singleton/noise” bucket
+
+Resten → ekte klynger
+
+Output: cluster_id på alle ukategoriserte tickets, og “noise bucket”.
+
+Steg 4 — Cluster-oppsummering (for admin og GPT)
+
+For hver cluster:
+
+Velg 5 representative tickets (diverse formuleringer).
+
+Lag:
+
+top_keywords (enkel TF-IDF eller n-grams)
+
+example_subjects
+
+sample_snippets (kort, scrubbet)
+
+Output: “Cluster card” data som kan vises i Discovery-tab.
+
+Steg 5 — Foreslå intentId (GPT – kun training)
+
+Kjør GPT på cluster-nivå (ikke per ticket) og be om:
+
+suggestedIntentId (PascalCase, kort)
+
+type: informational vs transactional (kun forslag)
+
+description (1 setning)
+
+requiredFields (forslag kun hvis transactional)
+
+confidence
+
+Guardrail: GPT skal aldri foreslå prosedyrer eller endpoints her – kun label/type.
+
+Output: suggested_intent for hvert cluster.
+
+Steg 6 — Normaliser mot eksisterende canonical intents
+
+Bruk normaliseringslaget dere allerede har (nå er det på plass):
+
+Sammenlign clusterets suggestedIntentId + description + keywords mot:
+
+eksisterende Playbook intents
+
+Help Center intents
+
+(viktig) TEMPLATE_CATEGORY_MAPPING intents
+
+Hvis similarityScore > 0.75:
+
+sett normalizedIntent = matchedExistingIntent
+
+sett isNewIntentCandidate = false
+
+arve properties (actionable/requiredFields/endpoint/category) hvis Playbook-match
+
+Hvis < 0.75:
+
+isNewIntentCandidate = true
+
+send til Pending (human review)
+
+Output: Auto-mapped vs New candidates.
+
+Steg 7 — Human review workflow (Discovery-tab)
+
+For New candidates må admin gjøre dette før “Promote”:
+
+Godkjenn/endre intentId
+
+Sett category (Help Center overkategori)
+
+Sett subcategory
+
+Sett actionable (særlig viktig)
+
+Hvis actionable:
+
+definér requiredFields
+
+definér endpoint (evt “TODO” hvis dere ikke har API ennå → da kan den ikke bli actionable)
+
+Hvis informational:
+
+generér/lim inn infoText (fra Help Center eller fra resolution patterns)
+
+Output: Godkjente discovered intents klare til Playbook.
+
+Steg 8 — Promote til Playbook (kontrollert)
+
+Når admin trykker “Promote”:
+
+opprett/oppdater PlaybookEntry
+
+sett approved=true
+
+logg provenance:
+
+source=DISCOVERY
+
+cluster_id
+
+ticket_count
+
+created_by_admin
+
+Viktig: Runtime skal ignorere alt som ikke er approved=true.
+
+Output: Nye canonical intents tilgjengelig for runtime.
+
+✅ Steg 9 — Testkjøring (målt og trygg)
+
+Når dere ber om testkjøring, be om dette – konkret:
+
+A) Discovery test (batch)
+
+Kjør pipeline på f.eks. 500–2000 lukkede tickets:
+
+antall ukategoriserte funnet
+
+antall clusters
+
+antall auto-mapped
+
+antall new candidates
+
+top 10 clusters med størst volum
+
+noise bucket størrelse
+
+Suksesskriterie (første runde):
+
+Minst 60–80% av ukategoriserte blir auto-mapped eller meningsfulle clusters
+
+New candidates er ikke eksplosjon (>50% av clusters er et varseltegn)
+
+B) Quality test (manual spot check)
+
+Velg 10 clusters:
+
+5 auto-mapped
+
+5 new candidates
+
+Sjekk:
+
+match gir riktig kategori
+
+actionability riktig
+
+ingen “farlige” actionable uten endpoint/requiredFields
+
+C) Runtime test (no hallucination)
+
+Velg 30 brukerspørsmål som dekker:
+
+10 transactional
+
+10 informational
+
+10 random/edge
+
+Sjekk at:
+
+transactional starter collectRequiredData → executeEndpoint uten GPT prosedyre
+
+informational svarer direkte med infoText (parafrase ok)
+
+ingen fallback som “lager svar”

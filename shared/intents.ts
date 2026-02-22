@@ -86,6 +86,14 @@ export const INTENT_DEFINITIONS: IntentDefinition[] = [
   { intent: "FamilyAccessLost", category: "Familiedeling", subcategory: "Jeg ser ikke lenger kjæledyret som har blitt delt", slug: "deling-forsvunnet", description: "Tilgang til delt kjæledyr mistet", keywords: ["ser ikke", "delt", "mistet tilgang", "borte", "familiedeling"] },
   { intent: "FamilySharingExisting", category: "Familiedeling", subcategory: "Familiedeling med noen som allerede har kjæledyr?", slug: "familiedeling-eksisterende", description: "Deling med eksisterende dyreeiere", keywords: ["eksisterende", "allerede", "kjæledyr", "bruker", "deling"] },
 
+  // ── ID-søk / Chip-oppslag / Registrering ──────────────────
+  { intent: "ChipLookup", category: "ID-søk", subcategory: "Søke opp chipnummer", slug: "chip-oppslag", description: "Søke opp eier eller dyr via chipnummer", keywords: ["chip", "chipnummer", "søk", "oppslag", "eier", "id-nummer"] },
+  { intent: "PetNotInSystem", category: "ID-søk", subcategory: "Dyret finnes ikke i registeret", slug: "ikke-i-system", description: "Dyr finnes ikke i DyreID-registeret", keywords: ["finnes ikke", "ikke registrert", "ikke i systemet", "mangler i register"] },
+  { intent: "NewRegistration", category: "Registrering", subcategory: "Registrere nytt dyr", slug: "ny-registrering", description: "Førstegangsregistrering av nytt kjæledyr", keywords: ["registrere", "nytt dyr", "ny registrering", "førstegangsregistrering", "valp"] },
+
+  // ── Utenlandsregistrering (tillegg) ─────────────────────
+  { intent: "UnregisteredChip578", category: "Utenlandsregistrering", subcategory: "Uregistrert norsk chip (578)", slug: "uregistrert-578", description: "Norsk chip (578-prefix) som ikke er forhåndsregistrert i DyreID", keywords: ["578", "uregistrert", "norsk chip", "ikke registrert", "forhåndsbetalt"] },
+
   // ── Generelle/system-intents ──────────────────────────────
   { intent: "GeneralInquiry", category: "Generell", subcategory: "Generell henvendelse", slug: "generell", description: "Generelle spørsmål som ikke passer andre kategorier", keywords: ["hjelp", "spørsmål", "lurer på", "informasjon"] },
   { intent: "ViewMyPets", category: "Min side", subcategory: "Se mine dyr", slug: "mine-dyr", description: "Vise oversikt over egne dyr", keywords: ["mine dyr", "se dyr", "dyrene mine", "hvilke dyr", "vis dyr"] },

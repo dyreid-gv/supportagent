@@ -1,0 +1,222 @@
+RUNTIME HARDENING + PILOT PREPARATION PROMPT
+
+We are finalizing the production architecture before running seed and pilot tests.
+
+Implement the following adjustments carefully.
+
+1️⃣ Canonical Intents = Single Source of Truth
+
+Runtime intent matching MUST use:
+
+canonical_intents WHERE approved = true
+
+Remove all runtime dependency on:
+
+INTENT_DEFINITIONS
+
+TEMPLATE_CATEGORY_MAPPING (keep only for discovery input)
+
+Playbook intent arrays
+
+Playbook entries must be accessed only AFTER canonical intent match.
+
+2️⃣ Strict Runtime Flow (Final Order)
+
+Update matchUserIntent() to:
+
+Session continuation
+
+Deterministic regex match (critical flows only)
+
+Semantic embedding match (threshold 0.78)
+
+Keyword fallback (Playbook keyword match)
+
+GPT intent classification fallback (restricted)
+
+BLOCK escalation
+
+3️⃣ Restrict GPT Intent Fallback
+
+GPT intent classification must only execute if:
+
+semanticScore < 0.65
+AND
+
+no keyword match found
+
+This prevents GPT from overriding near-semantic matches.
+
+GPT prompt must:
+
+Only return JSON { intent, confidence }
+
+Only select from provided approved canonical intents
+
+Never invent new intent IDs
+
+Never output explanation text
+
+If confidence < 0.7 → discard and trigger BLOCK.
+
+4️⃣ Harden Paraphrasing
+
+Paraphrasing is allowed ONLY for informational intents.
+
+Strengthen guardrails:
+
+Do not allow GPT to:
+
+Add new sentences
+
+Add warnings
+
+Add pricing disclaimers
+
+Modify numeric values
+
+Modify URLs
+
+Add contact instructions unless already present
+
+After GPT output:
+
+Validate:
+
+Numeric values unchanged
+
+URLs unchanged
+
+Sentence count difference <= +1
+
+Length <= 2.5x original
+
+If validation fails → return original infoText.
+
+Transactional intents must NEVER involve GPT after intent classification.
+
+5️⃣ Embedding Safety
+
+When loading canonical intent index:
+
+Throw error if any approved intent has null embedding
+
+Log count of loaded embeddings
+
+Log count of skipped intents
+
+Embedding index must refresh automatically after:
+
+seedCanonicalIntents()
+
+upsertCanonicalIntent()
+
+promoteDiscoveredIntent()
+
+deleteCanonicalIntent()
+
+6️⃣ Add Runtime Debug Logging
+
+For each request (debug mode only), log:
+
+matchedBy: regex | semantic | keyword | gpt | block
+
+semanticScore (if applicable)
+
+gptConfidence (if applicable)
+
+finalIntentId
+
+responseMethod: API_CALL | INFO | BLOCK
+
+This is required for pilot validation.
+
+7️⃣ BLOCK Layer Must Be Deterministic
+
+If no match after GPT fallback:
+
+Return fixed block message:
+
+"Beklager, dette er utenfor det jeg kan hjelpe med automatisk."
+
+Include:
+
+Top 3 suggested categories (semantic nearest)
+
+Escalation email
+
+No GPT involvement in block response.
+
+8️⃣ Seed Execution Plan
+
+After implementing above:
+
+Run:
+
+POST /api/canonical-intents/seed
+
+Verify:
+
+All canonical intents have embeddings
+
+Index loads successfully
+
+No null embeddings remain
+
+Runtime uses semantic matching
+
+9️⃣ Pilot Test Mode
+
+Add "Pilot Test Mode" toggle:
+
+When enabled:
+
+Log match distribution summary every 50 requests
+
+Track % matched by semantic vs GPT vs block
+
+After 30–100 test questions, provide:
+
+Match distribution
+
+GPT fallback rate
+
+Block rate
+
+Top 5 unmatched queries
+
+10️⃣ DO NOT MODIFY
+
+Do NOT:
+
+Change transactional flow logic
+
+Change endpoint execution logic
+
+Change OTP handling
+
+Change payment logic
+
+Only modify intent matching and GPT constraints.
+
+Expected Outcome
+
+System must now behave as:
+
+✔ Deterministic for transactional flows
+✔ Embedding-first semantic matching
+✔ GPT only for intent classification and guarded paraphrasing
+✔ No runtime resolution generation
+✔ Stable, measurable, production-safe
+
+When finished, return:
+
+Updated matchUserIntent flow
+
+GPT intent prompt
+
+Paraphrasing validation logic
+
+Embedding index load log
+
+Pilot test summary template

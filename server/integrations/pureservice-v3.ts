@@ -39,10 +39,10 @@ export async function getClosedTickets(
   const offset = (page - 1) * pageSize;
 
   const res = await fetch(
-    `${BASE}/ticket?limit=${pageSize}&offset=${offset}&include=communications&sort=-created`,
+    `${BASE}/ticket?limit=${pageSize}&offset=${offset}&include=communications`,
     {
       headers: {
-        "x-api-key": apiKey,
+        "Authorization": `Bearer ${apiKey}`,
         Accept: "application/json",
         "Content-Type": "application/json",
       },
@@ -117,7 +117,7 @@ export async function fetchTemplatesFromPureservice(): Promise<PureserviceTempla
     `${BASE}/template?limit=200`,
     {
       headers: {
-        "x-api-key": apiKey,
+        "Authorization": `Bearer ${apiKey}`,
         Accept: "application/json",
         "Content-Type": "application/json",
       },

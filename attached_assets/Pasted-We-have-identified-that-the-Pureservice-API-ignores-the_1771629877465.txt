@@ -1,0 +1,123 @@
+We have identified that the Pureservice API ignores the offset parameter.
+
+We must validate ID-based pagination logic before attempting full ingestion.
+
+This is a diagnostic run only. Do NOT run full pipeline.
+
+OBJECTIVE
+
+Implement and test deterministic ID-based pagination using descending ID order.
+
+We must verify:
+
+No duplicates
+
+No gaps
+
+Stable ordering
+
+Correct termination condition
+
+STEP 1 — Implement ID-Based Pagination (Diagnostic Mode)
+
+Use this pattern:
+
+First request:
+GET /tickets?sort=-id&limit=200
+
+For subsequent requests:
+GET /tickets?sort=-id&id<lastMinId&limit=200
+
+Where:
+
+lastMinId = smallest ID from previous batch
+
+Do NOT use offset.
+Do NOT modify database.
+Do NOT store tickets permanently in this test.
+
+STEP 2 — Collect Diagnostic Metrics
+
+Run until:
+
+2000 tickets retrieved
+OR
+
+API returns empty array
+
+Track:
+
+Total API calls made
+
+Total tickets retrieved
+
+Unique ticket count
+
+Duplicate ID count
+
+Min ID retrieved
+
+Max ID retrieved
+
+ID continuity check (no repeated segments)
+
+Any ID increases unexpectedly
+
+STEP 3 — Integrity Validation
+
+Verify:
+
+Each batch’s max ID < previous batch’s min ID
+
+No duplicate IDs across batches
+
+Ticket count increases monotonically
+
+Final batch returns fewer than limit before termination
+
+If any violation occurs:
+
+Log ERROR with exact batch number
+
+Stop execution
+
+STEP 4 — Output Structured Report
+
+Return structured output:
+
+Pagination Diagnostic Report
+
+Total API calls:
+Total tickets retrieved:
+Unique tickets:
+Duplicate IDs:
+Highest ID seen:
+Lowest ID seen:
+Batches processed:
+Continuity violations:
+Status: PASS / FAIL
+STEP 5 — Safety Guard
+
+Add protection:
+
+If duplicate IDs detected > 0:
+
+Abort immediately
+
+Log critical error
+
+IMPORTANT
+
+Do NOT trigger training pipeline
+
+Do NOT trigger embedding generation
+
+Do NOT write to canonical tables
+
+This is validation only
+
+🎯 Goal
+
+We must confirm that ID-based pagination works cleanly before ingesting 83,000 tickets.
+
+Only after PASS status should we proceed to controlled ingestion.

@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -48,8 +48,15 @@ import {
   ExternalLink,
   Globe,
   Monitor,
+  Hash,
+  Clock,
+  XCircle,
+  Lock,
+  Download,
+  ClipboardCheck,
 } from "lucide-react";
 import { useState, useCallback } from "react";
+import { useToast } from "@/hooks/use-toast";
 import {
   Dialog,
   DialogContent,
@@ -77,6 +84,7 @@ interface TrainingStats {
     uncertaintyCases: number;
     uncategorizedThemes: number;
     reviewQueuePending: number;
+    discoveredIntentsPending: number;
   };
   runs: {
     id: number;
@@ -211,6 +219,38 @@ interface MinsideFieldMapping {
   updatedAt: string | null;
 }
 
+interface DiscoveredIntent {
+  id: number;
+  clusterName: string;
+  suggestedIntent: string;
+  description: string | null;
+  category: string | null;
+  ticketCount: number;
+  ticketIds: string | null;
+  sampleMessages: string[] | null;
+  resolutionSteps: string | null;
+  agentActions: string | null;
+  actionable: boolean;
+  requiresOtp: boolean;
+  affectsRegister: boolean;
+  affectsOwnership: boolean;
+  affectsPayment: boolean;
+  confidence: number;
+  keywords: string | null;
+  requiredFields: string | null;
+  actionEndpoint: string | null;
+  normalizedIntent: string | null;
+  isNewIntentCandidate: boolean;
+  similarityScore: number;
+  matchedExistingIntent: string | null;
+  status: string;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  rejectionReason: string | null;
+  promotedToPlaybook: boolean;
+  discoveredAt: string;
+}
+
 interface UncertaintyCase {
   id: number;
   ticketId: number;
@@ -283,6 +323,7 @@ function useSSEWorkflow(endpoint: string) {
       queryClient.invalidateQueries({ queryKey: ["/api/training/help-center-matches"] });
       queryClient.invalidateQueries({ queryKey: ["/api/training/autoreply-stats"] });
       queryClient.invalidateQueries({ queryKey: ["/api/training/dialog-pattern-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/discovered-intents"] });
     }
   }, [endpoint]);
 
@@ -661,6 +702,10 @@ export default function Dashboard() {
     queryKey: ["/api/minside-mappings"],
   });
 
+  const { data: discoveredIntents } = useQuery<DiscoveredIntent[]>({
+    queryKey: ["/api/discovered-intents"],
+  });
+
   interface FeedbackStats {
     total: number;
     resolved: number;
@@ -819,6 +864,35 @@ export default function Dashboard() {
             size="sm"
             variant="outline"
             onClick={() => {
+              const link = document.createElement("a");
+              link.href = "/api/reports/pureservice-1000";
+              link.download = "pureservice-1000-cases-report.json";
+              link.click();
+            }}
+            data-testid="button-download-report"
+          >
+            <Download className="h-4 w-4" />
+            Last ned rapport
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="border-amber-500/50 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30"
+            onClick={() => {
+              const link = document.createElement("a");
+              link.href = "/api/reports/consolidation-proposal";
+              link.download = "fragmentation-consolidation-proposal.json";
+              link.click();
+            }}
+            data-testid="button-download-consolidation"
+          >
+            <Download className="h-4 w-4" />
+            Konsolideringsforslag
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
               queryClient.invalidateQueries({ queryKey: ["/api/training/stats"] });
               queryClient.invalidateQueries({ queryKey: ["/api/playbook"] });
               queryClient.invalidateQueries({ queryKey: ["/api/training/review-queue"] });
@@ -889,6 +963,18 @@ export default function Dashboard() {
           </TabsTrigger>
           <TabsTrigger value="minside-mappings" data-testid="tab-minside-mappings">
             Min Side-kobling ({minsideMappings?.length || 0})
+          </TabsTrigger>
+          <TabsTrigger value="discovery" data-testid="tab-discovery">
+            Discovery ({stats?.discoveredIntentsPending || 0})
+          </TabsTrigger>
+          <TabsTrigger value="canonical" data-testid="tab-canonical">
+            Canonical Intents
+          </TabsTrigger>
+          <TabsTrigger value="intent-discovery" data-testid="tab-intent-discovery">
+            Intent Discovery
+          </TabsTrigger>
+          <TabsTrigger value="escalations" data-testid="tab-escalations">
+            Case Escalation
           </TabsTrigger>
         </TabsList>
 
@@ -1661,6 +1747,22 @@ export default function Dashboard() {
 
         <TabsContent value="minside-mappings" className="mt-4">
           <MinsideMappingsTab mappings={minsideMappings || []} />
+        </TabsContent>
+
+        <TabsContent value="discovery" className="mt-4">
+          <DiscoveryTab discoveredIntents={discoveredIntents || []} />
+        </TabsContent>
+
+        <TabsContent value="canonical" className="mt-4">
+          <CanonicalIntentsTab />
+        </TabsContent>
+
+        <TabsContent value="intent-discovery" className="mt-4">
+          <IntentDiscoveryTab />
+        </TabsContent>
+
+        <TabsContent value="escalations" className="mt-4">
+          <CaseEscalationTab />
         </TabsContent>
       </Tabs>
     </div>
@@ -3120,6 +3222,7 @@ function QualityTab({ stats }: {
 function PlaybookTab({ playbook }: { playbook: PlaybookEntry[] | undefined }) {
   const [expandedEntry, setExpandedEntry] = useState<number | null>(null);
   const [filter, setFilter] = useState<string>("");
+  const infoTextWorkflow = useSSEWorkflow("/api/training/populate-infotext");
 
   const qualityColor: Record<string, string> = {
     high: "text-green-600 dark:text-green-400",
@@ -3164,10 +3267,36 @@ function PlaybookTab({ playbook }: { playbook: PlaybookEntry[] | undefined }) {
           className="max-w-sm"
           data-testid="input-playbook-filter"
         />
+        <Button
+          data-testid="button-populate-infotext"
+          onClick={() => {
+            infoTextWorkflow.run();
+            setTimeout(() => {
+              queryClient.invalidateQueries({ queryKey: ["/api/playbook"] });
+            }, 3000);
+          }}
+          disabled={infoTextWorkflow.isRunning}
+          size="sm"
+        >
+          {infoTextWorkflow.isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+          {infoTextWorkflow.isRunning ? "Genererer..." : "Populer InfoText"}
+        </Button>
         <Badge variant="outline">{filtered.length} entries</Badge>
         {withQuality.length > 0 && <Badge variant="secondary">{withQuality.length} kvalitetsvurdert</Badge>}
         {needsImprovementCount > 0 && <Badge variant="destructive">{needsImprovementCount} trenger forbedring</Badge>}
+        {infoTextWorkflow.isRunning && <Progress value={infoTextWorkflow.progress} className="flex-1 min-w-[200px]" />}
       </div>
+      {infoTextWorkflow.error && (
+        <div className="flex items-center gap-1 text-xs text-destructive">
+          <AlertCircle className="h-3 w-3 shrink-0" />
+          <span>{infoTextWorkflow.error}</span>
+        </div>
+      )}
+      {infoTextWorkflow.logs.length > 0 && (
+        <div className="text-xs text-muted-foreground max-h-20 overflow-y-auto border rounded-md p-2">
+          {infoTextWorkflow.logs.slice(-5).map((l, i) => <div key={i}>{l}</div>)}
+        </div>
+      )}
 
       <div className="grid gap-3 md:grid-cols-4">
         <Card>
@@ -3834,6 +3963,1309 @@ function MinsideMappingsTab({ mappings }: { mappings: MinsideFieldMapping[] }) {
           </div>
         </ScrollArea>
       )}
+    </div>
+  );
+}
+
+function DiscoveryTab({ discoveredIntents }: { discoveredIntents: DiscoveredIntent[] }) {
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState<{ suggestedIntent: string; actionable: boolean; category: string; resolutionSteps: string; requiredFields: string; actionEndpoint: string }>({
+    suggestedIntent: "", actionable: false, category: "", resolutionSteps: "", requiredFields: "", actionEndpoint: "",
+  });
+  const [rejectReason, setRejectReason] = useState("");
+  const [rejectingId, setRejectingId] = useState<number | null>(null);
+
+  const discovery = useSSEWorkflow("/api/training/domain-discovery");
+
+  const pending = discoveredIntents.filter(i => i.status === "pending" && i.isNewIntentCandidate);
+  const autoMapped = discoveredIntents.filter(i => i.status === "auto_mapped");
+  const approved = discoveredIntents.filter(i => i.status === "approved");
+  const rejected = discoveredIntents.filter(i => i.status === "rejected");
+
+  const startEdit = (intent: DiscoveredIntent) => {
+    setEditingId(intent.id);
+    setEditForm({
+      suggestedIntent: intent.suggestedIntent,
+      actionable: intent.actionable,
+      category: intent.category || "",
+      resolutionSteps: intent.resolutionSteps || "",
+      requiredFields: intent.requiredFields || "",
+      actionEndpoint: intent.actionEndpoint || "",
+    });
+  };
+
+  const approveIntent = async (id: number) => {
+    try {
+      const body = editingId === id ? { approvedBy: "admin", ...editForm } : { approvedBy: "admin" };
+      await apiRequest("POST", `/api/discovered-intents/${id}/approve`, body);
+      queryClient.invalidateQueries({ queryKey: ["/api/discovered-intents"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/training/stats"] });
+      setEditingId(null);
+    } catch (err: any) {
+      console.error(err);
+    }
+  };
+
+  const rejectIntent = async (id: number) => {
+    try {
+      await apiRequest("POST", `/api/discovered-intents/${id}/reject`, { reason: rejectReason });
+      queryClient.invalidateQueries({ queryKey: ["/api/discovered-intents"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/training/stats"] });
+      setRejectingId(null);
+      setRejectReason("");
+    } catch (err: any) {
+      console.error(err);
+    }
+  };
+
+  const promoteIntent = async (id: number) => {
+    try {
+      await apiRequest("POST", `/api/discovered-intents/${id}/promote`, {});
+      queryClient.invalidateQueries({ queryKey: ["/api/discovered-intents"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/playbook"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/training/stats"] });
+    } catch (err: any) {
+      console.error(err);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0 pb-2">
+          <div>
+            <CardTitle className="text-base">Domain Discovery Pipeline</CardTitle>
+            <p className="text-sm text-muted-foreground mt-1">
+              Analyser ukategoriserte tickets for å oppdage nye intents
+            </p>
+          </div>
+          <Button
+            onClick={discovery.run}
+            disabled={discovery.isRunning}
+            data-testid="button-run-discovery"
+          >
+            {discovery.isRunning ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Search className="h-4 w-4 mr-2" />}
+            Kjør Discovery
+          </Button>
+        </CardHeader>
+        {discovery.isRunning && (
+          <CardContent>
+            <Progress value={discovery.progress} className="mb-2" />
+            <ScrollArea className="h-32">
+              {discovery.logs.map((log, i) => (
+                <p key={i} className="text-xs text-muted-foreground font-mono">{log}</p>
+              ))}
+            </ScrollArea>
+          </CardContent>
+        )}
+      </Card>
+
+      <div className="grid grid-cols-4 gap-2">
+        <Card>
+          <CardContent className="p-4 text-center">
+            <p className="text-2xl font-bold">{pending.length}</p>
+            <p className="text-xs text-muted-foreground">Nye kandidater</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4 text-center">
+            <p className="text-2xl font-bold text-blue-600">{autoMapped.length}</p>
+            <p className="text-xs text-muted-foreground">Auto-mappet</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4 text-center">
+            <p className="text-2xl font-bold text-green-600">{approved.length}</p>
+            <p className="text-xs text-muted-foreground">Godkjent</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4 text-center">
+            <p className="text-2xl font-bold text-red-600">{rejected.length}</p>
+            <p className="text-xs text-muted-foreground">Avvist</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {pending.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex flex-wrap items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-yellow-500" />
+              Venter på godkjenning ({pending.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {pending.map((intent) => (
+                <Card key={intent.id} className="border">
+                  <CardContent className="p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2 mb-1">
+                          <span className="font-mono font-medium" data-testid={`text-intent-name-${intent.id}`}>{intent.suggestedIntent}</span>
+                          <Badge variant={intent.actionable ? "default" : "secondary"} className="no-default-hover-elevate no-default-active-elevate">
+                            {intent.actionable ? "Transaksjonell" : "Informasjonell"}
+                          </Badge>
+                          <Badge variant="outline" className="no-default-hover-elevate no-default-active-elevate">
+                            {Math.round(intent.confidence * 100)}% confidence
+                          </Badge>
+                          <Badge variant="outline" className="no-default-hover-elevate no-default-active-elevate">
+                            {intent.ticketCount} tickets
+                          </Badge>
+                        </div>
+                        <p className="text-sm text-muted-foreground">{intent.description}</p>
+                        {intent.normalizedIntent && intent.normalizedIntent !== intent.suggestedIntent && (
+                          <div className="flex flex-wrap items-center gap-1 mt-1">
+                            <span className="text-xs text-muted-foreground">Normalisert:</span>
+                            <span className="text-xs font-mono font-medium">{intent.normalizedIntent}</span>
+                            {intent.matchedExistingIntent && (
+                              <Badge variant="outline" className="text-xs no-default-hover-elevate no-default-active-elevate">
+                                {Math.round(intent.similarityScore * 100)}% lik {intent.matchedExistingIntent}
+                              </Badge>
+                            )}
+                          </div>
+                        )}
+                        <Badge variant="destructive" className="text-xs mt-1 no-default-hover-elevate no-default-active-elevate">
+                          Ny intent-kandidat — krever godkjenning
+                        </Badge>
+                        {intent.category && (
+                          <p className="text-xs text-muted-foreground mt-1">Kategori: {intent.category}</p>
+                        )}
+                        {intent.keywords && (
+                          <p className="text-xs text-muted-foreground mt-1">Nøkkelord: {intent.keywords}</p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Button size="icon" variant="ghost" onClick={() => setExpandedId(expandedId === intent.id ? null : intent.id)} data-testid={`button-expand-${intent.id}`}>
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                        <Button size="icon" variant="ghost" onClick={() => startEdit(intent)} data-testid={`button-edit-intent-${intent.id}`}>
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button size="icon" variant="ghost" onClick={() => approveIntent(intent.id)} data-testid={`button-approve-${intent.id}`}>
+                          <CheckCircle className="h-4 w-4 text-green-600" />
+                        </Button>
+                        <Button size="icon" variant="ghost" onClick={() => setRejectingId(intent.id)} data-testid={`button-reject-${intent.id}`}>
+                          <X className="h-4 w-4 text-red-600" />
+                        </Button>
+                      </div>
+                    </div>
+
+                    {expandedId === intent.id && (
+                      <div className="mt-3 border-t pt-3 space-y-2">
+                        {intent.resolutionSteps && (
+                          <div>
+                            <p className="text-xs font-medium mb-1">Løsningssteg:</p>
+                            <p className="text-xs text-muted-foreground whitespace-pre-wrap">{intent.resolutionSteps}</p>
+                          </div>
+                        )}
+                        {intent.agentActions && (
+                          <div>
+                            <p className="text-xs font-medium mb-1">Agent-handlinger:</p>
+                            <p className="text-xs text-muted-foreground">{intent.agentActions}</p>
+                          </div>
+                        )}
+                        <div className="flex flex-wrap gap-2">
+                          {intent.requiresOtp && <Badge variant="outline" className="text-xs no-default-hover-elevate no-default-active-elevate">Krever OTP</Badge>}
+                          {intent.affectsRegister && <Badge variant="outline" className="text-xs no-default-hover-elevate no-default-active-elevate">Endrer register</Badge>}
+                          {intent.affectsOwnership && <Badge variant="outline" className="text-xs no-default-hover-elevate no-default-active-elevate">Eierskap</Badge>}
+                          {intent.affectsPayment && <Badge variant="outline" className="text-xs no-default-hover-elevate no-default-active-elevate">Betaling</Badge>}
+                        </div>
+                        {intent.sampleMessages && intent.sampleMessages.length > 0 && (
+                          <div>
+                            <p className="text-xs font-medium mb-1">Eksempler fra kunder:</p>
+                            {intent.sampleMessages.map((msg, i) => (
+                              <p key={i} className="text-xs text-muted-foreground italic ml-2">"{msg}"</p>
+                            ))}
+                          </div>
+                        )}
+                        {intent.requiredFields && (
+                          <p className="text-xs text-muted-foreground">Nødvendige felt: {intent.requiredFields}</p>
+                        )}
+                        {intent.actionEndpoint && (
+                          <p className="text-xs font-mono text-muted-foreground">Endpoint: {intent.actionEndpoint}</p>
+                        )}
+                      </div>
+                    )}
+
+                    {editingId === intent.id && (
+                      <div className="mt-3 border-t pt-3 space-y-2">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <Label className="text-xs">Intent-navn</Label>
+                            <Input value={editForm.suggestedIntent} onChange={e => setEditForm(p => ({ ...p, suggestedIntent: e.target.value }))} className="text-sm" data-testid="input-edit-intent-name" />
+                          </div>
+                          <div>
+                            <Label className="text-xs">Kategori</Label>
+                            <Input value={editForm.category} onChange={e => setEditForm(p => ({ ...p, category: e.target.value }))} className="text-sm" data-testid="input-edit-category" />
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Switch checked={editForm.actionable} onCheckedChange={v => setEditForm(p => ({ ...p, actionable: v }))} data-testid="switch-actionable" />
+                          <Label className="text-xs">Transaksjonell (krever handling)</Label>
+                        </div>
+                        <div>
+                          <Label className="text-xs">Løsningssteg</Label>
+                          <Textarea value={editForm.resolutionSteps} onChange={e => setEditForm(p => ({ ...p, resolutionSteps: e.target.value }))} className="text-sm" rows={3} data-testid="textarea-resolution-steps" />
+                        </div>
+                        {editForm.actionable && (
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <Label className="text-xs">Nødvendige felt</Label>
+                              <Input value={editForm.requiredFields} onChange={e => setEditForm(p => ({ ...p, requiredFields: e.target.value }))} className="text-sm" placeholder="ownerMobile, tagId" data-testid="input-required-fields" />
+                            </div>
+                            <div>
+                              <Label className="text-xs">Action Endpoint</Label>
+                              <Input value={editForm.actionEndpoint} onChange={e => setEditForm(p => ({ ...p, actionEndpoint: e.target.value }))} className="text-sm" placeholder="/api/pet/..." data-testid="input-action-endpoint" />
+                            </div>
+                          </div>
+                        )}
+                        <div className="flex gap-2">
+                          <Button onClick={() => approveIntent(intent.id)} data-testid={`button-save-approve-${intent.id}`}>
+                            <CheckCircle className="h-4 w-4 mr-1" /> Godkjenn med endringer
+                          </Button>
+                          <Button variant="outline" onClick={() => setEditingId(null)}>Avbryt</Button>
+                        </div>
+                      </div>
+                    )}
+
+                    {rejectingId === intent.id && (
+                      <div className="mt-3 border-t pt-3 flex flex-wrap gap-2 items-end">
+                        <div className="flex-1 min-w-0">
+                          <Label className="text-xs">Begrunnelse for avvisning</Label>
+                          <Input value={rejectReason} onChange={e => setRejectReason(e.target.value)} placeholder="Skriv begrunnelse..." data-testid="input-reject-reason" />
+                        </div>
+                        <Button variant="destructive" onClick={() => rejectIntent(intent.id)} data-testid={`button-confirm-reject-${intent.id}`}>
+                          Avvis
+                        </Button>
+                        <Button variant="outline" onClick={() => setRejectingId(null)}>Avbryt</Button>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {autoMapped.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex flex-wrap items-center gap-2">
+              <Link2 className="h-4 w-4 text-blue-600" />
+              Auto-mappet til eksisterende intents ({autoMapped.length})
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">Disse klyngene ble automatisk koblet til eksisterende intents (likhet &gt; 75%). Ingen manuell godkjenning nødvendig.</p>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {autoMapped.map((intent) => (
+                <div key={intent.id} className="flex flex-wrap items-center justify-between gap-2 p-2 rounded-md border">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-mono text-sm text-muted-foreground line-through" data-testid={`text-suggested-${intent.id}`}>{intent.suggestedIntent}</span>
+                      <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                      <span className="font-mono text-sm font-medium" data-testid={`text-normalized-${intent.id}`}>{intent.normalizedIntent || intent.suggestedIntent}</span>
+                      <Badge variant="outline" className="text-blue-600 no-default-hover-elevate no-default-active-elevate">
+                        {Math.round(intent.similarityScore * 100)}% likhet
+                      </Badge>
+                      <Badge variant={intent.actionable ? "default" : "secondary"} className="no-default-hover-elevate no-default-active-elevate">
+                        {intent.actionable ? "Transaksjonell" : "Informasjonell"}
+                      </Badge>
+                      <Badge variant="outline" className="no-default-hover-elevate no-default-active-elevate">
+                        {intent.ticketCount} tickets
+                      </Badge>
+                    </div>
+                    {intent.matchedExistingIntent && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Arvet fra: <span className="font-mono font-medium">{intent.matchedExistingIntent}</span>
+                        {intent.category && <span> | Kategori: {intent.category}</span>}
+                      </p>
+                    )}
+                  </div>
+                  {!intent.promotedToPlaybook && (
+                    <Button variant="outline" onClick={() => promoteIntent(intent.id)} data-testid={`button-promote-mapped-${intent.id}`}>
+                      <ArrowRight className="h-3 w-3 mr-1" /> Promoter
+                    </Button>
+                  )}
+                  {intent.promotedToPlaybook && (
+                    <Badge variant="outline" className="text-green-600 no-default-hover-elevate no-default-active-elevate">I Playbook</Badge>
+                  )}
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {approved.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex flex-wrap items-center gap-2">
+              <CheckCircle className="h-4 w-4 text-green-600" />
+              Godkjente intents ({approved.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {approved.map((intent) => (
+                <div key={intent.id} className="flex flex-wrap items-center justify-between gap-2 p-2 rounded-md border">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-mono text-sm font-medium" data-testid={`text-approved-${intent.id}`}>{intent.suggestedIntent}</span>
+                    <Badge variant={intent.actionable ? "default" : "secondary"} className="no-default-hover-elevate no-default-active-elevate">
+                      {intent.actionable ? "Transaksjonell" : "Informasjonell"}
+                    </Badge>
+                    {intent.promotedToPlaybook ? (
+                      <Badge variant="outline" className="text-green-600 no-default-hover-elevate no-default-active-elevate">I Playbook</Badge>
+                    ) : (
+                      <Button variant="outline" onClick={() => promoteIntent(intent.id)} data-testid={`button-promote-${intent.id}`}>
+                        <ArrowRight className="h-3 w-3 mr-1" /> Promoter til Playbook
+                      </Button>
+                    )}
+                  </div>
+                  <span className="text-xs text-muted-foreground">
+                    Godkjent av {intent.approvedBy}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {rejected.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex flex-wrap items-center gap-2">
+              <X className="h-4 w-4 text-red-600" />
+              Avviste intents ({rejected.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-1">
+              {rejected.map((intent) => (
+                <div key={intent.id} className="flex flex-wrap items-center justify-between gap-2 p-2 text-sm text-muted-foreground">
+                  <span className="font-mono">{intent.suggestedIntent}</span>
+                  <span className="text-xs italic">{intent.rejectionReason || "Ingen begrunnelse"}</span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {discoveredIntents.length === 0 && !discovery.isRunning && (
+        <Card>
+          <CardContent className="p-8 text-center text-muted-foreground">
+            <Search className="h-12 w-12 mx-auto mb-4 opacity-50" />
+            <p>Ingen oppdagede intents ennå.</p>
+            <p className="text-sm mt-1">Kjør Domain Discovery Pipeline for å analysere ukategoriserte tickets.</p>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function CanonicalIntentsTab() {
+  const { data: intents, isLoading } = useQuery<any[]>({
+    queryKey: ["/api/canonical-intents"],
+  });
+
+  const { data: stats } = useQuery<{
+    total: number;
+    approved: number;
+    pending: number;
+    actionable: number;
+    bySource: Record<string, number>;
+    byCategory: Record<string, number>;
+  }>({
+    queryKey: ["/api/canonical-intents/stats"],
+  });
+
+  const { toast } = useToast();
+
+  const seedMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/canonical-intents/seed");
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/canonical-intents"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/canonical-intents/stats"] });
+      toast({
+        title: "Seed fullført",
+        description: `${data.seeded} intents seeded, ${data.skipped} skipped`,
+      });
+    },
+    onError: (err: any) => {
+      toast({ title: "Feil", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const toggleApprovalMutation = useMutation({
+    mutationFn: async ({ id, approved }: { id: number; approved: boolean }) => {
+      await apiRequest("PUT", `/api/canonical-intents/${id}`, { approved });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/canonical-intents"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/canonical-intents/stats"] });
+    },
+  });
+
+  const [filterSource, setFilterSource] = useState<string>("all");
+  const [filterCategory, setFilterCategory] = useState<string>("all");
+  const [searchTerm, setSearchTerm] = useState("");
+
+  const filteredIntents = (intents || []).filter((i: any) => {
+    if (filterSource !== "all" && i.source !== filterSource) return false;
+    if (filterCategory !== "all" && i.category !== filterCategory) return false;
+    if (searchTerm && !i.intentId.toLowerCase().includes(searchTerm.toLowerCase()) &&
+        !(i.description || "").toLowerCase().includes(searchTerm.toLowerCase()) &&
+        !(i.keywords || "").toLowerCase().includes(searchTerm.toLowerCase())) return false;
+    return true;
+  });
+
+  const categories = stats ? Object.keys(stats.byCategory).sort() : [];
+  const sources = stats ? Object.keys(stats.bySource).sort() : [];
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center p-12">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3 flex-wrap">
+        <Button
+          data-testid="button-seed-canonical"
+          onClick={() => seedMutation.mutate()}
+          disabled={seedMutation.isPending}
+          size="sm"
+        >
+          {seedMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          {seedMutation.isPending ? "Seeder..." : "Seed Canonical Intents"}
+        </Button>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Totalt</CardTitle>
+            <Hash className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold" data-testid="text-canonical-total">{stats?.total || 0}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Godkjent</CardTitle>
+            <CheckCircle className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold" data-testid="text-canonical-approved">{stats?.approved || 0}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Venter</CardTitle>
+            <Clock className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold" data-testid="text-canonical-pending">{stats?.pending || 0}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Kilder</CardTitle>
+            <FileText className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="flex gap-2 flex-wrap">
+              {sources.map(s => (
+                <Badge key={s} variant="secondary" data-testid={`badge-source-${s}`}>
+                  {s}: {stats?.bySource[s]}
+                </Badge>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
+          <CardTitle className="text-sm font-medium">Canonical Intent Registry</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex gap-2 flex-wrap">
+            <Input
+              data-testid="input-search-canonical"
+              placeholder="Søk intent..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="max-w-[200px]"
+            />
+            <Select value={filterSource} onValueChange={setFilterSource}>
+              <SelectTrigger className="max-w-[150px]" data-testid="select-filter-source">
+                <SelectValue placeholder="Kilde" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Alle kilder</SelectItem>
+                {sources.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={filterCategory} onValueChange={setFilterCategory}>
+              <SelectTrigger className="max-w-[180px]" data-testid="select-filter-category">
+                <SelectValue placeholder="Kategori" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Alle kategorier</SelectItem>
+                {categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <span className="text-xs text-muted-foreground self-center">
+              {filteredIntents.length} av {intents?.length || 0}
+            </span>
+          </div>
+
+          <ScrollArea className="h-[500px]">
+            <div className="space-y-1">
+              {filteredIntents.map((intent: any) => (
+                <div key={intent.id} className="flex flex-wrap items-center justify-between gap-2 p-2 border rounded-md" data-testid={`row-canonical-${intent.intentId}`}>
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <span className="font-mono text-sm truncate">{intent.intentId}</span>
+                    <Badge variant="outline">{intent.source}</Badge>
+                    <Badge variant="secondary">{intent.category}</Badge>
+                    {intent.subcategory && (
+                      <span className="text-xs text-muted-foreground truncate">{intent.subcategory}</span>
+                    )}
+                    {intent.actionable && <Badge variant="default">Transaksjonell</Badge>}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      size="icon"
+                      variant={intent.approved ? "default" : "outline"}
+                      data-testid={`button-toggle-approve-${intent.id}`}
+                      onClick={() => toggleApprovalMutation.mutate({ id: intent.id, approved: !intent.approved })}
+                      disabled={toggleApprovalMutation.isPending}
+                    >
+                      {intent.approved ? <CheckCircle className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </ScrollArea>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function IntentDiscoveryTab() {
+  const discovery = useSSEWorkflow("/api/admin/intent-discovery");
+  const { data: results, refetch } = useQuery<any>({
+    queryKey: ["/api/admin/intent-discovery/results"],
+  });
+  const [expandedSection, setExpandedSection] = useState<string | null>("proposed_new_intents");
+  const [expandedCluster, setExpandedCluster] = useState<number | null>(null);
+  const { toast } = useToast();
+
+  const hasResults = results && !results.status;
+
+  const handleRunDiscovery = async () => {
+    await discovery.run();
+    refetch();
+  };
+
+  const flagBadge = (flag: string) => {
+    switch (flag) {
+      case "MIDDLE_ZONE": return <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-300" data-testid={`badge-flag-${flag}`}>MIDDLE_ZONE</Badge>;
+      case "HIGH_RISK": return <Badge variant="destructive" data-testid={`badge-flag-${flag}`}>HIGH_RISK</Badge>;
+      case "HIGH_AUTOMATION_POTENTIAL": return <Badge className="bg-green-100 text-green-700 border-green-300" data-testid={`badge-flag-${flag}`}>HIGH_AUTOMATION</Badge>;
+      default: return <Badge variant="outline">{flag}</Badge>;
+    }
+  };
+
+  const renderCluster = (cluster: any, sectionType: string) => {
+    const isExpanded = expandedCluster === cluster.clusterId;
+    return (
+      <div
+        key={`${sectionType}-${cluster.clusterId}`}
+        className="border rounded-lg p-3 space-y-2"
+        data-testid={`cluster-${sectionType}-${cluster.clusterId}`}
+      >
+        <div
+          className="flex flex-wrap items-center justify-between gap-2 cursor-pointer"
+          onClick={() => setExpandedCluster(isExpanded ? null : cluster.clusterId)}
+        >
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-mono text-sm font-medium">{cluster.suggestedLabel || cluster.dominantIntent || `Cluster ${cluster.clusterId}`}</span>
+            <Badge variant="secondary">{cluster.clusterSize} saker</Badge>
+            <Badge variant="outline">sim: {cluster.avgSemanticSimilarityToNearest}</Badge>
+            {cluster.qualityFlags?.map((f: any) => (
+              <span key={f.flag}>{flagBadge(f.flag)}</span>
+            ))}
+          </div>
+          <div className="flex items-center gap-1">
+            {sectionType === "proposed_new_intents" && (
+              <Badge className="bg-blue-100 text-blue-700">NY</Badge>
+            )}
+            {sectionType === "map_to_existing" && (
+              <Badge className="bg-green-100 text-green-700">→ {cluster.nearestCanonical?.intentId}</Badge>
+            )}
+            {sectionType === "ambiguous_clusters" && (
+              <Badge className="bg-yellow-100 text-yellow-700">TVETYDIG</Badge>
+            )}
+          </div>
+        </div>
+
+        {isExpanded && (
+          <div className="space-y-3 pt-2 border-t">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+              <div>
+                <p className="text-muted-foreground">Auto-close %</p>
+                <p className="font-medium">{cluster.autoCloseablePct}%</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Reopen rate</p>
+                <p className="font-medium">{cluster.reopenRate}%</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Avg confidence</p>
+                <p className="font-medium">{cluster.avgConfidence}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Nearest canonical</p>
+                <p className="font-medium text-xs">{cluster.nearestCanonical?.intentId} ({cluster.nearestCanonical?.similarity?.toFixed(3)})</p>
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Nøkkelord</p>
+              <div className="flex flex-wrap gap-1">
+                {cluster.topKeywords?.map((kw: string) => (
+                  <Badge key={kw} variant="outline" className="text-xs">{kw}</Badge>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Eksempel-spørsmål</p>
+              {cluster.exampleQuestions?.map((q: string, i: number) => (
+                <p key={i} className="text-sm pl-2 border-l-2 mb-1">"{q}"</p>
+              ))}
+            </div>
+
+            {cluster.qualityFlags?.length > 0 && (
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">Kvalitetsflagg</p>
+                {cluster.qualityFlags.map((f: any) => (
+                  <p key={f.flag} className="text-xs text-muted-foreground">
+                    {flagBadge(f.flag)} <span className="ml-1">{f.detail}</span>
+                  </p>
+                ))}
+              </div>
+            )}
+
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Eksempel-saker</p>
+              <div className="space-y-1">
+                {cluster.sampleTickets?.map((t: any) => (
+                  <p key={t.ticketId} className="text-xs font-mono bg-muted p-1 rounded">
+                    #{t.ticketId}: {t.question}
+                  </p>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <Button
+                size="sm"
+                variant="default"
+                data-testid={`button-approve-cluster-${cluster.clusterId}`}
+                onClick={() => toast({ title: "Godkjenn som ny canonical", description: "Denne handlingen krever manuell opprettelse i Canonical Intents-fanen" })}
+              >
+                <CheckCircle className="h-3 w-3 mr-1" /> Godkjenn som ny
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                data-testid={`button-map-cluster-${cluster.clusterId}`}
+                onClick={() => toast({ title: "Koble til eksisterende", description: `Nærmeste canonical: ${cluster.nearestCanonical?.intentId} (${cluster.nearestCanonical?.similarity?.toFixed(3)})` })}
+              >
+                <Link2 className="h-3 w-3 mr-1" /> Koble til eksisterende
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                data-testid={`button-reject-cluster-${cluster.clusterId}`}
+                onClick={() => toast({ title: "Avvist", description: "Clusteret er markert som avvist" })}
+              >
+                <X className="h-3 w-3 mr-1" /> Avvis
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const sections = [
+    { key: "proposed_new_intents", label: "Foreslåtte nye intents", icon: Plus, color: "text-blue-600" },
+    { key: "map_to_existing", label: "Kan kobles til eksisterende", icon: Link2, color: "text-green-600" },
+    { key: "ambiguous_clusters", label: "Tvetydige clustere", icon: AlertTriangle, color: "text-yellow-600" },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0 pb-2">
+          <div>
+            <CardTitle className="text-base">Controlled Intent Discovery Pipeline</CardTitle>
+            <p className="text-sm text-muted-foreground mt-1">
+              Offline analyse av historiske saker uten canonical intent. Ingen automatisk promotering.
+            </p>
+          </div>
+          <Button
+            onClick={handleRunDiscovery}
+            disabled={discovery.isRunning}
+            data-testid="button-run-intent-discovery"
+          >
+            {discovery.isRunning ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Search className="h-4 w-4 mr-2" />}
+            Kjør Intent Discovery
+          </Button>
+        </CardHeader>
+        {discovery.isRunning && (
+          <CardContent>
+            <Progress value={discovery.progress} className="mb-2" />
+            <ScrollArea className="h-32">
+              {discovery.logs.map((log, i) => (
+                <p key={i} className="text-xs text-muted-foreground font-mono">{log}</p>
+              ))}
+            </ScrollArea>
+          </CardContent>
+        )}
+        {discovery.error && (
+          <CardContent>
+            <p className="text-sm text-red-500">{discovery.error}</p>
+          </CardContent>
+        )}
+      </Card>
+
+      {hasResults && (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+            <Card>
+              <CardContent className="p-3 text-center">
+                <p className="text-xl font-bold" data-testid="text-source-tickets">{results.metadata?.sourceTickets || 0}</p>
+                <p className="text-xs text-muted-foreground">Kilde-saker</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-3 text-center">
+                <p className="text-xl font-bold text-blue-600" data-testid="text-proposed-count">{results.proposed_new_intents?.length || 0}</p>
+                <p className="text-xs text-muted-foreground">Nye forslag</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-3 text-center">
+                <p className="text-xl font-bold text-green-600" data-testid="text-map-count">{results.map_to_existing?.length || 0}</p>
+                <p className="text-xs text-muted-foreground">Koble til eksisterende</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-3 text-center">
+                <p className="text-xl font-bold text-yellow-600" data-testid="text-ambiguous-count">{results.ambiguous_clusters?.length || 0}</p>
+                <p className="text-xs text-muted-foreground">Tvetydige</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-3 text-center">
+                <p className="text-xl font-bold text-muted-foreground" data-testid="text-noise-count">{results.noise?.length || 0}</p>
+                <p className="text-xs text-muted-foreground">Støy</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card>
+            <CardContent className="p-3">
+              <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+                <span>Kjørt: {results.metadata?.runAt ? new Date(results.metadata.runAt).toLocaleString("nb-NO") : "—"}</span>
+                <span>Eligible: {results.metadata?.eligibleTickets || 0} saker</span>
+                <span>Clustere: {results.metadata?.totalClusters || 0}</span>
+                <span>Noise: {results.metadata?.noiseTickets || 0}</span>
+                <span>Tid: {results.metadata?.processingTimeMs ? `${(results.metadata.processingTimeMs / 1000).toFixed(1)}s` : "—"}</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {sections.map(section => {
+            const clusters = results[section.key] || [];
+            if (clusters.length === 0) return null;
+            const isOpen = expandedSection === section.key;
+            return (
+              <Card key={section.key}>
+                <CardHeader
+                  className="cursor-pointer pb-2"
+                  onClick={() => setExpandedSection(isOpen ? null : section.key)}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <section.icon className={`h-4 w-4 ${section.color}`} />
+                      <CardTitle className="text-base">{section.label}</CardTitle>
+                      <Badge variant="secondary">{clusters.length}</Badge>
+                    </div>
+                    <ArrowRight className={`h-4 w-4 transition-transform ${isOpen ? "rotate-90" : ""}`} />
+                  </div>
+                </CardHeader>
+                {isOpen && (
+                  <CardContent>
+                    <ScrollArea className="max-h-[600px]">
+                      <div className="space-y-2">
+                        {clusters.map((cluster: any) => renderCluster(cluster, section.key))}
+                      </div>
+                    </ScrollArea>
+                  </CardContent>
+                )}
+              </Card>
+            );
+          })}
+
+          {results.noise?.length > 0 && (
+            <Card>
+              <CardHeader
+                className="cursor-pointer pb-2"
+                onClick={() => setExpandedSection(expandedSection === "noise" ? null : "noise")}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Hash className="h-4 w-4 text-muted-foreground" />
+                    <CardTitle className="text-base">Støy (ikke-gruppert)</CardTitle>
+                    <Badge variant="secondary">{results.noise.length}</Badge>
+                  </div>
+                  <ArrowRight className={`h-4 w-4 transition-transform ${expandedSection === "noise" ? "rotate-90" : ""}`} />
+                </div>
+              </CardHeader>
+              {expandedSection === "noise" && (
+                <CardContent>
+                  <ScrollArea className="max-h-[300px]">
+                    <div className="space-y-1">
+                      {results.noise.map((n: any) => (
+                        <p key={n.ticketId} className="text-xs font-mono bg-muted p-1 rounded">
+                          #{n.ticketId}: {n.question} {n.intent && <Badge variant="outline" className="ml-1">{n.intent}</Badge>}
+                        </p>
+                      ))}
+                    </div>
+                  </ScrollArea>
+                </CardContent>
+              )}
+            </Card>
+          )}
+        </>
+      )}
+
+      {!hasResults && !discovery.isRunning && (
+        <Card>
+          <CardContent className="p-8 text-center text-muted-foreground">
+            <Search className="h-8 w-8 mx-auto mb-2 opacity-50" />
+            <p>Ingen resultater ennå. Kjør Intent Discovery for å analysere historiske saker.</p>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function CaseEscalationTab() {
+  const statsQuery = useQuery<{
+    total: number;
+    pending: number;
+    posted: number;
+    failed: number;
+    today: number;
+    featureEnabled: boolean;
+    postEnabled: boolean;
+  }>({ queryKey: ["/api/admin/escalation-stats"] });
+
+  const escalationsQuery = useQuery<any[]>({ queryKey: ["/api/admin/escalations"] });
+
+  const [showQC, setShowQC] = useState(false);
+  const qcQuery = useQuery<any>({
+    queryKey: ["/api/admin/escalation-qc"],
+    enabled: showQC,
+  });
+
+  const stats = statsQuery.data;
+  const escalations = escalationsQuery.data || [];
+  const qc = qcQuery.data;
+
+  const statusMutation = useMutation({
+    mutationFn: async ({ id, status }: { id: number; status: string }) => {
+      await apiRequest("PATCH", `/api/admin/escalations/${id}/status`, { status });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/escalations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/escalation-stats"] });
+    },
+  });
+
+  return (
+    <div className="space-y-4">
+      <Card className="border-2 border-amber-500/40 bg-amber-50/30 dark:bg-amber-950/10">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-amber-100 dark:bg-amber-900/30 rounded-lg">
+                <AlertTriangle className="h-5 w-5 text-amber-600" />
+              </div>
+              <div>
+                <CardTitle className="text-lg">Case Escalation — Fase A (Staging)</CardTitle>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  Funksjonen er aktiv i chatboten, men poster <strong>ikke</strong> til Pureservice.
+                  Alle eskaleringer lagres lokalt i outbox for inspeksjon.
+                </p>
+              </div>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="p-3 bg-background rounded-lg border">
+              <div className="flex items-center gap-2 mb-1">
+                <div className={`h-2 w-2 rounded-full ${stats?.featureEnabled ? "bg-green-500" : "bg-red-500"}`} />
+                <span className="text-xs text-muted-foreground">Escalation</span>
+              </div>
+              <span className="text-sm font-medium" data-testid="status-escalation-enabled">{stats?.featureEnabled ? "Aktiv" : "Deaktivert"}</span>
+            </div>
+            <div className="p-3 bg-background rounded-lg border">
+              <div className="flex items-center gap-2 mb-1">
+                <div className={`h-2 w-2 rounded-full ${stats?.postEnabled ? "bg-green-500" : "bg-amber-500"}`} />
+                <span className="text-xs text-muted-foreground">Pureservice POST</span>
+              </div>
+              <span className="text-sm font-medium" data-testid="status-pureservice-post">{stats?.postEnabled ? "Aktiv" : "Kun logging"}</span>
+            </div>
+            <div className="p-3 bg-background rounded-lg border">
+              <span className="text-xs text-muted-foreground block mb-1">Totalt i outbox</span>
+              <span className="text-lg font-bold" data-testid="text-total-escalations">{stats?.total || 0}</span>
+            </div>
+            <div className="p-3 bg-background rounded-lg border">
+              <span className="text-xs text-muted-foreground block mb-1">I dag</span>
+              <span className="text-lg font-bold">{stats?.today || 0}</span>
+            </div>
+          </div>
+
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            <div className="flex items-center gap-2 text-sm">
+              <Badge variant="outline" className="bg-yellow-50 text-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-400">Venter</Badge>
+              <span className="font-medium">{stats?.pending || 0}</span>
+            </div>
+            <div className="flex items-center gap-2 text-sm">
+              <Badge variant="outline" className="bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400">Postet</Badge>
+              <span className="font-medium">{stats?.posted || 0}</span>
+            </div>
+            <div className="flex items-center gap-2 text-sm">
+              <Badge variant="outline" className="bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400">Feilet</Badge>
+              <span className="font-medium">{stats?.failed || 0}</span>
+            </div>
+          </div>
+
+          <div className="mt-4 p-3 bg-muted/50 rounded-lg border border-dashed">
+            <p className="text-xs text-muted-foreground">
+              <strong>Fase-plan:</strong> Fase A (nå) = logg alt, ingen POST. → Fase B (etter pilotperiode) = slå på POST til Pureservice. → Fase C = full produksjon med auto-tagging.
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              <strong>ENV-flagg:</strong> ENABLE_CASE_ESCALATION={stats?.featureEnabled ? "true" : "false"} | ENABLE_PURESERVICE_POST={stats?.postEnabled ? "true" : "false"}
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base">Phase B Readiness — QC Report</CardTitle>
+            <Button
+              variant={showQC ? "default" : "outline"}
+              size="sm"
+              onClick={() => {
+                if (showQC) {
+                  queryClient.invalidateQueries({ queryKey: ["/api/admin/escalation-qc"] });
+                }
+                setShowQC(true);
+              }}
+              disabled={qcQuery.isLoading}
+              data-testid="btn-run-qc"
+            >
+              {qcQuery.isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <ClipboardCheck className="h-3.5 w-3.5 mr-1" />}
+              {showQC ? "Oppdater rapport" : "Kjør QC-rapport"}
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {!showQC ? (
+            <div className="text-center py-6 text-muted-foreground">
+              <ClipboardCheck className="h-7 w-7 mx-auto mb-2 opacity-40" />
+              <p className="text-sm">Kjør QC-rapporten for å se Phase B readiness-status.</p>
+              <p className="text-xs mt-1">Analyserer siste 200 outbox-elementer (read-only, ingen DB-endringer).</p>
+            </div>
+          ) : qcQuery.isLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-5 w-5 animate-spin mr-2" />
+              <span className="text-sm text-muted-foreground">Genererer QC-rapport...</span>
+            </div>
+          ) : qc ? (
+            <div className="space-y-4">
+              <div className={`p-3 rounded-lg border-2 flex items-center gap-3 ${qc.overallVerdict === "PASS" ? "border-green-500/40 bg-green-50/30 dark:bg-green-950/10" : "border-red-500/40 bg-red-50/30 dark:bg-red-950/10"}`}>
+                <div className={`p-2 rounded-lg ${qc.overallVerdict === "PASS" ? "bg-green-100 dark:bg-green-900/30" : "bg-red-100 dark:bg-red-900/30"}`}>
+                  {qc.overallVerdict === "PASS" ? <CheckCircle className="h-5 w-5 text-green-600" /> : <XCircle className="h-5 w-5 text-red-600" />}
+                </div>
+                <div>
+                  <p className="font-semibold" data-testid="text-qc-verdict">Phase B Readiness: {qc.overallVerdict}</p>
+                  <p className="text-xs text-muted-foreground">{qc.itemCount} elementer analysert • {qc.generatedAt ? new Date(qc.generatedAt).toLocaleString("nb-NO") : ""}</p>
+                </div>
+              </div>
+
+              {qc.blockingIssues?.length > 0 && (
+                <div className="p-3 bg-red-50/50 dark:bg-red-950/10 rounded-lg border border-red-200 dark:border-red-800">
+                  <p className="text-sm font-medium text-red-700 dark:text-red-400 mb-1">Blokkerende problemer:</p>
+                  {qc.blockingIssues.map((issue: string, i: number) => (
+                    <p key={i} className="text-xs text-red-600 dark:text-red-400">• {issue}</p>
+                  ))}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className={`p-3 rounded-lg border ${qc.readinessGates?.gate1?.pass ? "border-green-300 dark:border-green-700" : "border-red-300 dark:border-red-700"}`}>
+                  <div className="flex items-center gap-2 mb-1">
+                    {qc.readinessGates?.gate1?.pass ? <CheckCircle className="h-3.5 w-3.5 text-green-500" /> : <XCircle className="h-3.5 w-3.5 text-red-500" />}
+                    <span className="text-xs font-medium">Gate 1: Kategori-dekning</span>
+                  </div>
+                  <p className="text-lg font-bold">{qc.readinessGates?.gate1?.value || 0}%</p>
+                  <p className="text-xs text-muted-foreground">Terskel: ≥{qc.readinessGates?.gate1?.threshold || 90}% gyldig category1Id</p>
+                </div>
+
+                <div className={`p-3 rounded-lg border ${qc.readinessGates?.gate2?.pass ? "border-green-300 dark:border-green-700" : "border-red-300 dark:border-red-700"}`}>
+                  <div className="flex items-center gap-2 mb-1">
+                    {qc.readinessGates?.gate2?.pass ? <CheckCircle className="h-3.5 w-3.5 text-green-500" /> : <XCircle className="h-3.5 w-3.5 text-red-500" />}
+                    <span className="text-xs font-medium">Gate 2: Dedupe</span>
+                  </div>
+                  <p className="text-lg font-bold">{qc.dedupe?.multiplePerSession || 0} slipped</p>
+                  <p className="text-xs text-muted-foreground">Duplikat-par: {qc.dedupe?.duplicateEmailIntentPairs || 0}</p>
+                </div>
+
+                <div className={`p-3 rounded-lg border ${qc.readinessGates?.gate3?.pass ? "border-green-300 dark:border-green-700" : "border-red-300 dark:border-red-700"}`}>
+                  <div className="flex items-center gap-2 mb-1">
+                    {qc.readinessGates?.gate3?.pass ? <CheckCircle className="h-3.5 w-3.5 text-green-500" /> : <XCircle className="h-3.5 w-3.5 text-red-500" />}
+                    <span className="text-xs font-medium">Gate 3: Innhold</span>
+                  </div>
+                  <p className="text-lg font-bold">{qc.readinessGates?.gate3?.emptyOrShort || 0}/{qc.readinessGates?.gate3?.total || 0}</p>
+                  <p className="text-xs text-muted-foreground">Tomme/korte transkripsjoner (≤10%)</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <Card className="border">
+                  <CardHeader className="pb-2 pt-3 px-3">
+                    <CardTitle className="text-sm">Intent-fordeling</CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-3 pb-3">
+                    {qc.distribution?.topIntents?.length > 0 ? (
+                      <div className="space-y-1">
+                        {qc.distribution.topIntents.map((i: any) => (
+                          <div key={i.intentId} className="flex items-center justify-between text-xs">
+                            <span className="font-mono truncate max-w-[180px]" title={i.intentId}>{i.intentId}</span>
+                            <span className="text-muted-foreground">{i.count} ({i.pct}%)</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : <p className="text-xs text-muted-foreground">Ingen data</p>}
+                    <div className="mt-2 pt-2 border-t text-xs text-muted-foreground">
+                      Fallback-rate: <strong>{qc.distribution?.fallbackCategoryRate || 0}%</strong>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border">
+                  <CardHeader className="pb-2 pt-3 px-3">
+                    <CardTitle className="text-sm">Kategori-fordeling</CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-3 pb-3">
+                    {qc.distribution?.topCategories?.length > 0 ? (
+                      <div className="space-y-1">
+                        {qc.distribution.topCategories.map((c: any) => (
+                          <div key={c.category} className="flex items-center justify-between text-xs">
+                            <span className="truncate max-w-[180px]" title={c.category}>{c.category}</span>
+                            <span className="text-muted-foreground">{c.count} ({c.pct}%)</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : <p className="text-xs text-muted-foreground">Ingen data</p>}
+                    <div className="mt-2 pt-2 border-t text-xs text-muted-foreground">
+                      Manglende underkategori: <strong>{qc.distribution?.missingSubcategoryRate || 0}%</strong>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <Card className="border">
+                <CardHeader className="pb-2 pt-3 px-3">
+                  <CardTitle className="text-sm">Payload-design verifisering</CardTitle>
+                </CardHeader>
+                <CardContent className="px-3 pb-3">
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="flex items-center gap-2">
+                      {qc.payloadDesign?.emailInDedicatedField ? <CheckCircle className="h-3.5 w-3.5 text-green-500" /> : <XCircle className="h-3.5 w-3.5 text-red-500" />}
+                      <span>E-post i dedikert felt (userEmail)</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {qc.payloadDesign?.transcriptContainsEmail === 0 ? <CheckCircle className="h-3.5 w-3.5 text-green-500" /> : <XCircle className="h-3.5 w-3.5 text-red-500" />}
+                      <span>Scrubbet transcript uten e-post ({qc.payloadDesign?.transcriptContainsEmail || 0} brudd)</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {qc.payloadDesign?.subjectMissingIntent === 0 ? <CheckCircle className="h-3.5 w-3.5 text-green-500" /> : <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />}
+                      <span>Subject inkluderer intentId ({qc.payloadDesign?.subjectMissingIntent || 0} mangler)</span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {qc.contentQuality?.samples?.length > 0 && (
+                <Card className="border">
+                  <CardHeader className="pb-2 pt-3 px-3">
+                    <CardTitle className="text-sm">Innholds-stikkprøver ({qc.contentQuality.samples.length} av {qc.itemCount})</CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-3 pb-3">
+                    <ScrollArea className="max-h-[400px]">
+                      <div className="space-y-2">
+                        {qc.contentQuality.samples.map((s: any) => (
+                          <div key={s.id} className={`p-2 rounded border text-xs ${s.isEmpty ? "border-red-300 dark:border-red-700 bg-red-50/30 dark:bg-red-950/10" : s.transcriptLength < 50 ? "border-amber-300 dark:border-amber-700 bg-amber-50/30 dark:bg-amber-950/10" : ""}`}>
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="font-mono text-muted-foreground">#{s.id}</span>
+                              <div className="flex items-center gap-2">
+                                {s.intentId && <Badge variant="outline" className="text-xs">{s.intentId}</Badge>}
+                                {s.category && <Badge variant="secondary" className="text-xs">{s.category}</Badge>}
+                                {s.isEmpty && <Badge variant="destructive" className="text-xs">TOM</Badge>}
+                                {!s.isEmpty && s.transcriptLength < 50 && <Badge variant="secondary" className="text-xs">KORT</Badge>}
+                              </div>
+                            </div>
+                            <p className="font-medium mb-1 truncate" title={s.subject}>{s.subject}</p>
+                            {!s.isEmpty && (
+                              <p className="text-muted-foreground whitespace-pre-wrap break-words">{s.transcriptPreview}{s.transcriptLength > 300 ? "…" : ""}</p>
+                            )}
+                            <p className="text-muted-foreground mt-1">Transkript-lengde: {s.transcriptLength} tegn</p>
+                          </div>
+                        ))}
+                      </div>
+                    </ScrollArea>
+                    <div className="mt-2 pt-2 border-t text-xs text-muted-foreground">
+                      Tomme: {qc.contentQuality.emptyTranscriptCount} • Korte (&lt;50 tegn): {qc.contentQuality.shortTranscriptCount}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base">Escalation Outbox</CardTitle>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                queryClient.invalidateQueries({ queryKey: ["/api/admin/escalations"] });
+                queryClient.invalidateQueries({ queryKey: ["/api/admin/escalation-stats"] });
+              }}
+              data-testid="btn-refresh-escalations"
+            >
+              <RefreshCw className="h-3.5 w-3.5 mr-1" />
+              Oppdater
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {escalationsQuery.isLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-5 w-5 animate-spin mr-2" />
+              <span className="text-sm text-muted-foreground">Laster...</span>
+            </div>
+          ) : escalations.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-40" />
+              <p className="text-sm">Ingen eskaleringer i outbox ennå.</p>
+              <p className="text-xs mt-1">Eskaleringer oppstår når en bruker svarer «Nei» på «Løste dette saken?»</p>
+            </div>
+          ) : (
+            <ScrollArea className="max-h-[600px]">
+              <div className="space-y-3">
+                {escalations.map((e: any) => (
+                  <Card key={e.id} className="border" data-testid={`escalation-item-${e.id}`}>
+                    <CardContent className="p-3">
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-mono text-muted-foreground">#{e.id}</span>
+                          <Badge variant={
+                            e.status === "pending" ? "secondary" :
+                            e.status === "posted" ? "default" :
+                            e.status === "failed" ? "destructive" : "outline"
+                          }>
+                            {e.status}
+                          </Badge>
+                          {e.intent_id && (
+                            <Badge variant="outline" className="text-xs">{e.intent_id}</Badge>
+                          )}
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                          {e.created_at ? new Date(e.created_at).toLocaleString("nb-NO") : ""}
+                        </span>
+                      </div>
+
+                      <p className="text-sm font-medium mb-1 truncate" title={e.subject}>{e.subject}</p>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                        <div>E-post: <span className="font-mono">{e.user_email}</span></div>
+                        <div>Match: {e.matched_by || "N/A"} ({e.semantic_score?.toFixed(3) || "–"})</div>
+                        <div>Kategori: {e.category1_id || "GeneralInquiry"}{e.category2_id ? ` > ${e.category2_id}` : ""}</div>
+                        <div>Samtale: #{e.conversation_id}</div>
+                      </div>
+
+                      {e.status === "pending" && (
+                        <div className="flex items-center gap-2 mt-2 pt-2 border-t">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-xs h-7"
+                            onClick={() => statusMutation.mutate({ id: e.id, status: "cancelled" })}
+                            disabled={statusMutation.isPending}
+                            data-testid={`btn-cancel-escalation-${e.id}`}
+                          >
+                            <XCircle className="h-3 w-3 mr-1" />
+                            Avbryt
+                          </Button>
+                        </div>
+                      )}
+
+                      {e.error_message && (
+                        <p className="text-xs text-red-500 mt-2">{e.error_message}</p>
+                      )}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </ScrollArea>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

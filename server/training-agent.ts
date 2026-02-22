@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import { sql } from "drizzle-orm";
 import { storage } from "./storage";
 import { db } from "./db";
-import { scrubbedTickets } from "@shared/schema";
+import { scrubbedTickets, playbookEntries } from "@shared/schema";
 import { scrubTicket } from "./gdpr-scrubber";
 import { getClosedTickets, mapPureserviceToRawTicket } from "./integrations/pureservice-v3";
 import { INTENTS, INTENT_DEFINITIONS } from "@shared/intents";
@@ -59,6 +59,18 @@ function chunk<T>(arr: T[], size: number): T[][] {
 
 const KNOWN_INTENTS = INTENTS;
 
+const INTENT_TO_HELPCENTER_CATEGORY: Record<string, string> = {
+  "DyreID-appen": "App",
+  "QR-brikke": "Produkter - QR Tag",
+  "Smart Tag": "Produkter - Smart Tag",
+  "Utenlandsregistrering": "Registrering",
+  "Eierskifte": "Eierskifte",
+  "Min side": "Min side",
+  "Familiedeling": "Familiedeling",
+  "Savnet/Funnet": "Savnet/Funnet",
+  "ID-søk": "ID-søk",
+};
+
 function formatIntentsForPrompt(): string {
   const byCategory: Record<string, typeof INTENT_DEFINITIONS> = {};
   for (const d of INTENT_DEFINITIONS) {
@@ -112,19 +124,24 @@ function extractJson(text: string): any {
 
 // ─── WORKFLOW 1: PURESERVICE TICKET INGESTION ─────────────────────────────
 export async function runIngestion(
-  onProgress?: (msg: string, pct: number) => void
+  onProgress?: (msg: string, pct: number) => void,
+  maxTickets?: number
 ): Promise<{ ingested: number; errors: number }> {
   let totalIngested = 0;
   let totalErrors = 0;
   let page = 1;
   const pageSize = 100;
   let hasMore = true;
+  const limit = maxTickets || Infinity;
 
-  onProgress?.("Starter ticket-innhenting fra Pureservice...", 0);
+  onProgress?.(`Starter ticket-innhenting fra Pureservice${maxTickets ? ` (maks ${maxTickets})` : ''}...`, 0);
 
   while (hasMore) {
     try {
-      const { tickets, total } = await getClosedTickets(page, pageSize);
+      const fetchSize = Math.min(pageSize, limit - totalIngested);
+      if (fetchSize <= 0) break;
+
+      const { tickets, total } = await getClosedTickets(page, fetchSize);
 
       if (tickets.length === 0) {
         hasMore = false;
@@ -135,10 +152,11 @@ export async function runIngestion(
       await storage.insertRawTickets(rawTicketData);
       totalIngested += tickets.length;
 
-      const pct = Math.min(100, Math.round((totalIngested / Math.max(total, 1)) * 100));
-      onProgress?.(`Hentet ${totalIngested} av ~${total} tickets (side ${page})`, pct);
+      const target = maxTickets ? Math.min(total, maxTickets) : total;
+      const pct = Math.min(100, Math.round((totalIngested / Math.max(target, 1)) * 100));
+      onProgress?.(`Hentet ${totalIngested} av ~${target} tickets (side ${page})`, pct);
 
-      if (totalIngested >= total || tickets.length < pageSize) {
+      if (totalIngested >= limit || totalIngested >= total || tickets.length < fetchSize) {
         hasMore = false;
       }
       page++;
@@ -649,9 +667,10 @@ export async function runResolutionExtraction(
 
     for (const classification of unextracted) {
       try {
-        const prompt = `Du er en ekspert på å ekstrahere løsningssteg fra support-dialog.
+        const prompt = `Du er en ekspert på å analysere DyreID support-tickets og ekstrahere STRUKTURERT OPERASJONELL DATA.
 
-OPPGAVE: Analyser dialogen og ekstraher steg-for-steg løsning.
+VIKTIG: Du skal IKKE ekstrahere agentens svar eller samtalefrasering.
+Du skal KUN ekstrahere operasjonell logikk som kan brukes av en handlingsagent.
 
 TICKET:
 Intent: ${classification.intent}
@@ -662,32 +681,52 @@ Runtime-data: ${classification.requiredRuntimeData || ""}
 Betaling: ${classification.paymentRequired ? "Ja" : "Nei"}
 Begrunnelse: ${classification.reasoning || ""}
 
-INSTRUKSJONER:
-1. Identifiser hva kunden trengte
-2. Identifiser hva agenten gjorde
-3. Ekstraher stegene i løsningen
-4. Identifiser hvilke data som ble hentet
-5. Identifiser handlinger som ble utført
+OPPGAVE:
+1. Hva var kundens OPERASJONELLE MÅL? (f.eks. overføre eierskap, melde savnet, aktivere QR)
+2. Ble saken løst ved en AUTENTISERT SYSTEMHANDLING i DyreID/Min Side?
+3. Hvis JA (actionable=true): Hvilke DATA trengs for å utføre handlingen? Hvilket ENDEPUNKT brukes?
+4. Hvis NEI (actionable=false): Skriv kun et kort informasjonstekst-sammendrag.
+
+KJENTE ENDEPUNKTER:
+- OwnershipTransferWeb → /OwnerChange/OwnerSeller/ReportOwnerChange
+- LostPetReport → /Pet/LostPet/ReportLostPet
+- FoundPetReport → /Pet/FoundPet/ReportFoundPet
+- QRTagActivation → /Pet/QR/Activate
+- SmartTagActivation → /SmartTag/Activate
+- CancelSubscription → /Subscription/Cancel
+- ForeignChipRegistration → /Pet/Foreign/Register
+- UpdateContactInfo → /Owner/UpdateContact
+- PetDeceased → /Pet/Deceased/Report
+- NewRegistration → /Pet/Register
+
+KJENTE DATAFELTER:
+PetId, NewOwnerMobile, TagId, SubscriptionId, OwnerMobile, ChipNumber, OwnerName, PetName, AnimalId
 
 SVAR I JSON:
 {
-  "customer_need": "What did customer want to achieve?",
-  "data_gathered": "from_customer: mobilnr, dyrenavn; from_system: PetId, PaymentStatus",
-  "resolution_steps": "1. Verifiser identitet via OTP; 2. Hent dyrprofil; 3. Utfør handling",
-  "success_indicators": "Betaling fullført, Dyr nå søkbart",
+  "customer_need": "Kort operasjonelt mål (f.eks. 'Overføre eierskap til ny eier')",
+  "actionable": true/false,
+  "required_data": ["PetId", "NewOwnerMobile"],
+  "action_endpoint": "/OwnerChange/OwnerSeller/ReportOwnerChange",
+  "guidance_steps": ["Verifiser eierskap via OTP", "Velg dyr", "Oppgi ny eiers mobilnummer", "Bekreft overføring"],
+  "info_text": null,
+  "success_indicators": "Eierskap overført, bekreftelse sendt",
   "follow_up_needed": false
 }`;
 
         const text = await callOpenAI(prompt);
         const result = extractJson(text);
 
+        const requiredDataStr = Array.isArray(result.required_data) ? result.required_data.join(", ") : (result.required_data || "");
+        const guidanceStepsStr = Array.isArray(result.guidance_steps) ? result.guidance_steps.join("; ") : (result.guidance_steps || "");
+
         await storage.insertResolutionPattern({
           ticketId: classification.ticketId,
           intent: classification.intent,
-          customerNeed: result.customer_need,
-          dataGathered: typeof result.data_gathered === "object" ? JSON.stringify(result.data_gathered) : result.data_gathered,
-          resolutionSteps: typeof result.resolution_steps === "object" ? JSON.stringify(result.resolution_steps) : result.resolution_steps,
-          successIndicators: typeof result.success_indicators === "object" ? JSON.stringify(result.success_indicators) : result.success_indicators,
+          customerNeed: result.customer_need || "",
+          dataGathered: requiredDataStr,
+          resolutionSteps: result.actionable ? guidanceStepsStr : (result.info_text || ""),
+          successIndicators: typeof result.success_indicators === "object" ? JSON.stringify(result.success_indicators) : (result.success_indicators || ""),
           followUpNeeded: result.follow_up_needed || false,
         });
 
@@ -833,7 +872,10 @@ export async function runPlaybookGeneration(
       `);
       const tickets = ticketDataRows.rows as any[];
 
-      if (tickets.length === 0) continue;
+      if (tickets.length === 0) {
+        log(`Playbook: skipping ${intent} - no tickets found`, "training");
+        continue;
+      }
 
       const mostCommonCategory = getMostCommon(tickets.map(t => t.reclassified_category || t.hjelpesenter_category).filter(Boolean));
       const mostCommonSubcategory = getMostCommon(tickets.map(t => t.reclassified_subcategory || t.hjelpesenter_subcategory).filter(Boolean));
@@ -901,6 +943,7 @@ export async function runPlaybookGeneration(
       });
 
       const ticketIds = tickets.map((t: any) => t.id);
+      const ticketIdArray = `{${ticketIds.join(",")}}`;
       const qualityRows = await db.execute(sql`
         SELECT quality_level, COUNT(*)::int as cnt,
           ARRAY_AGG(DISTINCT elem) FILTER (WHERE elem IS NOT NULL) as all_missing,
@@ -908,7 +951,7 @@ export async function runPlaybookGeneration(
         FROM resolution_quality
         LEFT JOIN LATERAL unnest(missing_elements) AS elem ON true
         LEFT JOIN LATERAL unnest(positive_elements) AS pos ON true
-        WHERE ticket_id = ANY(${ticketIds})
+        WHERE ticket_id = ANY(${ticketIdArray}::int[])
         GROUP BY quality_level
       `);
       const qualityData = qualityRows.rows as any[];
@@ -939,7 +982,7 @@ export async function runPlaybookGeneration(
           AVG(thcm.match_confidence)::real as avg_conf
         FROM help_center_articles hca
         JOIN ticket_help_center_matches thcm ON thcm.article_id = hca.id
-        WHERE thcm.ticket_id = ANY(${ticketIds})
+        WHERE thcm.ticket_id = ANY(${ticketIdArray}::int[])
         GROUP BY hca.id
         ORDER BY match_count DESC, avg_conf DESC
         LIMIT 1
@@ -960,12 +1003,29 @@ export async function runPlaybookGeneration(
       const totalUses = feedback?.total || 0;
       const successRate = totalUses > 0 ? successfulResolutions / totalUses : 0;
 
+      const isActionable = !!mostCommonAction || !!mostCommonEndpoint;
+
       let combinedResponse: string | null = null;
-      const hasMeaningfulData = autoreplyData.autoreplyContent || bestArticle?.body_text || topPositive.length > 0 || topMissing.length > 0;
-      if (hasMeaningfulData) {
-        try {
-          const articleSummary = bestArticle?.body_text ? bestArticle.body_text.substring(0, 500) : null;
-          const prompt = `Generer en kombinert chatbot-respons for DyreID support.
+      let chatbotStepsArray: string[] | null = null;
+
+      if (isActionable) {
+        const guidanceFromResolutions = resolutions
+          .map((r: any) => r.resolution_steps)
+          .filter(Boolean)
+          .slice(0, 3);
+
+        if (guidanceFromResolutions.length > 0) {
+          chatbotStepsArray = guidanceFromResolutions[0]
+            .split(/;\s*|\n/)
+            .map((s: string) => s.trim())
+            .filter(Boolean);
+        }
+      } else {
+        const hasMeaningfulData = autoreplyData.autoreplyContent || bestArticle?.body_text || topPositive.length > 0;
+        if (hasMeaningfulData) {
+          try {
+            const articleSummary = bestArticle?.body_text ? bestArticle.body_text.substring(0, 500) : null;
+            const prompt = `Generer en kort, faktabasert informasjonstekst for DyreID chatbot.
 
 INTENT: ${intent}
 KATEGORI: ${mostCommonCategory || "Ukjent"}
@@ -976,27 +1036,21 @@ ${autoreplyData.autoreplyContent?.substring(0, 400) || "Ikke tilgjengelig"}
 HJELPESENTER-ARTIKKEL:
 ${articleSummary || "Ikke tilgjengelig"}
 
-HVA SOM FUNGERER (fra analyse):
-${topPositive.join(", ") || "Ingen data"}
-
-HVA SOM OFTE MANGLER:
-${topMissing.join(", ") || "Ingen data"}
-
-LAG EN KORT, DIALOGBASERT RESPONS for chatbot:
-- Maks 200 ord
-- Naturlig samtaletone
-- Inkluder konkrete steg
-- Inkluder det som ofte mangler
-- Fjern unodvendig formalitet
+REGLER:
+- Maks 150 ord
+- KUN faktainformasjon fra kildene over
+- IKKE finn opp nye prosedyrer eller priser
 - IKKE inkluder lenker
+- IKKE foreslå å kontakte support med mindre det er siste utvei
 
 Return kun teksten, ingen JSON.`;
 
-          combinedResponse = await callOpenAI(prompt, "gpt-5-nano", 1024);
-          combinedResponse = combinedResponse.trim();
-        } catch (err: any) {
-          log(`Combined response error for ${intent}: ${err.message}`, "training");
-          combinedResponse = autoreplyData.autoreplyContent || null;
+            combinedResponse = await callOpenAI(prompt, "gpt-5-nano", 1024);
+            combinedResponse = combinedResponse.trim();
+          } catch (err: any) {
+            log(`Combined response error for ${intent}: ${err.message}`, "training");
+            combinedResponse = autoreplyData.autoreplyContent || null;
+          }
         }
       }
 
@@ -1041,17 +1095,17 @@ Return kun teksten, ingen JSON.`;
         officialProcedure: null,
         helpCenterContentSummary: bestArticle?.body_text?.substring(0, 500) || null,
 
-        requiresLogin: false,
-        requiresAction: !!mostCommonAction,
-        actionType: mostCommonAction ? "API_CALL" : "INFO_ONLY",
+        requiresLogin: isActionable,
+        requiresAction: isActionable,
+        actionType: isActionable ? "API_CALL" : "INFO_ONLY",
         apiEndpoint: mostCommonEndpoint || null,
         httpMethod: mostCommonEndpoint ? "POST" : null,
         requiredRuntimeDataArray: mostCommonRuntimeData ? mostCommonRuntimeData.split(",").map((s: string) => s.trim()) : null,
         paymentRequired: paymentProbability > 0.5,
         paymentAmount: null,
 
-        chatbotSteps: null,
-        combinedResponse,
+        chatbotSteps: chatbotStepsArray,
+        combinedResponse: isActionable ? null : combinedResponse,
 
         successfulResolutions,
         failedResolutions,
@@ -1163,12 +1217,16 @@ async function saveCombinedResult(ticket: any, result: any, metrics: BatchMetric
     reasoning: result.intent_reasoning || result.reasoning || "",
   });
 
+  const requiredDataStr = Array.isArray(result.required_data) ? result.required_data.join(", ") : (result.required_runtime_data || result.required_data || "");
+  const guidanceStepsStr = Array.isArray(result.guidance_steps) ? result.guidance_steps.join("; ") : "";
+  const resolutionContent = result.actionable ? guidanceStepsStr : (result.info_text || result.resolution_steps || "");
+
   await storage.insertResolutionPattern({
     ticketId: ticket.ticketId,
     intent: result.intent || "GeneralInquiry",
     customerNeed: result.customer_need || "",
-    dataGathered: typeof result.data_gathered === "object" ? JSON.stringify(result.data_gathered) : (result.data_gathered || ""),
-    resolutionSteps: typeof result.resolution_steps === "object" ? JSON.stringify(result.resolution_steps) : (result.resolution_steps || ""),
+    dataGathered: requiredDataStr,
+    resolutionSteps: typeof resolutionContent === "object" ? JSON.stringify(resolutionContent) : (resolutionContent || ""),
     successIndicators: typeof result.success_indicators === "object" ? JSON.stringify(result.success_indicators) : (result.success_indicators || ""),
     followUpNeeded: result.follow_up_needed || false,
   });
@@ -1702,13 +1760,31 @@ AUTOSVAR-MALER: ${JSON.stringify(templateSignatures)}
 FOR HVER TICKET:
 1. KATEGORI: Map til hjelpesenter-kategori/underkategori. "Ukategorisert" hvis ingen passer.
 2. INTENT: Klassifiser kundens intent (bruk kjente intents eller foreslå ny).
-3. RESOLUSJON: Ekstraher løsningssteg.
+3. OPERASJONELL ANALYSE: Bestem om saken krever en SYSTEMHANDLING (actionable=true) eller kun er INFORMASJONELL (actionable=false).
+   - Hvis actionable=true: Ekstraher required_data (datafelter som trengs) og action_endpoint (Min Side endepunkt).
+   - Hvis actionable=false: Skriv kun et kort info_text sammendrag.
 4. AUTOSVAR-MATCH: Matcher agentsvaret et autosvar? Oppgi template_id.
 5. DIALOG-MØNSTER: "autoresponse_only", "autoresponse_then_resolution", "autoresponse_then_no_resolution", "direct_human_response", eller "no_response"
 6. RESOLUSJONS-KVALITET: "high", "medium", "low", eller "none"
 7. GENERELL-REKLASSIFISERING: Hvis "Generell e-post", angi egentlig emne.
 
-Svar med JSON: {"tickets": [{"ticket_id":12345,"hjelpesenter_category":"Min Side","hjelpesenter_subcategory":"Innlogging","category_confidence":0.9,"category_reasoning":"...","intent":"LoginIssue","intent_confidence":0.85,"is_new_intent":false,"keywords":"...","required_runtime_data":"","required_action":"","action_endpoint":"","payment_required":false,"auto_close_possible":false,"intent_reasoning":"...","customer_need":"...","resolution_steps":"...","data_gathered":"...","success_indicators":"...","follow_up_needed":false,"matched_template_id":null,"dialog_pattern":"direct_human_response","resolution_quality":"high","original_category_if_general":null}]}`;
+VIKTIG: Du skal IKKE ekstrahere agentens svar eller samtalefrasering. Ekstraher KUN strukturert operasjonell data.
+
+KJENTE ENDEPUNKTER:
+- OwnershipTransferWeb → /OwnerChange/OwnerSeller/ReportOwnerChange
+- LostPetReport → /Pet/LostPet/ReportLostPet
+- FoundPetReport → /Pet/FoundPet/ReportFoundPet
+- QRTagActivation → /Pet/QR/Activate
+- SmartTagActivation → /SmartTag/Activate
+- CancelSubscription → /Subscription/Cancel
+- ForeignChipRegistration → /Pet/Foreign/Register
+- UpdateContactInfo → /Owner/UpdateContact
+- PetDeceased → /Pet/Deceased/Report
+- NewRegistration → /Pet/Register
+
+KJENTE DATAFELTER: PetId, NewOwnerMobile, TagId, SubscriptionId, OwnerMobile, ChipNumber, OwnerName, PetName, AnimalId
+
+Svar med JSON: {"tickets": [{"ticket_id":12345,"hjelpesenter_category":"Min Side","hjelpesenter_subcategory":"Innlogging","category_confidence":0.9,"category_reasoning":"...","intent":"LoginIssue","intent_confidence":0.85,"is_new_intent":false,"keywords":"...","required_runtime_data":"","required_action":"","action_endpoint":"","payment_required":false,"auto_close_possible":false,"intent_reasoning":"...","customer_need":"...","actionable":true,"required_data":["PetId"],"guidance_steps":["Steg 1","Steg 2"],"info_text":null,"success_indicators":"...","follow_up_needed":false,"matched_template_id":null,"dialog_pattern":"direct_human_response","resolution_quality":"high","original_category_if_general":null}]}`;
   }
 
   async function processSingleBatch(batch: any[], categoryList: string, intentsStr: string, templateSignatures: any[], metrics: BatchMetrics): Promise<void> {
@@ -2055,4 +2131,617 @@ Return JSON:
   onProgress?.(`Ferdig! ${total} vurdert. HIGH: ${qualityCounts.high} (${highPct}%), MEDIUM: ${qualityCounts.medium}, LOW: ${qualityCounts.low}, NONE: ${qualityCounts.none} (${nonePct}%). ${metrics.apiCalls} API-kall.`, 100);
 
   return { metrics };
+}
+
+// ─── INFORMATIONAL PLAYBOOK POPULATION ──────────────────────────────────────
+// Matches each informational intent to Help Center articles and generates
+// conversational infoText (combinedResponse) from article content.
+// This ensures informational responses answer directly instead of linking.
+export async function runInfoTextPopulation(
+  onProgress?: (msg: string, pct: number) => void
+): Promise<{ populated: number; skipped: number; noArticle: number; errors: number }> {
+  let populated = 0;
+  let skipped = 0;
+  let noArticle = 0;
+  let errors = 0;
+
+  onProgress?.("Starter informasjonstekst-populering fra Hjelpesenter-artikler...", 0);
+
+  const articles = await storage.getHelpCenterArticles();
+  if (articles.length === 0) {
+    onProgress?.("Ingen hjelpesenter-artikler funnet. Kjør scraping først.", 100);
+    return { populated: 0, skipped: 0, noArticle: 0, errors: 0 };
+  }
+  onProgress?.(`Lastet ${articles.length} hjelpesenter-artikler`, 5);
+
+  const informationalIntents = INTENT_DEFINITIONS.filter(d => {
+    const isTransactional = [
+      "OwnershipTransferWeb", "OwnershipTransferApp",
+      "ReportLostPet", "ReportFoundPet",
+      "SmartTagActivation", "SmartTagQRActivation",
+      "QRTagActivation", "QRUpdateContact",
+      "ForeignRegistration",
+      "GDPRDelete", "GDPRExport",
+      "LoginIssue", "LoginProblem",
+      "PetDeceased", "MissingPetProfile",
+      "WrongInfo", "AddContactInfo",
+      "FamilySharing", "FamilySharingRequest",
+      "ViewMyPets",
+    ].includes(d.intent);
+    return !isTransactional;
+  });
+
+  onProgress?.(`${informationalIntents.length} informasjons-intents å behandle`, 10);
+
+  for (let i = 0; i < informationalIntents.length; i++) {
+    const intentDef = informationalIntents[i];
+    const pct = Math.round(10 + ((i / informationalIntents.length) * 80));
+    onProgress?.(`Behandler ${i + 1}/${informationalIntents.length}: ${intentDef.intent}`, pct);
+
+    try {
+      const hcCategory = INTENT_TO_HELPCENTER_CATEGORY[intentDef.category] || intentDef.category;
+
+      const matchingArticles = articles.filter(a => {
+        if (!a.hjelpesenterCategory) return false;
+        const catMatch = a.hjelpesenterCategory === hcCategory;
+        if (!catMatch) return false;
+
+        if (a.hjelpesenterSubcategory) {
+          const subNorm = a.hjelpesenterSubcategory.toLowerCase().trim();
+          const intentSubNorm = intentDef.subcategory.toLowerCase().trim();
+          if (subNorm === intentSubNorm) return true;
+          if (subNorm.includes(intentSubNorm) || intentSubNorm.includes(subNorm)) return true;
+          const intentKeywords = intentDef.keywords || [];
+          const keywordMatch = intentKeywords.some(kw => subNorm.includes(kw.toLowerCase()));
+          if (keywordMatch) return true;
+        }
+        return false;
+      });
+
+      if (matchingArticles.length === 0) {
+        const fallbackArticles = articles.filter(a =>
+          a.hjelpesenterCategory === hcCategory && a.bodyText && a.bodyText.length > 50
+        );
+        const bestFallback = fallbackArticles.find(a => {
+          const titleLower = (a.title || "").toLowerCase();
+          return intentDef.keywords.some(kw => titleLower.includes(kw.toLowerCase()));
+        });
+
+        if (!bestFallback) {
+          log(`InfoText: Ingen artikkel funnet for ${intentDef.intent} (kategori: ${hcCategory})`, "training");
+          noArticle++;
+          continue;
+        }
+        matchingArticles.push(bestFallback);
+      }
+
+      const combinedBodyText = matchingArticles
+        .map(a => a.bodyText || "")
+        .filter(t => t.length > 20)
+        .join("\n\n---\n\n")
+        .substring(0, 3000);
+
+      if (!combinedBodyText || combinedBodyText.length < 20) {
+        log(`InfoText: Tom artikkeltekst for ${intentDef.intent}`, "training");
+        noArticle++;
+        continue;
+      }
+
+      const prompt = `Du er en informasjonsassistent for DyreID (Norges nasjonale kjæledyrregister).
+
+OPPGAVE: Generer en klar, faktabasert informasjonstekst som svarer direkte på spørsmål om "${intentDef.subcategory}".
+
+INTENT: ${intentDef.intent}
+KATEGORI: ${intentDef.category}
+BESKRIVELSE: ${intentDef.description}
+
+KILDE (Hjelpesenter-artikkeltekst):
+${combinedBodyText}
+
+STRENGE REGLER:
+- Skriv en konsis, vennlig tekst som forklarer temaet DIREKTE
+- Bruk KUN informasjon fra kildeteksten over
+- IKKE inkluder lenker eller URL-er
+- IKKE foreslå å kontakte support
+- IKKE beskriv register-endrende prosedyrer (som å logge inn og trykke knapper steg-for-steg)
+- IKKE nevn veterinær eller chipinnsetting
+- IKKE finn opp priser som ikke står i kilden
+- Teksten skal kunne omformuleres av en chatbot basert på brukerens spørsmål
+- Maks 150 ord
+- Skriv på norsk bokmål
+
+Returner KUN teksten, ingen JSON eller formatering.`;
+
+      const rawResponse = await callOpenAI(prompt, "gpt-4o", 512);
+      const infoText = rawResponse.replace(/^["'\s]+|["'\s]+$/g, "").trim();
+
+      if (!infoText || infoText.length < 15) {
+        log(`InfoText: For kort GPT-respons for ${intentDef.intent} (${infoText?.length || 0} tegn): "${(infoText || '').substring(0, 80)}"`, "training");
+        errors++;
+        continue;
+      }
+
+      if (infoText.includes("http") || infoText.includes("www.")) {
+        log(`InfoText: GPT inkluderte URL for ${intentDef.intent}, filtrerer bort`, "training");
+        errors++;
+        continue;
+      }
+
+      const existingEntries = await db.execute(sql`
+        SELECT intent, combined_response FROM playbook_entries WHERE intent = ${intentDef.intent}
+      `);
+      const existing = existingEntries.rows[0] as any;
+
+      if (existing) {
+        await db.execute(sql`
+          UPDATE playbook_entries
+          SET combined_response = ${infoText},
+              action_type = 'INFO_ONLY',
+              help_center_article_url = ${matchingArticles[0]?.url || null},
+              help_center_article_title = ${matchingArticles[0]?.title || null},
+              help_center_content_summary = ${combinedBodyText.substring(0, 500)},
+              last_updated = CURRENT_TIMESTAMP
+          WHERE intent = ${intentDef.intent}
+        `);
+      } else {
+        await storage.upsertPlaybookEntry({
+          intent: intentDef.intent,
+          hjelpesenterCategory: intentDef.category,
+          hjelpesenterSubcategory: intentDef.subcategory,
+          keywords: intentDef.keywords.join(", "),
+          requiredRuntimeData: null,
+          primaryAction: null,
+          primaryEndpoint: null,
+          resolutionSteps: null,
+          successIndicators: null,
+          avgConfidence: 0.9,
+          ticketCount: 0,
+          paymentRequiredProbability: 0,
+          autoCloseProbability: 0,
+          isActive: true,
+          hasAutoreplyAvailable: false,
+          autoreplyTemplateId: null,
+          autoreplyTemplateName: null,
+          autoreplyContent: null,
+          typicalDialogPattern: null,
+          avgMessagesAfterAutoreply: null,
+          dialogPatternDistribution: null,
+          wasReclassified: false,
+          originalCategories: null,
+          reclassifiedFrom: null,
+          avgResolutionQuality: null,
+          qualityDistribution: null,
+          commonMissingElements: null,
+          commonPositiveElements: null,
+          needsImprovement: false,
+          helpCenterArticleId: matchingArticles[0]?.articleId || null,
+          helpCenterArticleUrl: matchingArticles[0]?.url || null,
+          helpCenterArticleTitle: matchingArticles[0]?.title || null,
+          officialProcedure: null,
+          helpCenterContentSummary: combinedBodyText.substring(0, 500),
+          requiresLogin: false,
+          requiresAction: false,
+          actionType: "INFO_ONLY",
+          apiEndpoint: null,
+          httpMethod: null,
+          requiredRuntimeDataArray: null,
+          paymentRequired: false,
+          paymentAmount: null,
+          chatbotSteps: null,
+          combinedResponse: infoText,
+          successfulResolutions: 0,
+          failedResolutions: 0,
+          totalUses: 0,
+          successRate: 0,
+        });
+      }
+
+      populated++;
+      log(`InfoText: Generert for ${intentDef.intent} (${infoText.length} tegn, ${matchingArticles.length} artikler)`, "training");
+
+    } catch (err: any) {
+      log(`InfoText error for ${intentDef.intent}: ${err.message}`, "training");
+      errors++;
+    }
+  }
+
+  onProgress?.(`Ferdig! ${populated} populert, ${skipped} hoppet over, ${noArticle} uten artikkel, ${errors} feil`, 100);
+  return { populated, skipped, noArticle, errors };
+}
+
+// ─── INTENT NORMALIZATION ──────────────────────────────────────────────────
+interface NormalizationResult {
+  normalizedIntent: string;
+  isNewIntentCandidate: boolean;
+  similarityScore: number;
+  matchedExistingIntent: string | null;
+}
+
+async function normalizeDiscoveredIntent(
+  suggestedIntent: string,
+  description: string,
+  keywords: string[],
+  existingIntents: { intent: string; category: string; description: string; keywords: string[] }[],
+  playbookIntents: { intent: string; hjelpesenterCategory: string | null; requiredRuntimeData: string | null; apiEndpoint: string | null; requiresLogin: boolean | null; requiresAction: boolean | null; paymentRequired: boolean | null }[]
+): Promise<NormalizationResult> {
+  const allExistingNames = existingIntents.map(i => i.intent);
+  const allPlaybookNames = playbookIntents.map(p => p.intent);
+  const combinedIntents = Array.from(new Set([...allExistingNames, ...allPlaybookNames]));
+
+  const existingDetails = existingIntents.map(i =>
+    `${i.intent} (${i.category}): ${i.description} [${i.keywords.join(", ")}]`
+  ).join("\n");
+
+  const playbookDetails = playbookIntents.map(p =>
+    `${p.intent} (${p.hjelpesenterCategory || "ukjent"})${p.requiresLogin ? " [krever innlogging]" : ""}${p.requiresAction ? " [transaksjonell]" : ""}${p.paymentRequired ? " [betaling]" : ""}`
+  ).join("\n");
+
+  const prompt = `Du er en intent-normaliseringsekspert for DyreID support-systemet.
+
+OPPGAVE: Sammenlign den foreslåtte intenten med eksisterende intents og avgjør om den er semantisk lik noen av dem.
+
+FORESLÅTT INTENT:
+Navn: ${suggestedIntent}
+Beskrivelse: ${description}
+Nøkkelord: ${keywords.join(", ")}
+
+HJELPESENTER-INTENTS:
+${existingDetails}
+
+PLAYBOOK-INTENTS:
+${playbookDetails}
+
+INSTRUKSJONER:
+1. Sammenlign den foreslåtte intenten mot BÅDE Hjelpesenter-intents og Playbook-intents
+2. Finn den mest semantisk like intenten fra begge kildene
+3. Vurder semantisk likhet (0.0 til 1.0):
+   - 1.0 = identisk formål
+   - 0.75+ = samme underliggende behov, kan slås sammen
+   - 0.5-0.74 = relatert men distinkt nok til å være separat
+   - <0.5 = helt forskjellig
+4. Hvis likhet >= 0.75: Map til eksisterende intent (returner matchedExistingIntent)
+5. Hvis likhet < 0.75: Marker som ny intent-kandidat
+6. Foretrekk Playbook-treff over Hjelpesenter-treff ved lik likhetsscore
+
+VIKTIG: Vurder formål og brukerens underliggende behov, ikke bare ordlikhet.
+F.eks. "TransferPetOwnershipToFamily" og "OwnershipTransferWeb" handler begge om eierskifte.
+
+SVAR I JSON:
+{
+  "most_similar_intent": "ExistingIntentName eller null",
+  "similarity_score": 0.0-1.0,
+  "reasoning": "Kort forklaring",
+  "normalized_intent": "Enten eksisterende intent-navn (hvis mapped) eller det foreslåtte navnet (hvis nytt)"
+}`;
+
+  try {
+    const text = await callOpenAI(prompt, "gpt-4o", 1024, true);
+    const result = extractJson(text);
+
+    const score = result.similarity_score || 0;
+    const isNew = score < 0.75;
+    const matchedIntent = !isNew && result.most_similar_intent ? result.most_similar_intent : null;
+    const normalizedName = isNew ? suggestedIntent : (result.most_similar_intent || suggestedIntent);
+
+    return {
+      normalizedIntent: normalizedName,
+      isNewIntentCandidate: isNew,
+      similarityScore: score,
+      matchedExistingIntent: matchedIntent,
+    };
+  } catch (err: any) {
+    log(`Normalization error for "${suggestedIntent}": ${err.message}`, "training");
+    return {
+      normalizedIntent: suggestedIntent,
+      isNewIntentCandidate: true,
+      similarityScore: 0,
+      matchedExistingIntent: null,
+    };
+  }
+}
+
+// ─── CANONICAL INTENT NORMALIZATION ─────────────────────────────────────────
+async function normalizeAgainstCanonical(
+  suggestedIntent: string,
+  description: string,
+  keywords: string[],
+  canonicalIntents: { intentId: string; category: string; subcategory?: string | null; description?: string | null; keywords?: string | null; actionable?: boolean | null }[]
+): Promise<NormalizationResult> {
+  const canonicalDetails = canonicalIntents.map(ci =>
+    `${ci.intentId} (${ci.category}${ci.subcategory ? "/" + ci.subcategory : ""}): ${ci.description || ""} [${ci.keywords || ""}]`
+  ).join("\n");
+
+  const prompt = `Du er en intent-normaliseringsekspert for DyreID support-systemet.
+
+OPPGAVE: Sammenlign den foreslåtte intenten med eksisterende canonical intents og avgjør om den er semantisk lik noen av dem.
+
+FORESLÅTT INTENT:
+Navn: ${suggestedIntent}
+Beskrivelse: ${description}
+Nøkkelord: ${keywords.join(", ")}
+
+CANONICAL INTENTS:
+${canonicalDetails}
+
+INSTRUKSJONER:
+1. Finn den mest semantisk like canonical intenten
+2. Vurder semantisk likhet (0.0 til 1.0):
+   - 1.0 = identisk formål
+   - 0.75+ = samme underliggende behov, kan slås sammen
+   - 0.5-0.74 = relatert men distinkt nok til å være separat
+   - <0.5 = helt forskjellig
+3. Hvis likhet >= 0.75: Map til eksisterende intent
+4. Hvis likhet < 0.75: Marker som ny intent-kandidat
+
+VIKTIG: Vurder formål og brukerens underliggende behov, ikke bare ordlikhet.
+
+SVAR I JSON:
+{
+  "most_similar_intent": "ExistingIntentName eller null",
+  "similarity_score": 0.0-1.0,
+  "reasoning": "Kort forklaring",
+  "normalized_intent": "Enten eksisterende intent-navn (hvis mapped) eller det foreslåtte navnet (hvis nytt)"
+}`;
+
+  try {
+    const text = await callOpenAI(prompt, "gpt-4o", 1024, true);
+    const result = extractJson(text);
+
+    const score = result.similarity_score || 0;
+    const isNew = score < 0.75;
+    const matchedIntent = !isNew && result.most_similar_intent ? result.most_similar_intent : null;
+    const normalizedName = isNew ? suggestedIntent : (result.most_similar_intent || suggestedIntent);
+
+    return {
+      normalizedIntent: normalizedName,
+      isNewIntentCandidate: isNew,
+      similarityScore: score,
+      matchedExistingIntent: matchedIntent,
+    };
+  } catch (err: any) {
+    log(`Canonical normalization error for "${suggestedIntent}": ${err.message}`, "training");
+    return {
+      normalizedIntent: suggestedIntent,
+      isNewIntentCandidate: true,
+      similarityScore: 0,
+      matchedExistingIntent: null,
+    };
+  }
+}
+
+// ─── DOMAIN DISCOVERY PIPELINE (Steps 2A-2E) ──────────────────────────────
+
+function buildClusterText(ticket: { subject?: string | null; customerQuestion?: string | null; agentAnswer?: string | null }): string {
+  const parts: string[] = [];
+  if (ticket.subject) parts.push(ticket.subject.trim());
+  if (ticket.customerQuestion) parts.push(ticket.customerQuestion.trim());
+  if (ticket.agentAnswer) parts.push(ticket.agentAnswer.substring(0, 300).trim());
+  return parts.join(" | ");
+}
+
+export async function runDomainDiscovery(
+  onProgress?: (msg: string, pct: number) => void
+): Promise<{ discovered: number; errors: number }> {
+  const { isUncategorized } = await import("./canonical-intents");
+  let totalDiscovered = 0;
+  let totalErrors = 0;
+
+  onProgress?.("Starter Domain Discovery Pipeline...", 0);
+
+  const allScrubbed = await db.select().from(scrubbedTickets).limit(1000);
+
+  const genericTickets = allScrubbed.filter(t => isUncategorized({
+    categoryId: t.categoryId,
+    category: t.hjelpesenterCategory || t.category || "",
+  }));
+
+  if (genericTickets.length === 0) {
+    onProgress?.("Ingen ukategoriserte tickets funnet", 100);
+    return { discovered: 0, errors: 0 };
+  }
+
+  onProgress?.(`Fant ${genericTickets.length} ukategoriserte tickets. Laster canonical intents...`, 5);
+
+  const canonicalIntentRows = await storage.getApprovedCanonicalIntents();
+
+  onProgress?.(`${canonicalIntentRows.length} canonical intents lastet. Kjører klyngeanalyse (Steg 2A)...`, 10);
+
+  // ── STEP 2A: CLUSTERING (GPT-based, HDBSCAN reserved for future via env toggle) ──
+  const ticketSummaries = genericTickets.map((t, i) =>
+    `TICKET ${i + 1} (ID: ${t.ticketId}):\n${buildClusterText(t)}\n---`
+  ).join("\n");
+
+  const existingIntentNames = canonicalIntentRows.map(ci => ci.intentId);
+
+  let clusters: any[] = [];
+  try {
+    const clusterPrompt = `Du er en ekspert på å analysere support-tickets for DyreID (Norges nasjonale kjæledyrregister).
+
+OPPGAVE: Grupper disse ukategoriserte tickets i semantiske klynger basert på:
+- Hva kunden faktisk spør om
+- Lignende problemtyper
+- Lignende løsningsmetoder
+
+TICKETS:
+${ticketSummaries}
+
+EKSISTERENDE INTENTS (ikke gjenta disse):
+${existingIntentNames.join(", ")}
+
+INSTRUKSJONER:
+1. Identifiser klynger av lignende saker
+2. Hvert cluster må ha minst 2 tickets
+3. Foreslå et PascalCase intent-navn for hvert cluster (f.eks. SmartTagSyncIssue, PaymentLinkFailure)
+4. IKKE foreslå intents som allerede finnes i listen over
+5. Gi en kort norsk beskrivelse av hva clusteret handler om
+
+SVAR I JSON:
+{
+  "clusters": [
+    {
+      "cluster_name": "Kort navn på klyngen",
+      "suggested_intent": "PascalCaseIntentNavn",
+      "description": "Hva disse sakene handler om",
+      "category": "Foreslått hjelpesenter-kategori",
+      "ticket_ids": [1, 5, 12],
+      "sample_messages": ["Eksempel på kundemelding 1", "Eksempel 2"],
+      "keywords": ["nøkkelord1", "nøkkelord2"]
+    }
+  ]
+}`;
+
+    const clusterText = await callOpenAI(clusterPrompt, "gpt-4o", 8192, true);
+    const clusterResult = extractJson(clusterText);
+    clusters = clusterResult.clusters || [];
+    onProgress?.(`Fant ${clusters.length} klynger. Kjører analyse per klynge...`, 30);
+  } catch (err: any) {
+    log(`Domain Discovery clustering error: ${err.message}`, "training");
+    totalErrors++;
+    onProgress?.(`Feil i klyngeanalyse: ${err.message}`, -1);
+    return { discovered: 0, errors: 1 };
+  }
+
+  const discoveryRunId = Date.now();
+
+  // ── STEP 2B-2E: Analysis, normalization, storage per cluster ──
+  for (let i = 0; i < clusters.length; i++) {
+    const cluster = clusters[i];
+    const pct = 30 + Math.round((i / clusters.length) * 60);
+    onProgress?.(`Analyserer klynge ${i + 1}/${clusters.length}: ${cluster.suggested_intent}...`, pct);
+
+    try {
+      const clusterTicketIds = (cluster.ticket_ids || []).map((idx: number) => {
+        const ticket = genericTickets[idx - 1];
+        return ticket?.ticketId;
+      }).filter(Boolean);
+
+      const clusterTickets = genericTickets.filter(t =>
+        clusterTicketIds.includes(t.ticketId) ||
+        (cluster.ticket_ids || []).includes(genericTickets.indexOf(t) + 1)
+      );
+
+      const dialogSummaries = clusterTickets.slice(0, 5).map(t =>
+        `Kunde: ${t.customerQuestion || "?"}\nAgent: ${(t.agentAnswer || "?").substring(0, 400)}`
+      ).join("\n---\n");
+
+      const analysisPrompt = `Du er en ekspert på DyreID support-analyse.
+
+OPPGAVE: Analyser dette clusteret av support-saker og besvar to ting:
+
+1. RESOLUTION: Hva gjorde agentene faktisk for å løse disse sakene? List konkrete steg.
+2. ACTIONABILITY: Er dette transaksjonelt (krever innlogging/endring i register) eller informasjonelt?
+
+CLUSTER: ${cluster.suggested_intent}
+BESKRIVELSE: ${cluster.description}
+
+EKSEMPLER FRA DIALOGER:
+${dialogSummaries}
+
+SVAR I JSON:
+{
+  "resolution_steps": "Steg 1: ...\\nSteg 2: ...\\nSteg 3: ...",
+  "agent_actions": "Hva agenten konkret utførte (kort)",
+  "actionable": true/false,
+  "requires_otp": true/false,
+  "affects_register": true/false,
+  "affects_ownership": true/false,
+  "affects_payment": true/false,
+  "confidence": 0.0-1.0,
+  "required_fields": "felt1, felt2",
+  "action_endpoint": "/api/relevant-endpoint eller null"
+}`;
+
+      const analysisText = await callOpenAI(analysisPrompt, "gpt-4o", 2048, true);
+      const analysis = extractJson(analysisText);
+
+      // STEP 2D: INTENT NORMALIZATION against canonical_intents
+      const normalization = await normalizeAgainstCanonical(
+        cluster.suggested_intent,
+        cluster.description || "",
+        cluster.keywords || [],
+        canonicalIntentRows
+      );
+
+      let finalCategory = cluster.category || null;
+      let finalActionable = analysis.actionable || false;
+      let finalRequiresOtp = analysis.requires_otp || false;
+      let finalAffectsRegister = analysis.affects_register || false;
+      let finalAffectsOwnership = analysis.affects_ownership || false;
+      let finalAffectsPayment = analysis.affects_payment || false;
+      let finalRequiredFields = analysis.required_fields || null;
+      let finalActionEndpoint = analysis.action_endpoint || null;
+      let finalStatus = "pending";
+
+      if (!normalization.isNewIntentCandidate && normalization.matchedExistingIntent) {
+        const matched = canonicalIntentRows.find(ci => ci.intentId === normalization.matchedExistingIntent);
+        if (matched) {
+          finalCategory = matched.category || finalCategory;
+          finalActionable = matched.actionable || finalActionable;
+          finalRequiredFields = matched.requiredFields ? JSON.stringify(matched.requiredFields) : finalRequiredFields;
+          finalActionEndpoint = matched.endpoint || finalActionEndpoint;
+        }
+        finalStatus = "auto_mapped";
+      }
+
+      await storage.insertDiscoveredCluster({
+        clusterId: `${discoveryRunId}-${i}`,
+        clusterName: cluster.cluster_name || cluster.suggested_intent,
+        suggestedIntent: cluster.suggested_intent,
+        description: cluster.description || "",
+        category: finalCategory,
+        ticketCount: clusterTicketIds.length || cluster.ticket_ids?.length || 0,
+        ticketIds: clusterTicketIds,
+        sampleMessages: cluster.sample_messages || [],
+        topKeywords: cluster.keywords || [],
+        actionable: finalActionable,
+        confidence: analysis.confidence || 0,
+        normalizedIntent: normalization.normalizedIntent,
+        isNewCandidate: normalization.isNewIntentCandidate,
+        similarityScore: normalization.similarityScore,
+        matchedCanonicalIntent: normalization.matchedExistingIntent,
+        status: finalStatus,
+        discoveryRunId,
+      });
+
+      // Also store in legacy discovered_intents for backward compat
+      await storage.insertDiscoveredIntent({
+        clusterName: cluster.cluster_name || cluster.suggested_intent,
+        suggestedIntent: cluster.suggested_intent,
+        description: cluster.description || "",
+        category: finalCategory,
+        ticketCount: clusterTicketIds.length || cluster.ticket_ids?.length || 0,
+        ticketIds: JSON.stringify(clusterTicketIds),
+        sampleMessages: cluster.sample_messages || [],
+        resolutionSteps: analysis.resolution_steps || null,
+        agentActions: analysis.agent_actions || null,
+        actionable: finalActionable,
+        requiresOtp: finalRequiresOtp,
+        affectsRegister: finalAffectsRegister,
+        affectsOwnership: finalAffectsOwnership,
+        affectsPayment: finalAffectsPayment,
+        confidence: analysis.confidence || 0,
+        keywords: (cluster.keywords || []).join(", "),
+        requiredFields: finalRequiredFields,
+        actionEndpoint: finalActionEndpoint,
+        normalizedIntent: normalization.normalizedIntent,
+        isNewIntentCandidate: normalization.isNewIntentCandidate,
+        similarityScore: normalization.similarityScore,
+        matchedExistingIntent: normalization.matchedExistingIntent,
+        status: finalStatus,
+      });
+
+      const mappedLabel = normalization.isNewIntentCandidate
+        ? "NEW CANDIDATE (requires review)"
+        : `MAPPED → ${normalization.matchedExistingIntent} (${Math.round(normalization.similarityScore * 100)}%)`;
+      totalDiscovered++;
+      log(`Discovery: "${cluster.suggested_intent}" → ${mappedLabel} (${finalActionable ? "transactional" : "informational"})`, "training");
+
+    } catch (err: any) {
+      totalErrors++;
+      log(`Discovery error for cluster "${cluster.suggested_intent}": ${err.message}`, "training");
+    }
+  }
+
+  onProgress?.(`Domain Discovery ferdig! ${totalDiscovered} nye intents oppdaget, ${totalErrors} feil. Venter på godkjenning.`, 100);
+  return { discovered: totalDiscovered, errors: totalErrors };
 }

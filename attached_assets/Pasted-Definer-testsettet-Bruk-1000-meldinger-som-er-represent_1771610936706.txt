@@ -1,0 +1,100 @@
+Definer testsettet
+
+Bruk 1000 meldinger som er representativt:
+
+600 “vanlige” henvendelser (fra historiske tickets eller interne testspørsmål)
+
+200 “fuzzy” (typos, dialekt, korte meldinger som “qr”, “får ikke logge inn”, osv.)
+
+200 “edge” (nye tema, ukategorisert, rare formuleringer)
+
+B. Kjør med disse flaggene
+
+RUNTIME_DEBUG=true
+
+PILOT_MODE=true
+
+C. Hent rapport
+
+Kall:
+
+/api/pilot/report
+
+Rapporten må minst inneholde:
+
+matchDistribution: regex / semantic / keyword / gpt / block
+
+blockReasons fordeling
+
+semanticScore distribusjon (min/median/p95 eller buckets)
+
+top 20 unmatched queries
+
+top 20 intents (hyppighet)
+
+2) Optimalisere threshold “matematisk” (uten å overkomplisere)
+
+Målet er å minimere risiko for feil intent (false positives), men samtidig unngå for mye BLOCK.
+
+Vi gjør det med en enkel beslutningsregel basert på score-fordeling.
+
+A. Bucket semanticScore
+
+Lag buckets:
+
+≥0.85
+
+0.80–0.85
+
+0.75–0.80
+
+0.70–0.75
+
+0.65–0.70
+
+<0.65
+
+For hver bucket: hvor ofte ender det i riktig intent?
+(Dette trenger en liten manuell verifisering – se punkt C.)
+
+B. Velg threshold slik
+
+Sett semanticThreshold = laveste score-bucket der “riktig intent-rate” ≥ 95% for transactional intents
+
+Sett informationalThreshold = laveste score-bucket der “riktig intent-rate” ≥ 90%
+
+(Transaksjonelt må være strengere.)
+
+C. Hvordan få “riktig intent-rate” uten masse arbeid
+
+Ta et stratified sample:
+
+20 saker fra hver bucket (120 totalt)
+
+Merk bare: “riktig intent?” ja/nei
+Det tar 30–45 min, og gir dere et objektivt grunnlag.
+
+D. GPT gate
+
+GPT fallback bør bare dekke “lav score + høy usikkerhet”.
+Matematisk:
+
+sett gptGate = min(0.65, semanticThreshold - 0.10)
+
+sett gptConfidence = 0.75 hvis dere ser feilklassifiseringer i pilot (ellers behold 0.70)
+
+3) Hva jeg anbefaler som start-innstillinger (før data)
+
+Basert på at dere har mange intents og vil være safe:
+
+semanticThreshold: 0.80 (generelt)
+
+transactionalSemanticThreshold: 0.85
+
+gptGate: 0.65 (som nå)
+
+gptConfidence: 0.70 (evt 0.75 hvis GPT overtrigger)
+
+Og viktig:
+
+0.65–0.80: suggestion UI / BLOCK med forslag, ikke GPT.

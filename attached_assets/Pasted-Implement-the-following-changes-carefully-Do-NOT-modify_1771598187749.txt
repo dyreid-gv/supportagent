@@ -1,0 +1,164 @@
+Implement the following changes carefully. Do NOT modify intent logic or GPT flow beyond what is specified.
+
+1️⃣ STRAM DYNAMIC BLOCK LAYER
+
+We must make BLOCK deterministic, score-aware, and fully logged.
+
+A) Suggestion score gate
+
+When entering BLOCK:
+
+We already compute top 3 semantic matches.
+
+Add this rule:
+
+If topSemanticScore < 0.50:
+    Do NOT show suggestions
+    Return pure BLOCK response
+
+Only show suggestions if:
+
+topSemanticScore >= 0.50
+
+Sort suggestions strictly by descending semantic score.
+
+Never include hardcoded categories unless:
+
+embedding index is completely empty
+
+OR semantic matching throws
+
+Remove any fallback that shows irrelevant suggestions.
+
+B) Explicit blockReason logging
+
+Extend runtime debug logging to include:
+
+blockReason: 
+  "lowSemanticZone"
+  | "noMatch"
+  | "lowGptConfidence"
+  | "embeddingUnavailable"
+
+Also log:
+
+topIntentId
+
+topSemanticScore
+
+gptConfidence (if applicable)
+
+matchedBy
+
+This must be included in RUNTIME_DEBUG logs.
+
+C) Between-zone handling must not leak to GPT
+
+Ensure:
+
+If semanticScore is between 0.72 and threshold (e.g. 0.82):
+
+→ DO NOT call GPT
+→ Trigger suggestion UI (not GPT fallback)
+
+This must be explicit in the gating logic.
+
+2️⃣ EMBEDDING SAFETY – FAIL FAST IN PILOT
+
+Embedding integrity must be strict during pilot.
+
+A) Hard validation during index load
+
+When building in-memory intent index:
+
+If any intent where:
+
+approved === true AND embedding == null
+
+Then:
+
+If PILOT_MODE === true:
+Throw fatal error and stop server startup
+
+If PILOT_MODE === false:
+Log CRITICAL error with intentId
+Skip that intent (but warn loudly)
+
+This prevents silent semantic degradation.
+
+B) Log embedding integrity stats
+
+On index refresh log:
+
+totalApprovedIntents
+
+totalEmbeddingsLoaded
+
+totalEmbeddingsMissing
+
+indexReady: true/false
+
+Example:
+
+[IntentIndex] Approved: 76 | Loaded embeddings: 76 | Missing: 0 | Ready: true
+
+If Missing > 0:
+
+Log severity ERROR.
+
+C) Refresh confirmation after seed
+
+After running:
+
+POST /api/canonical-intents/seed
+
+Ensure:
+
+Embeddings generated
+
+Index refreshes automatically
+
+Log: “Index refreshed after seed – X intents loaded”
+
+If refresh fails → log ERROR.
+
+3️⃣ DO NOT MODIFY
+
+Do NOT change:
+
+GPT intent prompt
+
+Threshold values
+
+Transactional routing
+
+Endpoint execution
+
+OTP handling
+
+Payment logic
+
+This task is strictly:
+
+BLOCK hardening
+
+Embedding integrity hardening
+
+4️⃣ AFTER IMPLEMENTATION – RETURN
+
+Return:
+
+Updated BLOCK logic snippet
+
+Updated embedding index load logic
+
+Example RUNTIME_DEBUG log output
+
+Example startup log when embeddings missing
+
+Confirmation that GPT fallback is untouched
+
+We are preparing for a 1000-ticket pilot run.
+System must fail loudly rather than degrade silently.
+
+Implement carefully.

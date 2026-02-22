@@ -357,6 +357,113 @@ export const trainingRuns = pgTable("training_runs", {
 
 export const insertResolutionQualitySchema = createInsertSchema(resolutionQuality).omit({ id: true });
 export const insertTicketHelpCenterMatchSchema = createInsertSchema(ticketHelpCenterMatches).omit({ id: true });
+export const discoveredIntents = pgTable("discovered_intents", {
+  id: serial("id").primaryKey(),
+  clusterName: text("cluster_name").notNull(),
+  suggestedIntent: text("suggested_intent").notNull(),
+  description: text("description"),
+  category: text("category"),
+  ticketCount: integer("ticket_count").default(0),
+  ticketIds: text("ticket_ids"),
+  sampleMessages: jsonb("sample_messages"),
+  resolutionSteps: text("resolution_steps"),
+  agentActions: text("agent_actions"),
+  actionable: boolean("actionable").default(false),
+  requiresOtp: boolean("requires_otp").default(false),
+  affectsRegister: boolean("affects_register").default(false),
+  affectsOwnership: boolean("affects_ownership").default(false),
+  affectsPayment: boolean("affects_payment").default(false),
+  confidence: real("confidence").default(0),
+  keywords: text("keywords"),
+  requiredFields: text("required_fields"),
+  actionEndpoint: text("action_endpoint"),
+  normalizedIntent: text("normalized_intent"),
+  isNewIntentCandidate: boolean("is_new_intent_candidate").default(true),
+  similarityScore: real("similarity_score").default(0),
+  matchedExistingIntent: text("matched_existing_intent"),
+  status: text("status").default("pending"),
+  approvedBy: text("approved_by"),
+  approvedAt: timestamp("approved_at"),
+  rejectionReason: text("rejection_reason"),
+  promotedToPlaybook: boolean("promoted_to_playbook").default(false),
+  discoveredAt: timestamp("discovered_at").default(sql`CURRENT_TIMESTAMP`),
+  clusterId: integer("cluster_id"),
+  discoveryRunId: integer("discovery_run_id"),
+});
+
+export const insertDiscoveredIntentSchema = createInsertSchema(discoveredIntents).omit({ id: true });
+
+export const canonicalIntents = pgTable("canonical_intents", {
+  id: serial("id").primaryKey(),
+  intentId: text("intent_id").notNull().unique(),
+  category: text("category").notNull(),
+  subcategory: text("subcategory"),
+  source: text("source").notNull(),
+  actionable: boolean("actionable").default(false),
+  requiredFields: jsonb("required_fields"),
+  endpoint: text("endpoint"),
+  infoText: text("info_text"),
+  approved: boolean("approved").default(false),
+  embedding: jsonb("embedding"),
+  keywords: text("keywords"),
+  description: text("description"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const insertCanonicalIntentSchema = createInsertSchema(canonicalIntents).omit({ id: true });
+
+export const discoveredClusters = pgTable("discovered_clusters", {
+  id: serial("id").primaryKey(),
+  clusterId: text("cluster_id").notNull(),
+  clusterName: text("cluster_name"),
+  suggestedIntent: text("suggested_intent"),
+  description: text("description"),
+  category: text("category"),
+  ticketCount: integer("ticket_count").default(0),
+  ticketIds: jsonb("ticket_ids"),
+  topKeywords: jsonb("top_keywords"),
+  sampleMessages: jsonb("sample_messages"),
+  exampleSubjects: jsonb("example_subjects"),
+  sampleSnippets: jsonb("sample_snippets"),
+  centroidEmbedding: jsonb("centroid_embedding"),
+  actionable: boolean("actionable").default(false),
+  confidence: real("confidence").default(0),
+  normalizedIntent: text("normalized_intent"),
+  isNewCandidate: boolean("is_new_candidate").default(true),
+  similarityScore: real("similarity_score").default(0),
+  matchedCanonicalIntent: text("matched_canonical_intent"),
+  status: text("status").default("pending"),
+  discoveryRunId: integer("discovery_run_id"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const insertDiscoveredClusterSchema = createInsertSchema(discoveredClusters).omit({ id: true });
+
+export const escalationsOutbox = pgTable("escalations_outbox", {
+  id: serial("id").primaryKey(),
+  conversationId: integer("conversation_id").notNull(),
+  sessionId: text("session_id"),
+  intentId: text("intent_id"),
+  matchedBy: text("matched_by"),
+  semanticScore: real("semantic_score"),
+  userEmail: text("user_email").notNull(),
+  subject: text("subject").notNull(),
+  description: text("description").notNull(),
+  category1Id: text("category1_id"),
+  category2Id: text("category2_id"),
+  category3Id: text("category3_id"),
+  pureserviceTicketId: text("pureservice_ticket_id"),
+  status: text("status").default("pending").notNull(),
+  chatTranscript: text("chat_transcript"),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
+  postedAt: timestamp("posted_at"),
+  errorMessage: text("error_message"),
+});
+
+export const insertEscalationSchema = createInsertSchema(escalationsOutbox).omit({ id: true, createdAt: true, postedAt: true });
+
 export const insertChatbotInteractionSchema = createInsertSchema(chatbotInteractions).omit({ id: true });
 export const insertHelpCenterArticleSchema = createInsertSchema(helpCenterArticles).omit({ id: true });
 export const insertResponseTemplateSchema = createInsertSchema(responseTemplates).omit({ id: true });
@@ -410,3 +517,11 @@ export type InsertTicketHelpCenterMatch = z.infer<typeof insertTicketHelpCenterM
 export type MinsideFieldMapping = typeof minsideFieldMappings.$inferSelect;
 export type InsertMinsideFieldMapping = z.infer<typeof insertMinsideFieldMappingSchema>;
 export type TrainingRun = typeof trainingRuns.$inferSelect;
+export type DiscoveredIntent = typeof discoveredIntents.$inferSelect;
+export type InsertDiscoveredIntent = z.infer<typeof insertDiscoveredIntentSchema>;
+export type CanonicalIntent = typeof canonicalIntents.$inferSelect;
+export type InsertCanonicalIntent = z.infer<typeof insertCanonicalIntentSchema>;
+export type DiscoveredCluster = typeof discoveredClusters.$inferSelect;
+export type InsertDiscoveredCluster = z.infer<typeof insertDiscoveredClusterSchema>;
+export type EscalationOutbox = typeof escalationsOutbox.$inferSelect;
+export type InsertEscalation = z.infer<typeof insertEscalationSchema>;

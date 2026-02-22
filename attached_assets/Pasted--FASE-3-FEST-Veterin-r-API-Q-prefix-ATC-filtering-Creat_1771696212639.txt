@@ -1,0 +1,240 @@
+# FASE 3: FEST Veterinær API (Q-prefix ATC filtering)
+
+## Create FEST Service
+
+Create `server/src/services/fest.ts`:
+```typescript
+import { supabase } from '../db/supabase';
+
+export interface VeterinarySubstance {
+  substance_name: string;
+  atc_code: string;
+  species: string[];
+  products: Array<{
+    name: string;
+    strength: string;
+    form: string;
+  }>;
+}
+
+/**
+ * Sync FEST substances from existing fest_products/fest_substances tables
+ * Filter ONLY veterinary (ATC starts with Q)
+ */
+export async function syncFestVeterinarySubstances(): Promise<number> {
+  console.log('🔄 Syncing FEST veterinary substances...');
+  
+  // Get all unique substances from fest_products where ATC starts with 'Q'
+  const { data: festProducts, error } = await supabase
+    .from('fest_products')
+    .select('substance_name, atc_code, species, name, strength, form')
+    .like('atc_code', 'Q%'); // VETERINARY ONLY
+  
+  if (error) {
+    console.error('❌ FEST sync failed:', error);
+    throw error;
+  }
+  
+  // Group by substance_name
+  const substanceMap = new Map<string, VeterinarySubstance>();
+  
+  for (const product of festProducts || []) {
+    const key = product.substance_name.toLowerCase();
+    
+    if (!substanceMap.has(key)) {
+      substanceMap.set(key, {
+        substance_name: product.substance_name,
+        atc_code: product.atc_code,
+        species: product.species || [],
+        products: []
+      });
+    }
+    
+    const substance = substanceMap.get(key)!;
+    substance.products.push({
+      name: product.name,
+      strength: product.strength,
+      form: product.form
+    });
+  }
+  
+  // Upsert into fest_substances table
+  const substances = Array.from(substanceMap.values());
+  
+  for (const substance of substances) {
+    await supabase
+      .from('fest_substances')
+      .upsert({
+        substance_name: substance.substance_name,
+        atc_code: substance.atc_code,
+        species: substance.species,
+        products: substance.products,
+        is_veterinary: true,
+        last_synced: new Date().toISOString()
+      }, {
+        onConflict: 'substance_name'
+      });
+  }
+  
+  console.log(`✅ Synced ${substances.length} veterinary substances`);
+  return substances.length;
+}
+
+/**
+ * Get all veterinary substances (cached)
+ */
+export async function getAllVeterinarySubstances(): Promise<VeterinarySubstance[]> {
+  const { data, error } = await supabase
+    .from('fest_substances')
+    .select('*')
+    .eq('is_veterinary', true)
+    .order('substance_name');
+  
+  if (error) throw error;
+  return data || [];
+}
+
+/**
+ * Get substance by name
+ */
+export async function getSubstanceByName(name: string): Promise<VeterinarySubstance | null> {
+  const { data, error } = await supabase
+    .from('fest_substances')
+    .select('*')
+    .ilike('substance_name', name)
+    .single();
+  
+  if (error) {
+    if (error.code === 'PGRST116') return null; // Not found
+    throw error;
+  }
+  
+  return data;
+}
+
+/**
+ * Validate substance against FEST registry (closed-world)
+ */
+export async function validateAgainstFEST(substanceName: string): Promise<boolean> {
+  const { data } = await supabase
+    .from('fest_substances')
+    .select('id')
+    .ilike('substance_name', substanceName)
+    .single();
+  
+  return !!data;
+}
+
+/**
+ * Get species for substance
+ */
+export async function getSpeciesForSubstance(substanceName: string): Promise<string[]> {
+  const substance = await getSubstanceByName(substanceName);
+  return substance?.species || [];
+}
+```
+
+## Create FEST API Routes
+
+Create `server/src/routes/fest.ts`:
+```typescript
+import express from 'express';
+import {
+  syncFestVeterinarySubstances,
+  getAllVeterinarySubstances,
+  getSubstanceByName,
+  getSpeciesForSubstance
+} from '../services/fest';
+
+const router = express.Router();
+
+/**
+ * POST /api/fest/sync
+ * Sync veterinary substances from FEST database
+ */
+router.post('/sync', async (req, res) => {
+  try {
+    const count = await syncFestVeterinarySubstances();
+    res.json({
+      success: true,
+      synced: count,
+      message: `Synced ${count} veterinary substances`
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/fest/substances
+ * Get all veterinary substances
+ */
+router.get('/substances', async (req, res) => {
+  try {
+    const substances = await getAllVeterinarySubstances();
+    res.json({
+      success: true,
+      count: substances.length,
+      substances
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/fest/substances/:name
+ * Get specific substance by name
+ */
+router.get('/substances/:name', async (req, res) => {
+  try {
+    const substance = await getSubstanceByName(req.params.name);
+    
+    if (!substance) {
+      return res.status(404).json({
+        success: false,
+        error: 'Substance not found'
+      });
+    }
+    
+    res.json({
+      success: true,
+      substance
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/fest/species/:substanceName
+ * Get species for a substance
+ */
+router.get('/species/:substanceName', async (req, res) => {
+  try {
+    const species = await getSpeciesForSubstance(req.params.substanceName);
+    res.json({
+      success: true,
+      species
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+export default router;
+```
+
+Confirm when FEST API is created and tested with `/api/fest/sync`.

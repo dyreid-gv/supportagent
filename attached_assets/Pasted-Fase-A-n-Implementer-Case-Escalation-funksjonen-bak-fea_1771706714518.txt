@@ -1,0 +1,154 @@
+Fase A (nå): Implementer “Case Escalation” funksjonen bak feature-flag + logg alt, men ikke POST til Pureservice i prod.
+Fase B (etter 1000–5000 pilot og Playbook-konsolidering): Slå på POST i pilot/limited release.
+Fase C: Full produksjon, med rate-limit, dedupe, og auto-tagging.
+
+Hvorfor dette er riktig:
+
+Dere trenger først en stabil “canonical intent” og category mapping som faktisk fungerer i runtime.
+
+Dere må få kontroll på auto-close / systemmeldinger (som dere allerede har sett dominerer) så dere ikke eskalerer “støy”.
+
+Funksjonell design: “Løste dette saken?” + eskalering
+1) Når spør vi “Løste dette saken?”
+
+Ikke spør på hver melding. Bruk klare triggere:
+
+Trigger A: Etter at boten har levert en løsning
+
+informational answer (Playbook)
+
+transactional flow fullført (API_CALL done)
+
+Trigger B: Etter 2–3 runder uten progress
+
+brukeren stiller samme spørsmål igjen
+
+user sentiment/phrasing: “fungerer ikke”, “ikke riktig”, “hjelper ikke”
+
+2) Spørsmål til bruker
+
+“Løste dette saken?” (Ja / Nei)
+
+Hvis Nei → “Ok, jeg kan opprette en supportsak for deg. Hvilken e-post skal kobles til saken?”
+
+Valider e-post (regex)
+
+Hvis bruker er OTP-logget: prefill e-post hvis dere har den, men la bruker endre
+
+3) Ticket payload til Pureservice (hva skal med)
+
+Minimum:
+
+subject: kort oppsummering + intent + evt. dyr/produkt-kontekst
+
+description: hele dialogen (scrubbet for PII dere ikke skal sende videre, men e-post må med siden den skal brukes som requester)
+
+category1Id / category2Id / category3Id: fra canonical intent mapping (ikke GPT)
+
+metadata tags/custom fields (hvis tilgjengelig): source=dyreid-ai, intentId, semanticScore, chatSessionId
+
+Pureservice API-dokumentasjon ligger offentlig, og dere må bruke korrekt auth/header slik dere allerede har vært inne på.
+
+Viktig: Ikke send OTP-koder, chipnumre, betalingsreferanser eller andre sensitive felt i fritekst. Dere har allerede GDPR-scrubber – gjenbruk den her.
+
+Sikkerhet og kvalitet (må være med fra dag 1)
+Dedupe (anti-spam)
+
+Før dere oppretter ticket:
+
+Sjekk om det finnes en nylig ticket med samme e-post + samme intent + siste 24t (lokal DB-logg holder)
+
+Hvis ja: “Jeg ser du nylig opprettet en sak om dette. Vil du legge til mer info i samme sak?”
+(og evt POST “communication”/note hvis API støtter det)
+
+Rate limit
+
+maks 1 opprettelse per session
+
+maks 3 per e-post per døgn (justerbart)
+
+Kategorisikkerhet
+
+Ticket category settes kun hvis intent-match er “canonical & approved”
+
+Hvis BLOCK og score < 0.50: send category = “GeneralInquiry” eller tilsvarende trygg default + legg intent-forslag i beskrivelse
+
+Replit-prompt: implementer “Escalate to Pureservice” riktig (feature-flag)
+
+Kopier/lim dette:
+
+PROMPT (Case Escalation v1 – feature-flagged)
+
+Implement a “Case Escalation” flow in the chatbot:
+
+Goals:
+
+Ask “Løste dette saken?” at appropriate moments
+
+If user says NO, collect an email address and create a ticket in Pureservice
+
+Include full chat transcript + intent/category context
+
+Strict safety: no hallucinated category, no sensitive leakage, dedupe + rate limits
+
+Constraints:
+
+Do NOT change intent thresholds, GPT policy, or Playbook logic
+
+Must be behind ENV flags:
+
+ENABLE_CASE_ESCALATION=true
+
+ENABLE_PURESERVICE_POST=false by default (logs only)
+
+Must reuse existing GDPR scrubber on outbound ticket content
+
+Implementation details:
+
+A) Trigger rules:
+
+After delivering an informational Playbook answer OR after completing a transactional flow, show:
+“Løste dette saken?” [Yes/No]
+
+Also trigger after 3 messages without progress OR repeated “doesn’t work”-signals.
+
+B) If YES:
+
+Log feedback: resolved=true, intentId, responseMethod, sessionId
+
+C) If NO:
+
+Ask: “Hvilken e-post skal kobles til saken?”
+
+Validate email
+
+Build ticket payload:
+
+subject: “DyreID Support AI – {intentId} – {short summary}”
+
+description: include scrubbed transcript, matched intentId, semanticScore, and product context if available
+
+category fields: map from canonical intent → Pureservice category1Id/category2Id/category3Id if known; else fallback to GeneralInquiry category
+
+When ENABLE_PURESERVICE_POST=false: do not call API; store payload in DB table escalations_outbox with status=“pending”
+
+When ENABLE_PURESERVICE_POST=true: POST to Pureservice create-ticket endpoint (per their API docs) and store returned ticketId
+
+D) Dedupe + rate limit:
+
+Prevent creating more than 1 ticket per session
+
+Prevent duplicates within 24h for same email+intentId (use DB check)
+
+E) Observability:
+
+Add audit logs for every escalation attempt with:
+sessionId, intentId, matchedBy, semanticScore, userEmail, status, createdTicketId (if any)
+
+Deliverables:
+
+Code changes + migrations (new table escalations_outbox)
+
+Admin view to inspect pending outbox items (for pilot)
+
+Unit tests for: trigger rules, email validation, dedupe, and “logs only” mode.

@@ -36,6 +36,12 @@ import {
   type InsertTicketHelpCenterMatch,
   type InsertResolutionQuality,
   type InsertMinsideFieldMapping,
+  discoveredIntents,
+  type InsertDiscoveredIntent,
+  canonicalIntents,
+  type InsertCanonicalIntent,
+  discoveredClusters,
+  type InsertDiscoveredCluster,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -103,6 +109,7 @@ export interface IStorage {
     uncertaintyCases: number;
     uncategorizedThemes: number;
     reviewQueuePending: number;
+    discoveredIntentsPending: number;
   }>;
 
   createTrainingRun(workflow: string, totalTickets: number): Promise<number>;
@@ -216,6 +223,19 @@ export interface IStorage {
   updateMinsideFieldMapping(id: number, data: Partial<InsertMinsideFieldMapping>): Promise<void>;
   deleteMinsideFieldMapping(id: number): Promise<void>;
   seedMinsideFieldMappings(mappings: InsertMinsideFieldMapping[]): Promise<number>;
+
+  getCanonicalIntents(): Promise<typeof canonicalIntents.$inferSelect[]>;
+  getApprovedCanonicalIntents(): Promise<typeof canonicalIntents.$inferSelect[]>;
+  getCanonicalIntentById(intentId: string): Promise<typeof canonicalIntents.$inferSelect | undefined>;
+  upsertCanonicalIntent(intent: InsertCanonicalIntent): Promise<typeof canonicalIntents.$inferSelect>;
+  updateCanonicalIntent(id: number, data: Partial<InsertCanonicalIntent>): Promise<void>;
+  deleteCanonicalIntent(id: number): Promise<void>;
+  getCanonicalIntentCount(): Promise<number>;
+  clearCanonicalIntents(): Promise<void>;
+
+  insertDiscoveredCluster(cluster: InsertDiscoveredCluster): Promise<number>;
+  getDiscoveredClusters(runId?: number): Promise<typeof discoveredClusters.$inferSelect[]>;
+  clearDiscoveredClusters(): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -591,7 +611,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getTrainingStats() {
-    const [raw, scrubbed, catMap, intents, resolutions, playbook, uncertainty, uncat, pendingReview] = await Promise.all([
+    const [raw, scrubbed, catMap, intents, resolutions, playbook, uncertainty, uncat, pendingReview, discoveredPending] = await Promise.all([
       db.select({ count: count() }).from(rawTickets),
       db.select({ count: count() }).from(scrubbedTickets),
       db.select({ count: count() }).from(categoryMappings),
@@ -601,6 +621,7 @@ export class DatabaseStorage implements IStorage {
       db.select({ count: count() }).from(uncertaintyCases),
       db.select({ count: count() }).from(uncategorizedThemes),
       db.select({ count: count() }).from(reviewQueue).where(eq(reviewQueue.status, "pending")),
+      db.select({ count: count() }).from(discoveredIntents).where(eq(discoveredIntents.status, "pending")),
     ]);
     return {
       rawTickets: raw[0].count,
@@ -612,6 +633,7 @@ export class DatabaseStorage implements IStorage {
       uncertaintyCases: uncertainty[0].count,
       uncategorizedThemes: uncat[0].count,
       reviewQueuePending: pendingReview[0].count,
+      discoveredIntentsPending: discoveredPending[0].count,
     };
   }
 
@@ -1420,6 +1442,164 @@ export class DatabaseStorage implements IStorage {
       }
     }
     return inserted;
+  }
+
+  async insertDiscoveredIntent(intent: InsertDiscoveredIntent): Promise<number> {
+    const [row] = await db.insert(discoveredIntents).values(intent).returning();
+    return row.id;
+  }
+
+  async getDiscoveredIntents(): Promise<typeof discoveredIntents.$inferSelect[]> {
+    return db.select().from(discoveredIntents).orderBy(desc(discoveredIntents.discoveredAt));
+  }
+
+  async getPendingDiscoveredIntents(): Promise<typeof discoveredIntents.$inferSelect[]> {
+    return db.select().from(discoveredIntents)
+      .where(eq(discoveredIntents.status, "pending"))
+      .orderBy(desc(discoveredIntents.confidence));
+  }
+
+  async getDiscoveredIntentCount(): Promise<number> {
+    const result = await db.select({ count: count() }).from(discoveredIntents);
+    return result[0].count;
+  }
+
+  async getPendingDiscoveredIntentCount(): Promise<number> {
+    const result = await db.select({ count: count() }).from(discoveredIntents)
+      .where(eq(discoveredIntents.status, "pending"));
+    return result[0].count;
+  }
+
+  async approveDiscoveredIntent(id: number, approvedBy: string, updates?: { suggestedIntent?: string; actionable?: boolean; category?: string; resolutionSteps?: string; requiredFields?: string; actionEndpoint?: string }): Promise<void> {
+    const data: any = {
+      status: "approved",
+      approvedBy,
+      approvedAt: new Date(),
+    };
+    if (updates?.suggestedIntent) data.suggestedIntent = updates.suggestedIntent;
+    if (updates?.actionable !== undefined) data.actionable = updates.actionable;
+    if (updates?.category) data.category = updates.category;
+    if (updates?.resolutionSteps) data.resolutionSteps = updates.resolutionSteps;
+    if (updates?.requiredFields) data.requiredFields = updates.requiredFields;
+    if (updates?.actionEndpoint) data.actionEndpoint = updates.actionEndpoint;
+    await db.update(discoveredIntents).set(data).where(eq(discoveredIntents.id, id));
+  }
+
+  async rejectDiscoveredIntent(id: number, rejectionReason: string): Promise<void> {
+    await db.update(discoveredIntents).set({
+      status: "rejected",
+      rejectionReason,
+    }).where(eq(discoveredIntents.id, id));
+  }
+
+  async promoteDiscoveredIntentToPlaybook(id: number): Promise<void> {
+    const [intent] = await db.select().from(discoveredIntents).where(eq(discoveredIntents.id, id));
+    if (!intent || (intent.status !== "approved" && intent.status !== "auto_mapped")) {
+      throw new Error("Intent must be approved or auto-mapped before promoting to playbook");
+    }
+
+    const actionType = intent.actionable ? "TRANSACTIONAL" : "INFO_ONLY";
+    const intentName = intent.normalizedIntent || intent.suggestedIntent;
+
+    await this.upsertPlaybookEntry({
+      intent: intentName,
+      hjelpesenterCategory: intent.category || null,
+      keywords: intent.keywords || null,
+      avgConfidence: intent.confidence || 0.8,
+      ticketCount: intent.ticketCount || 0,
+      isActive: true,
+      requiresLogin: intent.requiresOtp || false,
+      requiresAction: intent.actionable || false,
+      actionType,
+      apiEndpoint: intent.actionEndpoint || null,
+      requiredRuntimeDataArray: intent.requiredFields ? intent.requiredFields.split(",").map(s => s.trim()) : null,
+      paymentRequired: intent.affectsPayment || false,
+      chatbotSteps: intent.resolutionSteps ? intent.resolutionSteps.split("\n").filter(Boolean) : null,
+      combinedResponse: !intent.actionable ? intent.description : null,
+    });
+
+    await db.update(discoveredIntents).set({ promotedToPlaybook: true }).where(eq(discoveredIntents.id, id));
+  }
+
+  async clearDiscoveredIntents(): Promise<void> {
+    await db.delete(discoveredIntents);
+  }
+
+  async getCanonicalIntents(): Promise<typeof canonicalIntents.$inferSelect[]> {
+    return db.select().from(canonicalIntents).orderBy(canonicalIntents.category, canonicalIntents.intentId);
+  }
+
+  async getApprovedCanonicalIntents(): Promise<typeof canonicalIntents.$inferSelect[]> {
+    return db.select().from(canonicalIntents)
+      .where(eq(canonicalIntents.approved, true))
+      .orderBy(canonicalIntents.category, canonicalIntents.intentId);
+  }
+
+  async getCanonicalIntentById(intentId: string): Promise<typeof canonicalIntents.$inferSelect | undefined> {
+    const [row] = await db.select().from(canonicalIntents)
+      .where(eq(canonicalIntents.intentId, intentId));
+    return row;
+  }
+
+  async upsertCanonicalIntent(intent: InsertCanonicalIntent): Promise<typeof canonicalIntents.$inferSelect> {
+    const [row] = await db.insert(canonicalIntents)
+      .values(intent)
+      .onConflictDoUpdate({
+        target: canonicalIntents.intentId,
+        set: {
+          category: intent.category,
+          subcategory: intent.subcategory,
+          source: intent.source,
+          actionable: intent.actionable,
+          requiredFields: intent.requiredFields,
+          endpoint: intent.endpoint,
+          infoText: intent.infoText,
+          approved: intent.approved,
+          embedding: intent.embedding,
+          keywords: intent.keywords,
+          description: intent.description,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+    return row;
+  }
+
+  async updateCanonicalIntent(id: number, data: Partial<InsertCanonicalIntent>): Promise<void> {
+    await db.update(canonicalIntents)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(canonicalIntents.id, id));
+  }
+
+  async deleteCanonicalIntent(id: number): Promise<void> {
+    await db.delete(canonicalIntents).where(eq(canonicalIntents.id, id));
+  }
+
+  async getCanonicalIntentCount(): Promise<number> {
+    const result = await db.select({ count: count() }).from(canonicalIntents);
+    return result[0].count;
+  }
+
+  async clearCanonicalIntents(): Promise<void> {
+    await db.delete(canonicalIntents);
+  }
+
+  async insertDiscoveredCluster(cluster: InsertDiscoveredCluster): Promise<number> {
+    const [row] = await db.insert(discoveredClusters).values(cluster).returning();
+    return row.id;
+  }
+
+  async getDiscoveredClusters(runId?: number): Promise<typeof discoveredClusters.$inferSelect[]> {
+    if (runId) {
+      return db.select().from(discoveredClusters)
+        .where(eq(discoveredClusters.discoveryRunId, runId))
+        .orderBy(desc(discoveredClusters.ticketCount));
+    }
+    return db.select().from(discoveredClusters).orderBy(desc(discoveredClusters.ticketCount));
+  }
+
+  async clearDiscoveredClusters(): Promise<void> {
+    await db.delete(discoveredClusters);
   }
 }
 

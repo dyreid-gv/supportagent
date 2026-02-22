@@ -1,0 +1,176 @@
+PROBLEMET DERE NÅ HAR
+
+Når dere importerer tickets fra Pureservice vil:
+
+30–60% ligge i:
+
+"Generell e-post"
+"Annet"
+"Ukategorisert"
+
+Men disse inneholder:
+
+Pyramidion diagnose-data spørsmål
+
+App funksjonalitet
+
+SmartTag linking
+
+QR abonnement
+
+Savnet/funnet flows
+
+Min side OTP issues
+
+Payment link failure
+
+Subscription expiry
+
+Utenlandsregistrering edge cases
+
+etc.
+
+Altså:
+
+👉 Reelle intents som ikke finnes i hjelpesenteret
+
+Hvis dere ikke håndterer dette riktig vil:
+
+Playbook etter hvert inneholde:
+
+Intent: UnknownIssue1
+Intent: ProblemDog
+Intent: MinSideGreie
+Intent: AppBug
+
+= runtime dør 💀
+
+🟩 STEG 2 MÅ GJØRE DETTE:
+
+Ukategorisert må bli:
+
+👉 Domain Discovery Input
+ikke
+👉 Playbook Input
+
+🧠 NY TRAINING FLOW
+
+Når ticket importeres fra Pureservice:
+
+if (ticket.category === 'Generell e-post') {
+   routeToDomainDiscovery(ticket)
+}
+DOMAIN DISCOVERY PIPELINE
+STEP 2A — CLUSTERING
+
+AI grupperer tickets etter:
+
+semantic similarity
+
+dialogmønster
+
+resolution steps
+
+Eksempel:
+
+Cluster:
+
+"jeg finner ikke smart tag"
+"tag er borte fra app"
+"posisjon oppdaterer seg ikke"
+
+→ Cluster:
+
+SmartTagSyncIssue
+STEP 2B — RESOLUTION EXTRACTION
+
+Fra clusteret:
+
+AI finner:
+
+Hva agent faktisk gjorde:
+
+Eksempel:
+
+ba bruker slå av bluetooth
+restart app
+relink tag
+STEP 2C — ACTIONABILITY DETECTION
+
+AI må så avgjøre:
+
+requires OTP?
+affects register?
+affects ownership?
+affects payment?
+
+Hvis:
+
+✔ ja
+→ TransactionalIntent
+
+Hvis:
+
+❌ nei
+→ InformationalIntent
+
+STEP 2D — PLAYBOOK CANDIDATE
+
+Opprett:
+
+{
+ intent: "SmartTagRelink",
+ actionable: false,
+ confidence: 0.83,
+ requiresHumanReview: true
+}
+STEP 2E — HUMAN APPROVAL UI
+
+Vis i Dashboard:
+
+Cluster	Suggested Intent	Actionable?
+SmartTag sync	SmartTagRelink	No
+QR expired	QRSubscriptionExpired	Yes
+App crash	AppLoginIssue	No
+
+Dere godkjenner:
+
+✔ navn
+✔ actionable flag
+✔ resolution steps
+
+🚨 KRITISK REGEL
+
+Ny intent må ikke gå til runtime før:
+
+approved === true
+🟩 GODKJENT INTENT GÅR DA TIL:
+
+Playbook
+
+med:
+
+{
+ intent: "QRSubscriptionExpired",
+ actionable: true,
+ requiredFields: ["ownerMobile","tagId"],
+ endpoint: "/api/pet/product-context"
+}
+🟦 RESULTAT
+
+Agenten lærer nå:
+
+✔ nye app-funksjoner
+✔ diagnose-spørsmål
+✔ tag-issues
+✔ abonnementssaker
+✔ betalingsproblemer
+
+fra Pureservice
+
+uten:
+
+❌ runtime GPT resolution
+❌ hallusinasjon
+❌ feil priser
+❌ feil eierskifte-prosedyre
