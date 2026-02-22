@@ -1,0 +1,66 @@
+PROMPT: Extract Playbook Content from Historical Ticket Responses
+
+For each of the 4 clusters below, fetch the actual agent responses from 
+Pureservice tickets and use them to draft Playbook combinedResponse text.
+
+CONSTRAINTS:
+- Use ONLY content from actual agent responses – do NOT generate or invent content
+- GDPR scrub all output (remove names, emails, phone numbers, chip numbers)
+- Do NOT include greetings, signatures, or case numbers
+- If agent responses conflict, use the most common/consistent answer
+- Flag any uncertainty with [MANGLER INFO] instead of guessing
+
+=== CLUSTER 1: SmartTagBatteryInfo ===
+Ticket IDs: 10070
++ fetch 10 additional tickets where AI-label contains any of:
+  SmartTagBattery, SmartTagBatteryInfo
+
+For each ticket, extract:
+- The inbound customer question (scrubbed)
+- The agent's outbound resolution response (scrubbed)
+
+Then produce:
+{
+  "intent": "SmartTagBatteryInfo",
+  "combinedResponse": "[paste actual agent answer here – scrubbed]",
+  "resolutionSteps": "[ordered steps if present in agent responses]",
+  "confidence_note": "Based on N agent responses. Conflicts: yes/no"
+}
+
+=== CLUSTER 2: SmartTagNotificationIssue ===
+Ticket IDs: 10272
++ fetch 10 additional tickets where AI-label contains any of:
+  SmartTagNotifications, SmartTagNotificationIssue
+
+Same extraction format as above.
+
+=== CLUSTER 3: AppLanguageSettings ===
+Ticket IDs: 10340
++ fetch 10 additional tickets where AI-label contains any of:
+  AppLanguage, AppChangeLanguage, AppLanguageSetting, AppSettings
+
+Same extraction format as above.
+
+=== CLUSTER 4: AppPushNotificationIssue ===
+Ticket IDs: 10289
++ fetch 10 additional tickets where AI-label contains any of:
+  AppPushNotifications, AppNotifications, PushNotifications,
+  PushNotificationsIssue, PushNotificationIssue
+
+Same extraction format as above.
+
+=== OUTPUT FORMAT ===
+Return 4 JSON objects (one per cluster) + a summary:
+{
+  "cluster": "SmartTagBatteryInfo",
+  "tickets_found": N,
+  "tickets_with_agent_response": N,
+  "sample_questions": ["...", "...", "..."],  // 3 scrubbed examples
+  "draft_combinedResponse": "...",            // from actual agent text
+  "draft_resolutionSteps": "...",             // from actual agent text
+  "unresolved_conflicts": ["..."],            // where agents said different things
+  "missing_info_flags": ["..."]              // [MANGLER INFO] items
+}
+
+Do NOT write to DB. Read-only + draft output only.
+Admin must review and approve before any Playbook entry is created.
