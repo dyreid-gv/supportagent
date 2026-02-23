@@ -212,9 +212,11 @@ const INTENT_PATTERNS: IntentQuickMatch[] = [
   { intent: "SmartTagConnection", regex: /koble.*smart.?tag|smart.?tag.*kobl|bluetooth.*(?:tag|smart)|(?:kan ikke|får ikke).*koble|legge til.*smart|smart.?tag.*(?:pairing|tilkobling|bluetooth)|tilkobling.*smart/i },
   { intent: "SmartTagMissing", regex: /(?:finner ikke|forsvunnet|borte|vises ikke|mistet).*smart.?tag|smart.?tag.*(?:forsvunnet|borte|vises ikke|forsvant)/i },
   { intent: "SmartTagPosition", regex: /(?:posisjon|lokasjon|plassering|gps|sporing).*(?:smart.?tag|oppdater)|smart.?tag.*(?:posisjon|lokasjon|plassering|gps|sporing)/i },
+  { intent: "SmartTagBatteryInfo", regex: /(?:smart.?tag|tag).*(?:batter|cr2032|strøm|lad)|(?:batter|cr2032|strøm|lad).*(?:smart.?tag|tag)|bytte.*batter.*(?:smart|tag)|(?:smart|tag).*bytte.*batter|hvor lenge.*(?:smart|tag).*(?:varer|holder)/i },
   { intent: "SmartTagSound", regex: /(?:smart.?tag|tag).*(?:lyd|piper?|bråk|alarm|ringer|lager lyd)|(?:lyd|piper?|bråk).*(?:smart.?tag|tag)/i },
 
   // ── QR-brikke (specific subtypes BEFORE general) ────────
+  { intent: "QRPremiumInfo", regex: /qr.*premium|premium.*qr|basis.*(?:vs|eller).*premium|oppgrader.*qr|sms.*varsling.*qr|geolokasjon.*qr/i },
   { intent: "QRTagOrderExtra", regex: /bestill.*(?:ekstra|ny|flere).*(?:qr|brikke)|(?:ekstra|ny|flere).*(?:qr|brikke).*bestill|kjøpe.*(?:qr|brikke)|(?:qr|brikke).*(?:kjøpe|bestill)|(?:bestill|vil ha).*(?:qr|brikke)/i },
   { intent: "QRTagLost", regex: /mistet.*(?:qr|brikke)|(?:qr|brikke).*(?:mistet|borte|forsvunnet|falt av)|tapt.*(?:qr|brikke)|mista.*(?:qr|brikke)|(?:hund|katt).*mistet.*(?:qr|brikke)/i },
   { intent: "QRRequiresIDMark", regex: /(?:må|treng|krev|behøv|forutsett).*(?:id.?merk|chip|microchip).*(?:qr|brikke)|(?:qr|brikke).*(?:krav|uten).*(?:chip|id)|(?:id.?merk|chip).*(?:krav|nødvendig).*(?:qr|brikke)|(?:chip|chippet).*for.*qr/i },

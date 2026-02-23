@@ -1,0 +1,223 @@
+PROMPT: Fullstendig prisopprydding – alle betalbare tjenester
+
+Execute in order. Report after each step.
+
+═══════════════════════════════════════════════════════
+BAKGRUNN
+═══════════════════════════════════════════════════════
+
+service_prices er master for alle priser.
+Ingen combinedResponse skal inneholde hardkodede
+kroner-beløp. Bruk {{pris:serviceKey}} som løses opp
+av chatbot-koden ved kjøring.
+
+Priser som MÅ verifiseres av produktteam før produksjon
+(sourceTemplate = "Seed test data"):
+  qr_brikke_ekstra (99,-), registrering_ny (401,-),
+  abonnement_basis (99,-), abonnement_standard (29,-),
+  abonnement_familie (189,-), smart_tag_ny (299,-)
+
+═══════════════════════════════════════════════════════
+STEP 1 – Legg til manglende rader i service_prices
+═══════════════════════════════════════════════════════
+
+INSERT INTO service_prices VALUES:
+
+  ('smart_tag_abonnement_mnd', 'Smart Tag abonnement månedlig',
+   19, 'NOK', '19,-/mnd betalt årlig. Opptil 3 brikker
+   på samme abonnement.', 'Smart Tag',
+   'dyreid.no/smarttag', CURRENT_DATE, true)
+
+  ('smart_tag_abonnement_aar', 'Smart Tag abonnement årlig',
+   228, 'NOK', 'Tilsvarer 19,-/mnd. Opptil 3 brikker.',
+   'Smart Tag', 'dyreid.no/smarttag', CURRENT_DATE, true)
+
+  ('qr_premium_aar', 'QR Premium abonnement årlig',
+   99, 'NOK', 'SMS-varsling, geolokasjon, gratis
+   erstatningsbrikke. Inkludert i DyreID+.',
+   'QR Brikke', 'dyreid.no/qrbrikke', CURRENT_DATE, true)
+
+═══════════════════════════════════════════════════════
+STEP 2 – Rett feil pris i ForeignRegistrationCost
+═══════════════════════════════════════════════════════
+
+KRITISK: combinedResponse sier "590 kroner per januar 2023"
+service_prices har 656 kr.
+
+Erstatt hele combinedResponse:
+  "Å registrere et dyr merket i utlandet koster
+   {{pris:utenlandsregistrering}}.
+
+   Har du utenlandsk hund med stamtavle? Kontakt
+   Norsk Kennel Klub (NKK) for informasjon om
+   registrering av slike dyr."
+
+═══════════════════════════════════════════════════════
+STEP 3 – Erstatt hardkodede priser i 7 eksisterende intenter
+═══════════════════════════════════════════════════════
+
+Følgende intenter har "kr 19" og/eller "kr 189"
+hardkodet i combinedResponse. Erstatt med tokens:
+
+  AppAccess, AppLoginIssue, AppBenefits,
+  AppTargetAudience, AppCost, AppMinSide:
+    "kr 19"  → {{pris:dyreid_pluss_maaned}}
+    "kr 189" → {{pris:dyreid_pluss_aar}}
+    "19 kr"  → {{pris:dyreid_pluss_maaned}}
+    "189 kr" → {{pris:dyreid_pluss_aar}}
+
+  QRPricingModel:
+    Eventuelle prisreferanser → tilsvarende tokens
+
+Report: hvilke intenter ble endret, hvilke strenger
+ble erstattet.
+
+═══════════════════════════════════════════════════════
+STEP 4 – Legg til prisreferanser i null-intenter
+═══════════════════════════════════════════════════════
+
+Disse har combinedResponse=null og dekker betalbare
+tjenester. Opprett minimalt korrekt svar:
+
+OwnershipTransferCost:
+  "Eierskifte koster {{pris:eierskifte}}.
+   Det er selger som betaler.
+   Gå til Min Side > Eierskifte for å starte."
+  actionType: INFO_ONLY
+
+NewRegistration:
+  Beholder API_CALL, men legg til i chatbotSteps:
+  "Registrering av nytt dyr koster
+   {{pris:registrering_ny}}."
+
+ForeignRegistration:
+  Beholder API_CALL, men legg til i chatbotSteps:
+  "Utenlandsregistrering koster
+   {{pris:utenlandsregistrering}}."
+
+═══════════════════════════════════════════════════════
+STEP 5 – QR og Smart Tag intenter (fra forrige prompt)
+═══════════════════════════════════════════════════════
+
+5A – QRTagActivation (ny, offisiell kilde):
+  "Slik aktiverer du QR-brikken:
+   1. Last ned DyreID-appen fra App Store eller
+      Google Play
+   2. Åpne appen og trykk på QR-brikke-ikonet
+      på forsiden eller under Meny
+   3. Skann QR-koden, eller hold telefonen mot
+      brikken (NFC)
+   4. Skriv inn telefonnummeret ditt
+   5. Velg hvilken kontaktinfo som skal vises
+      ved skanning
+   6. Aktiver pushvarsel i appen
+
+   Problemer med å skanne i appen?
+   Prøv å skanne med kamera-appen i stedet."
+
+5B – SmartTagBatteryInfo (rett faktafeil):
+  "Batteriet varer 6–9 måneder.
+   Du kan bytte det selv – Smart Tag bruker
+   CR2032 3V knappcellebatteri.
+
+   Trenger du ny Smart Tag?
+   Ny brikke koster {{pris:smart_tag_erstatning}}
+   for eksisterende kunder."
+
+5C – SmartTagSound (skriv om – feil innhold):
+  Nåværende svar handler om "vann i enheten".
+  Korrekt svar om alarmfunksjonen:
+  "Smart Tag har en innebygd alarm som kan
+   aktiveres via DyreID-appen.
+   Alarmen varer i 10 sekunder og er 60–80 dB."
+
+5D – SmartTagConnection (oppdater aktiveringsflyt):
+  "Smart Tag må aktiveres to steder:
+
+   Steg 1 – Koble til DyreID:
+   Skann QR-koden på brikken og følg instruksjonene
+   på dyreid.no for å registrere taggen.
+
+   Steg 2 – Aktiver posisjonssporing:
+   • iPhone: Åpne 'Hvor er' og legg til brikken
+   • Android: Åpne 'Finn enheten min' og legg til
+   Hold Smart Tag nær telefonen (ulåst og på)
+   når du legger den til.
+
+   Brikken vises som 'Loshall Tag' i enhetslisten."
+
+5E – SmartTagPosition (oppdater):
+  "Smart Tag har ikke GPS, men spores via
+   Bluetooth gjennom Apple og Androids
+   sporingsnettverk.
+
+   • Viser siste registrerte posisjon – ikke sanntid
+   • Ingen posisjonshistorikk lagres
+   • Fungerer best i byer og tettbygde strøk
+   • På fjellet kan posisjonen mangle helt
+
+   QR-koden på brikken fungerer overalt."
+
+5F – QRPremiumInfo (ny intent):
+  intent_id:     QRPremiumInfo
+  actionType:    INFO_ONLY
+  requiresLogin: false
+  keywords:      ["QR premium", "basis vs premium",
+                  "oppgradere QR", "SMS varsling QR",
+                  "geolokasjon skanning", "hva koster QR"]
+  combinedResponse:
+    "QR-brikken finnes i to varianter:
+
+     Basis (gratis):
+     • Deling av kontaktinfo ved skanning
+     • Én ekstra kontaktperson
+
+     QR Premium ({{pris:qr_premium_aar}}/år):
+     • SMS-varsling når brikken skannes
+     • Geolokasjon – se hvor brikken ble skannet
+     • Gratis erstatningsbrikke ved tap
+     • Inkludert i DyreID+ uten ekstra kostnad
+
+     Oppgrader i DyreID-appen."
+
+5G – QRTagLost (endre fra PURESERVICE_CREATE):
+  chatbotSteps:
+    Spør: "Har du QR Premium?"
+    → Ja: "Send e-post til post@dyreid.no –
+           du får gratis erstatningsbrikke."
+           actionType: INFO_ONLY
+    → Nei: "Bestill ny på dyreid.no/qrbrikke
+            eller i DyreID-appen.
+            Pris: {{pris:qr_brikke_ekstra}}."
+            actionType: INFO_ONLY
+    → Vet ikke: "Sjekk i DyreID-appen under
+                 QR-brikker."
+
+5H – QRTagOrderExtra (aktiver med korrekt kilde):
+  combinedResponse:
+    "Bestill ekstra QR-brikke på
+     dyreid.no/qrbrikke eller i DyreID-appen.
+     Pris: {{pris:qr_brikke_ekstra}}."
+  actionType:    INFO_ONLY
+  requiresLogin: false
+  NOTE: Fjern API_CALL – bestilling skjer på
+  nettside/app, ikke via agent-API.
+
+═══════════════════════════════════════════════════════
+STEP 6 – Regenerer embeddings + fullstendig rapport
+═══════════════════════════════════════════════════════
+
+Regenerer embeddings for alle endrede intenter.
+
+Report:
+1. service_prices: antall nye rader lagt til
+2. ForeignRegistrationCost: gammel vs ny pris bekreftet
+3. Antall intenter med hardkodede priser erstattet
+4. OwnershipTransferCost, NewRegistration,
+   ForeignRegistration: oppdatert
+5. QR/SmartTag: alle 8 intenter oppdatert/aktivert
+6. QRTagLost: endret fra PURESERVICE_CREATE (ny liste: 5)
+7. SmartTagSound: faktarettelse bekreftet
+8. Embeddings regenerert (count)
+9. Priser som fortsatt venter på verifisering
+   fra produktteam (list)
