@@ -120,6 +120,26 @@ const PURESERVICE_CREATE_CONFIGS: Record<string, PureserviceCreateConfig> = {
     category1: "Min side",
     category2: "Kontaktinfo",
   },
+  CancelSubscription: {
+    fields: [
+      { key: "navn", label: "Ditt fulle navn" },
+      { key: "e-post", label: "E-postadresse" },
+      { key: "telefon", label: "Telefonnummer" },
+    ],
+    category1: "Abonnement",
+    category2: "Oppsigelse",
+    note: "Kunden ønsker oppsigelse. Abonnementet skal sies opp og ikke fornyes etter endt periode.",
+  },
+  SmartTagReassign: {
+    fields: [
+      { key: "navn", label: "Ditt fulle navn" },
+      { key: "e-post", label: "E-postadresse" },
+      { key: "telefon", label: "Telefonnummer" },
+    ],
+    category1: "Smart Tag",
+    category2: "Flytte til annet dyr",
+    note: "Kunden ønsker å koble Smart Tag til et annet dyr. Trenger manuell behandling.",
+  },
   GeneralInquiryBusiness: {
     fields: [
       { key: "beskrivelse", label: "Hva gjelder henvendelsen din?", hint: "Beskriv kort hva du ønsker" },
@@ -227,6 +247,7 @@ const INTENT_PATTERNS: IntentQuickMatch[] = [
   { intent: "SmartTagPosition", regex: /(?:posisjon|lokasjon|plassering|gps|sporing).*(?:smart.?tag|oppdater)|smart.?tag.*(?:posisjon|lokasjon|plassering|gps|sporing)/i },
   { intent: "SmartTagBatteryInfo", regex: /(?:smart.?tag|tag).*(?:batter|cr2032|strøm|lad)|(?:batter|cr2032|strøm|lad).*(?:smart.?tag|tag)|bytte.*batter.*(?:smart|tag)|(?:smart|tag).*bytte.*batter|hvor lenge.*(?:smart|tag).*(?:varer|holder)/i },
   { intent: "SmartTagSound", regex: /(?:smart.?tag|tag).*(?:lyd|piper?|bråk|alarm|ringer|lager lyd)|(?:lyd|piper?|bråk).*(?:smart.?tag|tag)/i },
+  { intent: "SmartTagReassign", regex: /(?:smart.?tag|tag).*(?:annet dyr|ny (?:hund|katt|valp)|flytte|gjenbruk|bytte dyr)|(?:flytte|gjenbruk|bytte).*(?:smart.?tag|tag)|koble.*(?:smart.?tag|tag).*(?:annet|ny)|(?:annet dyr|ny (?:hund|katt|valp)).*(?:smart.?tag|tag)/i },
 
   // ── QR-brikke (specific subtypes BEFORE general) ────────
   { intent: "QRPremiumInfo", regex: /qr.*premium|premium.*qr|basis.*(?:vs|eller).*premium|oppgrader.*qr|sms.*varsling.*qr|geolokasjon.*qr/i },
@@ -269,6 +290,10 @@ const INTENT_PATTERNS: IntentQuickMatch[] = [
   { intent: "PetNotInSystem", regex: /finnes ikke.*(?:system|register)|(?:dyr|hund|katt).*(?:finnes|dukker|er).*ikke|finner ikke.*(?:dyr|hund|katt)|ikke (?:i )?(?:registeret|systemet)|mangler.*register|(?:hund|katt|dyr).*ikke registrert/i },
   { intent: "ChipLookup", regex: /chip.?(?:nummer|søk|sjekk|oppslag|registrering)|søke?.*(?:opp )?chip|finne.*(?:eier.*chip|dyr.*chip)|(?:slå|søke?).*opp.*(?:chip|id)|id.?(?:nummer|søk).*(?:søk|oppslag)|(?:hvem|finne).*eier.*chip|fant.*(?:en|et).*(?:katt|hund|dyr).*chip/i },
   { intent: "NewRegistration", regex: /registrere.*(?:nytt?|ny).*(?:dyr|hund|katt|valp|kattunge)|(?:nytt?|ny).*(?:dyr|hund|katt|valp|kattunge).*registrer|ny.*registrering|(?:nyregistrering|førstegangsregistrering)|(?:hvordan|første gang).*registrer|^registrer.*(?:hund|katt|dyr|valp)$|registrere.*(?:hund|katt|dyr|valp)(?:\s+(?:i|hos|på)\s+)?(?:DyreID)?$/i },
+
+  // ── Abonnement ─────────────────────────────────────────
+  { intent: "CancelSubscription", regex: /(?:si opp|avslutte|kansellere?|stoppe|ikke fornye?).*abonnement|abonnement.*(?:si opp|avslutte|kansellere?|stopp|oppsigelse)|oppsigelse.*abonnement|si opp.*(?:dyreID\+|dyreID pluss)/i },
+  { intent: "SubscriptionAddPet", regex: /(?:legge til|flere|utvide|ekstra).*(?:dyr|kjæledyr|katt|hund).*(?:abonnement|samme)|(?:abonnement|samme).*(?:flere|legge til).*(?:dyr|kjæledyr)|(?:tre|to|inntil).*dyr.*(?:abonnement|samme)|kan.*(?:jeg )?ha.*flere.*(?:katt|hund|dyr)/i },
 
   // ── Generell ────────────────────────────────────────────
   { intent: "GeneralInquiryBusiness", regex: /samarbeid|partnerskap|api.?tilgang|forskning.*dyreid|integrasjon.*dyreid|forhandler|white.?label|presse.*dyreid|media.*henvendelse|registerdata|pyramidion|kjæledyrstatistikk|vi ønsker å samarbeide/i },
@@ -1415,6 +1440,91 @@ function handleDirectIntent(
         { label: "Vet ikke", action: "UNKNOWN" },
       ],
       model: "qr-lost-ask-premium",
+    };
+  }
+
+  if (intent === "CancelSubscription") {
+    if (!isAuthenticated) {
+      session.directIntentFlow = "CancelSubscription";
+      return {
+        text: "For å si opp abonnementet ditt må du logge inn først. Klikk på knappen under for å logge inn med engangskode (OTP).",
+        requiresLogin: true,
+        model: "direct-cancel-sub-login",
+      };
+    }
+
+    session.pureserviceCreateFlow = "collecting";
+    session.pureserviceCreateIntent = "CancelSubscription";
+    session.pureserviceCreateFieldIndex = 1;
+    session.collectedData = {};
+    return {
+      text: "Abonnementet ditt vil ikke bli fornyet etter inneværende periode er over.\n\nVi oppretter en sak for deg – kan du bekrefte navn, e-postadresse og telefonnummer?\n\n**Ditt fulle navn:**",
+      model: "direct-cancel-sub-start",
+    };
+  }
+
+  if (session.directIntentFlow === "CancelSubscription") {
+    session.directIntentFlow = undefined;
+    if (isAuthenticated) {
+      session.pureserviceCreateFlow = "collecting";
+      session.pureserviceCreateIntent = "CancelSubscription";
+      session.pureserviceCreateFieldIndex = 1;
+      session.collectedData = {};
+      return {
+        text: "Abonnementet ditt vil ikke bli fornyet etter inneværende periode er over.\n\nVi oppretter en sak for deg – kan du bekrefte navn, e-postadresse og telefonnummer?\n\n**Ditt fulle navn:**",
+        model: "direct-cancel-sub-start",
+      };
+    }
+    return null;
+  }
+
+  if (intent === "SubscriptionAddPet" || session.directIntentFlow === "SubscriptionAddPet") {
+    if (session.directIntentFlow === "SubscriptionAddPet") {
+      const msgLower = userMessage.trim().toLowerCase();
+      session.directIntentFlow = undefined;
+
+      if (/smart.?tag/i.test(msgLower)) {
+        return {
+          text: substitutePrices("Du kan ha inntil 3 dyr på samme Smart Tag-abonnement.\n\nBestill på dyreid.no/smarttag – velg inntil 3 enheter. Du betaler:\n• 1 abonnement: {{PRICE:smart_tag_abonnement_aar}}\n• + {{PRICE:smart_tag_ny}} per enhet × antall"),
+          model: "direct-sub-add-pet-smart",
+          requestFeedback: true,
+        };
+      }
+
+      if (/qr|brikke/i.test(msgLower)) {
+        return {
+          text: substitutePrices("QR-abonnement gjelder ett dyr per brikke. Abonnementet dekker fritt antall SMS når noen finner dyret ditt.\n\nBestill ekstra brikke på dyreid.no/qrbrikke eller i DyreID-appen.\nPris: {{PRICE:qr_brikke_ekstra}}"),
+          model: "direct-sub-add-pet-qr",
+          requestFeedback: true,
+        };
+      }
+
+      return {
+        text: substitutePrices("**Smart Tag:**\nDu kan ha inntil 3 dyr på samme Smart Tag-abonnement.\nBestill på dyreid.no/smarttag.\n• 1 abonnement: {{PRICE:smart_tag_abonnement_aar}}\n• + {{PRICE:smart_tag_ny}} per enhet × antall\n\n**QR-brikke:**\nQR-abonnement gjelder ett dyr per brikke.\nBestill ekstra på dyreid.no/qrbrikke.\nPris: {{PRICE:qr_brikke_ekstra}}"),
+        model: "direct-sub-add-pet-both",
+        requestFeedback: true,
+      };
+    }
+
+    session.directIntentFlow = "SubscriptionAddPet";
+    return {
+      text: "Gjelder det Smart Tag eller QR-brikke?",
+      suggestions: [
+        { label: "Smart Tag", action: "SMART_TAG" },
+        { label: "QR-brikke", action: "QR_TAG" },
+      ],
+      model: "direct-sub-add-pet-ask",
+    };
+  }
+
+  if (intent === "SmartTagReassign") {
+    session.pureserviceCreateFlow = "collecting";
+    session.pureserviceCreateIntent = "SmartTagReassign";
+    session.pureserviceCreateFieldIndex = 1;
+    session.collectedData = {};
+    return {
+      text: "Per i dag kan ikke dette gjøres selv i appen – vi hjelper deg med dette.\n\nKan du oppgi navn, e-postadresse og telefonnummer?\n\n**Ditt fulle navn:**",
+      model: "direct-smart-tag-reassign-start",
     };
   }
 
@@ -3274,7 +3384,7 @@ export async function* streamChatResponse(
     }
   }
 
-  const DIRECT_INTENTS = ["ViewMyPets", "OwnershipTransferWeb", "OwnershipTransferApp", "ReportLostPet", "ReportFoundPet", "QRTagActivation", "QRTagLost", "PetDeceased", "NKKOwnership", "LoginIssue", "LoginProblem", "UnregisteredChip578", "ForeignRegistration", "ForeignRegistrationCost", "WrongInfo", "WrongOwner", "MissingPetProfile", "InactiveRegistration", "NewRegistration", "SmartTagActivation", "SmartTagQRActivation", "SmartTagConnection", "SmartTagMissing", "SmartTagPosition", "SmartTagSound", "SmartTagMultiple", "GDPRDelete", "LostFoundInfo", "SearchableMisuse", "FamilySharing", "FamilySharingRequest", "FamilySharingPermissions", "FamilySharingRequirement", "PetNotInSystem", "ContactInfoDisambiguate", "UpdateContactInfo"];
+  const DIRECT_INTENTS = ["ViewMyPets", "OwnershipTransferWeb", "OwnershipTransferApp", "ReportLostPet", "ReportFoundPet", "QRTagActivation", "QRTagLost", "PetDeceased", "NKKOwnership", "LoginIssue", "LoginProblem", "UnregisteredChip578", "ForeignRegistration", "ForeignRegistrationCost", "WrongInfo", "WrongOwner", "MissingPetProfile", "InactiveRegistration", "NewRegistration", "SmartTagActivation", "SmartTagQRActivation", "SmartTagConnection", "SmartTagMissing", "SmartTagPosition", "SmartTagSound", "SmartTagMultiple", "SmartTagReassign", "GDPRDelete", "LostFoundInfo", "SearchableMisuse", "FamilySharing", "FamilySharingRequest", "FamilySharingPermissions", "FamilySharingRequirement", "PetNotInSystem", "ContactInfoDisambiguate", "UpdateContactInfo", "CancelSubscription", "SubscriptionAddPet"];
   if ((intent && DIRECT_INTENTS.includes(intent)) || session.directIntentFlow || session.loginHelpStep) {
     let effectiveIntent = session.directIntentFlow || intent || "";
     let directResponse = handleDirectIntent(effectiveIntent, session, isAuthenticated, ownerContext, storedUserContext || null, userMessage);

@@ -1,0 +1,129 @@
+PROMPT: Aktiver CancelSubscription, SubscriptionAddPet, SmartTagReassign
+
+═══════════════════════════════════════════════════════
+STEP 1 – CancelSubscription
+═══════════════════════════════════════════════════════
+
+intent_id:    CancelSubscription
+action_type:  PURESERVICE_CREATE
+requires_login: true
+keywords:     ["si opp abonnement", "avslutte abonnement",
+               "kansellere abonnement", "ikke fornye",
+               "stoppe abonnement", "si opp DyreID+",
+               "CancelSubscription"]
+
+combined_response:
+  "Abonnementet ditt vil ikke bli fornyet etter
+   inneværende periode er over.
+
+   Vi oppretter en sak for deg – kan du bekrefte
+   navn og e-postadresse slik at vi kan behandle
+   oppsigelsen?"
+
+chatbot_steps:
+  1. Samle: navn, e-postadresse, telefonnummer
+  2. Opprett Pureservice-sak med:
+     - Kundens melding (kopi av tekst)
+     - Navn, e-post, telefon
+     - category: Subscription_Cancel
+     - Beskjed til agent: "Kunden ønsker oppsigelse.
+       Abonnementet skal sies opp og ikke fornyes
+       etter endt periode."
+
+NOTE: Skill ut CancelSubscription_PetDeceased og
+CancelSubscription/PetDeceased → remap til
+eksisterende PetDeceased-intent (allerede aktiv).
+
+═══════════════════════════════════════════════════════
+STEP 2 – SubscriptionAddPet
+═══════════════════════════════════════════════════════
+
+intent_id:    SubscriptionAddPet
+action_type:  INFO_ONLY
+requires_login: false
+keywords:     ["legge til dyr", "flere dyr samme abonnement",
+               "kan jeg ha flere katter", "utvide abonnement",
+               "tre dyr samme abonnement", "SubscriptionAddPet",
+               "legg til kjæledyr abonnement"]
+
+chatbot_steps:
+  1. Spør: "Gjelder det Smart Tag eller QR-brikke?"
+
+  → Smart Tag:
+    "Du kan ha inntil 3 dyr på samme Smart Tag-
+     abonnement.
+
+     Bestill på dyreid.no/smarttag – velg inntil
+     3 enheter. Du betaler:
+     • 1 abonnement: {{PRICE:smart_tag_abonnement_aar}}
+     • + {{PRICE:smart_tag_ny}} per enhet × antall"
+
+  → QR-brikke:
+    "QR-abonnement gjelder ett dyr per brikke.
+     Abonnementet dekker fritt antall SMS når noen
+     finner dyret ditt.
+
+     Bestill ekstra brikke på dyreid.no/qrbrikke
+     eller i DyreID-appen.
+     Pris: {{PRICE:qr_brikke_ekstra}}"
+
+═══════════════════════════════════════════════════════
+STEP 3 – SmartTagReassign
+═══════════════════════════════════════════════════════
+
+intent_id:    SmartTagReassign
+action_type:  PURESERVICE_CREATE
+requires_login: false
+keywords:     ["koble smart tag til annet dyr",
+               "bruke smart tag på ny hund",
+               "flytte smart tag", "gjenbruke smart tag",
+               "smart tag ny valp", "SmartTagReassign",
+               "koble til annet dyr smart tag"]
+
+combined_response:
+  "Per i dag kan ikke dette gjøres selv i appen –
+   vi hjelper deg med dette.
+
+   Kan du oppgi navn, e-postadresse og
+   telefonnummer?"
+
+chatbot_steps:
+  1. Samle: navn, e-postadresse, telefonnummer
+  2. Opprett Pureservice-sak med:
+     - category: SmartTag_Reassign
+     - Beskjed til agent: "Kunden ønsker å koble
+       Smart Tag til et annet dyr. Trenger
+       manuell behandling."
+
+═══════════════════════════════════════════════════════
+STEP 4 – Remap duplikat-intenter
+═══════════════════════════════════════════════════════
+
+UPDATE intent_classifications:
+  CancelSubscription_PetDeceased → PetDeceased
+  CancelSubscription/PetDeceased → PetDeceased
+
+(Disse dekkes allerede av PetDeceased-intenten)
+
+═══════════════════════════════════════════════════════
+STEP 5 – Oppdater PURESERVICE_CREATE-liste + rapport
+═══════════════════════════════════════════════════════
+
+PURESERVICE_CREATE-intenter blir nå 8:
+  ChipCorrection, CancelSubscription,
+  GeneralInquiryBusiness, MergeDuplicateRegistrations,
+  QRTagDamaged, RefundRequest, SmartTagReassign,
+  UpdateAuthContact
+
+Regenerer embeddings for alle 3 nye intenter.
+
+Report:
+1. CancelSubscription aktivert – bekreftet
+2. SubscriptionAddPet aktivert – bekreftet
+3. SmartTagReassign aktivert – bekreftet
+4. CancelSubscription_PetDeceased + varianter
+   remappet til PetDeceased (antall rader)
+5. PURESERVICE_CREATE totalt: 8
+6. Embeddings regenerert (count)
+7. Coverage % etter oppdatering
+8. Gjenstående NEEDS_MANUAL_AUTHORING (antall)
