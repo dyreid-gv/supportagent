@@ -46,6 +46,10 @@ function getPriceNum(key: string): number | undefined {
   return priceCache.get(key);
 }
 
+function substitutePrices(text: string): string {
+  return text.replace(/\{\{PRICE:(\w+)\}\}/g, (_, key) => getPrice(key));
+}
+
 interface PureserviceCreateConfig {
   fields: { key: string; label: string; hint?: string }[];
   category1: string;
@@ -856,7 +860,7 @@ async function executePlaybookAction(
   }
 
   return {
-    text: playbook.combinedResponse || playbook.resolutionSteps || "Jeg kan hjelpe deg med dette, men denne handlingen er ikke tilgjengelig automatisk enna. Kontakt support pa support@dyreid.no.",
+    text: substitutePrices(playbook.combinedResponse || playbook.resolutionSteps || "Jeg kan hjelpe deg med dette, men denne handlingen er ikke tilgjengelig automatisk enna. Kontakt support pa support@dyreid.no."),
     model: "playbook-fallback",
   };
 }
@@ -2409,7 +2413,7 @@ async function handlePlaybookResponse(
     }
 
     return {
-      text: playbook.combinedResponse || playbook.resolutionSteps || `Jeg kan hjelpe deg med ${playbook.primaryAction || playbook.intent}.`,
+      text: substitutePrices(playbook.combinedResponse || playbook.resolutionSteps || `Jeg kan hjelpe deg med ${playbook.primaryAction || playbook.intent}.`),
       suggestions: generateSuggestions(playbook),
       model: "playbook-guide-fallback",
     };
@@ -2428,7 +2432,7 @@ async function handlePlaybookResponse(
     const config = PURESERVICE_CREATE_CONFIGS[playbook.intent];
     if (!config) {
       return {
-        text: playbook.combinedResponse || "Denne henvendelsen krever manuell behandling. Kontakt support@dyreid.no.",
+        text: substitutePrices(playbook.combinedResponse || "Denne henvendelsen krever manuell behandling. Kontakt support@dyreid.no."),
         model: "pureservice-create-no-config",
         requestFeedback: true,
       };
@@ -2455,7 +2459,7 @@ async function handlePlaybookResponse(
         let prompt = `**${nextField.label}:**`;
         if (nextField.hint) prompt += `\n_${nextField.hint}_`;
         if (fieldIdx === 0 && playbook.combinedResponse) {
-          prompt = `${playbook.combinedResponse}\n\nFor å opprette en sak trenger jeg noen opplysninger.\n\n${prompt}`;
+          prompt = `${substitutePrices(playbook.combinedResponse)}\n\nFor å opprette en sak trenger jeg noen opplysninger.\n\n${prompt}`;
         }
         return {
           text: prompt,
@@ -2596,7 +2600,7 @@ async function handlePlaybookResponse(
 
   if (actionType === "FORM_FILL" || actionType === "NAVIGATION") {
     return {
-      text: playbook.combinedResponse || playbook.resolutionSteps || "Folg instruksjonene for a fullere dette.",
+      text: substitutePrices(playbook.combinedResponse || playbook.resolutionSteps || "Folg instruksjonene for a fullere dette."),
       suggestions: generateSuggestions(playbook),
       helpCenterLink: playbook.helpCenterArticleUrl,
       requiresLogin: !!(playbook.requiresLogin && !isAuthenticated),
@@ -2607,7 +2611,7 @@ async function handlePlaybookResponse(
   // INFORMATIONAL FLOW — GPT may paraphrase existing Playbook infoText, adapt tone
   // GPT must NOT: generate new procedures, infer pricing not in Playbook, suggest operational steps
   if (playbook.combinedResponse || playbook.resolutionSteps) {
-    const originalInfoText = playbook.combinedResponse || playbook.resolutionSteps || "";
+    const originalInfoText = substitutePrices(playbook.combinedResponse || playbook.resolutionSteps || "");
     const paraphrased = await paraphrasePlaybookResponse(originalInfoText, userMessage);
     return {
       text: paraphrased,
