@@ -1,0 +1,161 @@
+PROMPT: Aktiver 4 NULL-intenter
+
+Execute in order. Report after each step.
+
+═══════════════════════════════════════════════════════
+INTENT 1 – GeneralInquiry → rename + B2B-routing
+═══════════════════════════════════════════════════════
+
+Rename intent: GeneralInquiry → GeneralInquiryBusiness
+
+action_type:      PURESERVICE_CREATE
+requires_login:   false
+keywords:         ["samarbeid", "partnerskap", "tilgang til data",
+                   "API-tilgang", "forskning", "integrasjon",
+                   "distribusjon", "forhandler", "white label",
+                   "presse", "mediahenvendelse", "EU-prosjekt",
+                   "anonymiserte data", "registerdata", "Pyramidion",
+                   "kjæledyrstatistikk", "markedsmuligheter",
+                   "vi ønsker å samarbeide", "kan vi bruke deres",
+                   "tilgang til DyreID-plattformen"]
+
+negative_keywords (skal IKKE matche – rutes til support):
+                  ["logger ikke inn", "endre eier", "QR-brikken",
+                   "mistet hunden", "registrere katt", "appen krasjer",
+                   "telefonnummer", "betaling feilet"]
+
+combined_response:
+  "Takk for at du tar kontakt med DyreID.
+
+   Det ser ut som henvendelsen din gjelder samarbeid,
+   dataforespørsel eller en forretningsrelatert mulighet.
+   Vi håndterer slike henvendelser manuelt og vil følge
+   opp så snart som mulig.
+
+   For at vi skal kunne hjelpe deg best mulig, trenger
+   vi litt informasjon:"
+
+chatbot_steps:
+  1. Spør: "Hva gjelder henvendelsen din?"
+     (fritekst – lagres som case description)
+  2. Spør: "Hva er ditt navn?"
+  3. Spør: "Hva er din e-postadresse?"
+  4. Spør: "Hva er ditt telefonnummer? (valgfritt)"
+  5. Bekreft og opprett Pureservice-sak med:
+       - category: B2B_Inquiries
+       - priority: medium
+       - notify: business@dyreid.no
+       - requires_manual_followup: true
+
+NOTE: Dette er en kontrollert rest-klasse for B2B,
+strategiske og eksterne aktører. Skal aldri lande
+i ordinær supportkø.
+
+═══════════════════════════════════════════════════════
+INTENT 2 – ProfileVerification
+═══════════════════════════════════════════════════════
+
+action_type:    INFO_ONLY
+requires_login: false
+keywords:       ["hvorfor har jeg fått sms", "hvorfor har jeg fått
+                  e-post", "ukjent melding fra dyreid",
+                  "hva betyr denne meldingen", "bekreftelse fra
+                  dyreid", "fått melding om kjæledyr",
+                  "ny eier melding", "veterinær sendte melding"]
+
+combined_response:
+  "Du har fått en SMS eller e-post fra DyreID fordi
+   kjæledyret ditt nylig er ID-merket hos veterinær,
+   eller fordi du er registrert som ny eier av et dyr.
+
+   Vi sender denne meldingen for å bekrefte at
+   kontaktinformasjonen vi har registrert er korrekt.
+   Riktige kontaktdata er viktig for rask gjenfinning
+   hvis dyret ditt skulle bli borte.
+
+   Oppdater kontaktinformasjonen din på Min Side:
+   https://minside.dyreidentitet.no"
+
+help_center_article_url:
+  https://www.dyreid.no/hjelp-min-side/23-hvorfor-har-jeg-fatt-sms-e-post
+
+═══════════════════════════════════════════════════════
+INTENT 3 – SMSEmailNotification
+═══════════════════════════════════════════════════════
+
+NOTE: SMSEmailNotification og ProfileVerification
+dekker samme scenario. Vurder å slå dem sammen til
+ProfileVerification og deprecated SMSEmailNotification.
+
+Inntil videre: sett samme combined_response som
+ProfileVerification, og legg til alias-kobling.
+
+action_type:    INFO_ONLY
+requires_login: false
+keywords:       ["varsling", "sms-varsling", "e-postvarsling",
+                 "hvorfor varsler", "skru av varsler",
+                 "endre varslingsinnstillinger",
+                 "SMSEmailNotification"]
+
+combined_response: (identisk med ProfileVerification)
+  "Du har fått en SMS eller e-post fra DyreID fordi
+   kjæledyret ditt nylig er ID-merket hos veterinær,
+   eller fordi du er registrert som ny eier av et dyr.
+
+   Vi sender denne meldingen for å bekrefte at
+   kontaktinformasjonen vi har registrert er korrekt.
+   Riktige kontaktdata er viktig for rask gjenfinning
+   hvis dyret ditt skulle bli borte.
+
+   Oppdater kontaktinformasjonen din på Min Side:
+   https://minside.dyreidentitet.no"
+
+help_center_article_url:
+  https://www.dyreid.no/hjelp-min-side/23-hvorfor-har-jeg-fatt-sms-e-post
+
+FLAG for manuell vurdering: bør SMSEmailNotification
+deprecated og aliasert til ProfileVerification?
+
+═══════════════════════════════════════════════════════
+INTENT 4 – WhyIDMark
+═══════════════════════════════════════════════════════
+
+action_type:    INFO_ONLY
+requires_login: false
+keywords:       ["hvorfor id-merke", "hvorfor chipe",
+                 "er det påbudt", "er det lovpålagt",
+                 "hva er hensikten med chip",
+                 "hvorfor registrere kjæledyr",
+                 "chip hund katt obligatorisk",
+                 "hva skjer hvis ikke chippet"]
+
+combined_response:
+  "ID-merking er den sikreste måten å identifisere
+   kjæledyret ditt på – og koble deg som eier til
+   dyret hvis det skulle bli borte.
+
+   Det er lovpålagt å ID-merke hunder i Norge.
+   For katter anbefales det sterkt.
+
+   Mikrochipen sitter under huden og er permanent –
+   den kan ikke falle av som et halsbånd.
+   QR-brikken og Smart Tag gir ekstra trygghet
+   ved at finner enkelt kan kontakte deg direkte.
+
+   ID-merking gjøres hos veterinær og registreres
+   automatisk i DyreIDs nasjonale register."
+
+═══════════════════════════════════════════════════════
+STEP 5 – Regenerer embeddings + rapport
+═══════════════════════════════════════════════════════
+
+Regenerer embeddings for alle 4 intenter.
+
+Report:
+1. GeneralInquiry renamed til GeneralInquiryBusiness – bekreftet
+2. PURESERVICE_CREATE-routing til business@dyreid.no – bekreftet
+3. ProfileVerification og SMSEmailNotification aktivert
+4. WhyIDMark aktivert
+5. Flag: bør SMSEmailNotification deprecated? (ja/nei)
+6. Embeddings regenerert (count)
+7. Gjenstående NULL_RESPONSE-intenter (skal være 0)

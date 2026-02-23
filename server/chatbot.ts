@@ -94,15 +94,6 @@ const PURESERVICE_CREATE_CONFIGS: Record<string, PureserviceCreateConfig> = {
     category2: "Chipkorrigering",
     note: "Dyrets navn + art brukes for å verifisere signalement",
   },
-  QRTagLost: {
-    fields: [
-      { key: "navn", label: "Ditt fulle navn" },
-      { key: "adresse", label: "Postadresse" },
-      { key: "e-post", label: "E-postadresse" },
-    ],
-    category1: "QR-brikke",
-    category2: "Tapt",
-  },
   QRTagDamaged: {
     fields: [
       { key: "navn", label: "Ditt fulle navn" },
@@ -119,6 +110,17 @@ const PURESERVICE_CREATE_CONFIGS: Record<string, PureserviceCreateConfig> = {
     ],
     category1: "Min side",
     category2: "Kontaktinfo",
+  },
+  GeneralInquiryBusiness: {
+    fields: [
+      { key: "beskrivelse", label: "Hva gjelder henvendelsen din?", hint: "Beskriv kort hva du ønsker" },
+      { key: "navn", label: "Hva er ditt navn?" },
+      { key: "e-post", label: "Hva er din e-postadresse?" },
+      { key: "telefon", label: "Hva er ditt telefonnummer?", hint: "Valgfritt – trykk Enter for å hoppe over" },
+    ],
+    category1: "B2B_Inquiries",
+    category2: "Forretningshenvendelse",
+    note: "B2B/strategisk henvendelse – rutes til business@dyreid.no, ikke ordinær supportkø",
   },
 };
 
@@ -258,7 +260,7 @@ const INTENT_PATTERNS: IntentQuickMatch[] = [
   { intent: "NewRegistration", regex: /registrere.*(?:nytt?|ny).*(?:dyr|hund|katt|valp|kattunge)|(?:nytt?|ny).*(?:dyr|hund|katt|valp|kattunge).*registrer|ny.*registrering|(?:nyregistrering|førstegangsregistrering)|(?:hvordan|første gang).*registrer|^registrer.*(?:hund|katt|dyr|valp)$|registrere.*(?:hund|katt|dyr|valp)(?:\s+(?:i|hos|på)\s+)?(?:DyreID)?$/i },
 
   // ── Generell ────────────────────────────────────────────
-  { intent: "GeneralInquiry", regex: /generell|hjelp med|lurer på|spørsmål om/i },
+  { intent: "GeneralInquiryBusiness", regex: /samarbeid|partnerskap|api.?tilgang|forskning.*dyreid|integrasjon.*dyreid|forhandler|white.?label|presse.*dyreid|media.*henvendelse|registerdata|pyramidion|kjæledyrstatistikk|vi ønsker å samarbeide/i },
 ];
 
 interface CategorySubtopic {
