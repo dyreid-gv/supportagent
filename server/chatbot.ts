@@ -94,6 +94,15 @@ const PURESERVICE_CREATE_CONFIGS: Record<string, PureserviceCreateConfig> = {
     category2: "Chipkorrigering",
     note: "Dyrets navn + art brukes for å verifisere signalement",
   },
+  QRTagLost: {
+    fields: [
+      { key: "navn", label: "Ditt fulle navn" },
+      { key: "e-post", label: "E-postadresse" },
+      { key: "telefon", label: "Telefonnummer" },
+    ],
+    category1: "QR-brikke",
+    category2: "Tapt – Premium erstatning",
+  },
   QRTagDamaged: {
     fields: [
       { key: "navn", label: "Ditt fulle navn" },
@@ -135,6 +144,8 @@ interface SessionState {
   chipLookupResult?: ChipLookupResult;
   directIntentFlow?: string;
   loginHelpStep?: "awaiting_phone" | "awaiting_sms_confirm";
+  qrLostFlow?: "awaiting_premium_answer" | "collecting_premium_data";
+  qrLostFieldIndex?: number;
   pureserviceCreateFlow?: "collecting" | "confirming";
   pureserviceCreateIntent?: string;
   pureserviceCreateFieldIndex?: number;
@@ -1307,6 +1318,103 @@ function handleDirectIntent(
     return {
       text: "Jeg hjelper deg med innlogging på Min Side. Vi bruker engangskode (OTP) via SMS.\n\nHvilket telefonnummer bruker du for å logge inn?",
       model: "direct-login-help-start",
+    };
+  }
+
+  if (intent === "QRTagLost" || session.directIntentFlow === "QRTagLost") {
+    if (session.directIntentFlow === "QRTagLost" && intent && intent !== "QRTagLost"
+        && !/^(ja|yes|nei|no|vet ikke|usikker)/i.test(userMessage.trim())
+        && !session.qrLostFlow) {
+      session.directIntentFlow = undefined;
+      session.qrLostFlow = undefined;
+      session.qrLostFieldIndex = undefined;
+      return null;
+    }
+
+    if (session.qrLostFlow === "collecting_premium_data") {
+      const premiumFields = [
+        { key: "navn", label: "Ditt fulle navn" },
+        { key: "e-post", label: "Din e-postadresse" },
+        { key: "telefon", label: "Ditt telefonnummer" },
+      ];
+      const fieldIdx = session.qrLostFieldIndex || 0;
+
+      if (fieldIdx > 0 && fieldIdx <= premiumFields.length) {
+        const prevField = premiumFields[fieldIdx - 1];
+        if (prevField.key === "e-post" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(userMessage.trim())) {
+          return { text: "Ugyldig e-postadresse. Prøv igjen:", model: "qr-lost-invalid-email" };
+        }
+        session.collectedData[prevField.key] = userMessage.trim();
+      }
+
+      if (fieldIdx < premiumFields.length) {
+        const nextField = premiumFields[fieldIdx];
+        session.qrLostFieldIndex = fieldIdx + 1;
+        let prompt = `**${nextField.label}:**`;
+        if (fieldIdx === 0) {
+          prompt = "Vi oppretter en sak for deg så du får gratis erstatningsbrikke.\nOppgi navn, e-postadresse og telefonnummer.\n\n" + prompt;
+        }
+        return { text: prompt, model: `qr-lost-collect-${nextField.key}` };
+      }
+
+      const summary = `**Oppsummering:**\n- Navn: ${session.collectedData.navn}\n- E-post: ${session.collectedData["e-post"]}\n- Telefon: ${session.collectedData.telefon}\n\nStemmer dette?`;
+      session.qrLostFlow = undefined;
+      session.pureserviceCreateFlow = "confirming";
+      session.pureserviceCreateIntent = "QRTagLost";
+      return {
+        text: summary,
+        suggestions: [
+          { label: "Ja, opprett sak", action: "CONFIRM" },
+          { label: "Nei, avbryt", action: "CANCEL" },
+        ],
+        model: "qr-lost-premium-confirm",
+      };
+    }
+
+    if (session.qrLostFlow === "awaiting_premium_answer") {
+      const msgLower = userMessage.trim().toLowerCase();
+      session.qrLostFlow = undefined;
+
+      if (/^(ja|yes|jep|japp|jepp|har premium|har qr premium)/i.test(msgLower)) {
+        session.qrLostFlow = "collecting_premium_data";
+        session.qrLostFieldIndex = 0;
+        session.collectedData = {};
+        const firstField = { key: "navn", label: "Ditt fulle navn" };
+        session.qrLostFieldIndex = 1;
+        return {
+          text: "Vi oppretter en sak for deg så du får gratis erstatningsbrikke.\nOppgi navn, e-postadresse og telefonnummer.\n\n**Ditt fulle navn:**",
+          model: "qr-lost-premium-start",
+        };
+      }
+
+      if (/^(nei|no|ikke|har ikke)/i.test(msgLower)) {
+        session.directIntentFlow = undefined;
+        return {
+          text: substitutePrices("Bestill ny QR-brikke på dyreid.no/qrbrikke eller i DyreID-appen.\nPris: {{PRICE:qr_brikke_ekstra}}."),
+          model: "qr-lost-no-premium",
+          requestFeedback: true,
+        };
+      }
+
+      session.directIntentFlow = undefined;
+      return {
+        text: "Sjekk abonnementet ditt i DyreID-appen under QR-brikker.",
+        model: "qr-lost-unknown-premium",
+        requestFeedback: true,
+      };
+    }
+
+    session.directIntentFlow = "QRTagLost";
+    session.qrLostFlow = "awaiting_premium_answer";
+    session.collectedData = {};
+    return {
+      text: "Har du mistet QR-brikken?\n\nHar du **QR Premium**-abonnement?",
+      suggestions: [
+        { label: "Ja", action: "CONFIRM" },
+        { label: "Nei", action: "DENY" },
+        { label: "Vet ikke", action: "UNKNOWN" },
+      ],
+      model: "qr-lost-ask-premium",
     };
   }
 
@@ -3166,7 +3274,7 @@ export async function* streamChatResponse(
     }
   }
 
-  const DIRECT_INTENTS = ["ViewMyPets", "OwnershipTransferWeb", "OwnershipTransferApp", "ReportLostPet", "ReportFoundPet", "QRTagActivation", "PetDeceased", "NKKOwnership", "LoginIssue", "LoginProblem", "UnregisteredChip578", "ForeignRegistration", "ForeignRegistrationCost", "WrongInfo", "WrongOwner", "MissingPetProfile", "InactiveRegistration", "NewRegistration", "SmartTagActivation", "SmartTagQRActivation", "SmartTagConnection", "SmartTagMissing", "SmartTagPosition", "SmartTagSound", "SmartTagMultiple", "GDPRDelete", "LostFoundInfo", "SearchableMisuse", "FamilySharing", "FamilySharingRequest", "FamilySharingPermissions", "FamilySharingRequirement", "PetNotInSystem", "ContactInfoDisambiguate", "UpdateContactInfo"];
+  const DIRECT_INTENTS = ["ViewMyPets", "OwnershipTransferWeb", "OwnershipTransferApp", "ReportLostPet", "ReportFoundPet", "QRTagActivation", "QRTagLost", "PetDeceased", "NKKOwnership", "LoginIssue", "LoginProblem", "UnregisteredChip578", "ForeignRegistration", "ForeignRegistrationCost", "WrongInfo", "WrongOwner", "MissingPetProfile", "InactiveRegistration", "NewRegistration", "SmartTagActivation", "SmartTagQRActivation", "SmartTagConnection", "SmartTagMissing", "SmartTagPosition", "SmartTagSound", "SmartTagMultiple", "GDPRDelete", "LostFoundInfo", "SearchableMisuse", "FamilySharing", "FamilySharingRequest", "FamilySharingPermissions", "FamilySharingRequirement", "PetNotInSystem", "ContactInfoDisambiguate", "UpdateContactInfo"];
   if ((intent && DIRECT_INTENTS.includes(intent)) || session.directIntentFlow || session.loginHelpStep) {
     let effectiveIntent = session.directIntentFlow || intent || "";
     let directResponse = handleDirectIntent(effectiveIntent, session, isAuthenticated, ownerContext, storedUserContext || null, userMessage);
