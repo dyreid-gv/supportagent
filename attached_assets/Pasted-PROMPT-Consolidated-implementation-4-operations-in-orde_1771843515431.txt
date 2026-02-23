@@ -1,0 +1,147 @@
+PROMPT: Consolidated implementation – 4 operations in order
+
+Execute in this exact sequence. Report result of each step before proceeding.
+
+═══════════════════════════════════════════════════════
+STEP 1 – Remove 2 internal-only entries
+═══════════════════════════════════════════════════════
+
+DELETE FROM playbook_entries 
+WHERE intent_id IN ('RoutingIssue', 'GeneralInquiry_InternalTest');
+
+DELETE FROM canonical_intents 
+WHERE intent_id IN ('RoutingIssue', 'GeneralInquiry_InternalTest');
+
+Report: rows deleted from each table.
+
+═══════════════════════════════════════════════════════
+STEP 2 – Add PURESERVICE_CREATE actionType + implement flow
+═══════════════════════════════════════════════════════
+
+2A – Schema: add 'PURESERVICE_CREATE' as valid actionType value.
+
+2B – Create tracking table:
+CREATE TABLE IF NOT EXISTS chatbot_created_cases (
+  id SERIAL PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  intent_id TEXT NOT NULL,
+  pureservice_ticket_id INTEGER,
+  collected_data JSONB,
+  status TEXT DEFAULT 'pending',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+2C – Set actionType = PURESERVICE_CREATE on these intents
+with required_data_fields:
+
+  RefundRequest
+    collect: [e-post, betalingsmetode, beløp, transaksjonsdato]
+    note: e-post brukes til å slå opp dyr/abonnement – ikke spør om chipnummer
+    category: "Min side" / "Betalingshistorikk"
+
+  MergeDuplicateRegistrations
+    collect: [e-post, chipnummer_1, chipnummer_2, dyrets_navn, beskrivelse]
+    note: beskrivelse = hva som er feil (to profiler, feil eier, etc.)
+    category: "Min side" / "Registreringer"
+
+  ChipCorrection
+    collect: [e-post, gammelt_chipnummer, nytt_chipnummer, 
+              veterinærnavn, veterinærklinikk, dyrets_navn, dyrets_art]
+    note: dyrets_navn + art brukes for å verifisere signalement
+    category: "Min side" / "Chipkorrigering"
+
+  QRTagLost
+    collect: [navn, adresse, e-post]
+    category: "QR-brikke" / "Tapt"
+
+  QRTagDamaged
+    collect: [navn, adresse, e-post]
+    category: "QR-brikke" / "Erstatning"
+
+2D – ChipLookup: implement as direct agent lookup (NOT PURESERVICE_CREATE)
+  If chipnummer provided → perform direct lookup via existing chip API
+  If no chipnummer → ask user to provide it
+  Do NOT create Pureservice case
+
+2E – Implement chatbot flow for PURESERVICE_CREATE in chatbot.ts:
+  1. Ask for each required field one at a time, in order
+  2. Before creating case: verify user identity via e-post
+     matched against existing owner record
+  3. When all fields collected and verified:
+     a. Write to chatbot_created_cases (status=pending)
+     b. Write to escalations_outbox with:
+        - subject: "DyreID Chatbot – {intentId} – {kort sammendrag}"
+        - description: collected fields + scrubbed session transcript
+        - category mapped from intent (see 2C above)
+        - source: "chatbot_pureservice_create"
+        - status: pending (respects ENABLE_PURESERVICE_POST flag)
+     c. Confirm to user:
+        "Vi har opprettet en sak og tar kontakt med deg snart."
+  4. On failure: fall back to standard escalation flow
+
+═══════════════════════════════════════════════════════
+STEP 3 – Split contact info intents
+═══════════════════════════════════════════════════════
+
+3A – Create UpdateContactInfo:
+  actionType: API_CALL
+  endpoint: /Owner/UpdateContact
+  description: "Endre navn eller adresse"
+  combinedResponse: "Du kan endre navn og adresse direkte på
+    Min Side under Kontaktinformasjon."
+  keywords: ["endre navn", "endre adresse", "feil navn", "feil adresse",
+             "oppdatere kontaktinfo"]
+
+3B – Create UpdateAuthContact:
+  actionType: PURESERVICE_CREATE
+  required_data_fields: [felt_som_skal_endres, ny_verdi]
+  description: "Endre e-postadresse eller telefonnummer (brukes til OTP)"
+  combinedResponse: "E-post og telefonnummer brukes til innlogging
+    og verifisering av kontoen din. Av sikkerhetsgrunner verifiserer
+    vi endringen manuelt – vi oppretter en sak og tar kontakt."
+  keywords: ["endre e-post", "endre telefon", "feil e-post",
+             "feil telefonnummer", "bytte e-post", "bytte telefon"]
+
+3C – Add disambiguation question in chatbot.ts when contact
+info intent is triggered:
+  "Hva ønsker du å endre?
+   → Navn eller adresse   (løses med det samme)
+   → E-postadresse        (krever verifisering)
+   → Telefonnummer        (krever verifisering)"
+
+3D – Deprecate old intents (do NOT delete):
+  PhoneError       → status: DEPRECATED, replaced_by: UpdateAuthContact
+  CheckContactData → status: DEPRECATED,
+                     replaced_by: [UpdateContactInfo, UpdateAuthContact]
+
+═══════════════════════════════════════════════════════
+STEP 4 – Approve and activate all new intents
+═══════════════════════════════════════════════════════
+
+Move from playbook_candidates to playbook_entries (approved=true)
+with actionType updated from steps above:
+
+  RefundRequest               → PURESERVICE_CREATE
+  MergeDuplicateRegistrations → PURESERVICE_CREATE
+  QRTagDamaged                → PURESERVICE_CREATE
+  QRTagLost                   → PURESERVICE_CREATE
+  ChipCorrection              → PURESERVICE_CREATE
+    note: use 8-ticket draft as combinedResponse base,
+    confirm all collect fields are set before activating
+
+Then regenerate embeddings for all new/changed intents:
+  UpdateContactInfo, UpdateAuthContact,
+  RefundRequest, MergeDuplicateRegistrations,
+  QRTagDamaged, QRTagLost, ChipCorrection
+
+═══════════════════════════════════════════════════════
+VERIFICATION
+═══════════════════════════════════════════════════════
+
+Report:
+1. playbook_entries count before/after
+2. canonical_intents count before/after
+3. All intents with actionType=PURESERVICE_CREATE (complete list)
+4. All intents with actionType=DEPRECATED (complete list)
+5. Embeddings regenerated (count)
+6. Any errors or skipped items

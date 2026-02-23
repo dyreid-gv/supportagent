@@ -488,6 +488,18 @@ export const playbookCandidates = pgTable("playbook_candidates", {
 
 export const insertPlaybookCandidateSchema = createInsertSchema(playbookCandidates).omit({ id: true, createdAt: true, updatedAt: true });
 
+export const chatbotCreatedCases = pgTable("chatbot_created_cases", {
+  id: serial("id").primaryKey(),
+  sessionId: text("session_id").notNull(),
+  intentId: text("intent_id").notNull(),
+  pureserviceTicketId: integer("pureservice_ticket_id"),
+  collectedData: jsonb("collected_data"),
+  status: text("status").default("pending"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const insertChatbotCreatedCaseSchema = createInsertSchema(chatbotCreatedCases).omit({ id: true, createdAt: true });
+
 export const insertChatbotInteractionSchema = createInsertSchema(chatbotInteractions).omit({ id: true });
 export const insertHelpCenterArticleSchema = createInsertSchema(helpCenterArticles).omit({ id: true });
 export const insertResponseTemplateSchema = createInsertSchema(responseTemplates).omit({ id: true });
@@ -551,3 +563,5 @@ export type EscalationOutbox = typeof escalationsOutbox.$inferSelect;
 export type InsertEscalation = z.infer<typeof insertEscalationSchema>;
 export type PlaybookCandidate = typeof playbookCandidates.$inferSelect;
 export type InsertPlaybookCandidate = z.infer<typeof insertPlaybookCandidateSchema>;
+export type ChatbotCreatedCase = typeof chatbotCreatedCases.$inferSelect;
+export type InsertChatbotCreatedCase = z.infer<typeof insertChatbotCreatedCaseSchema>;

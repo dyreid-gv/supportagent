@@ -10,7 +10,9 @@ import { findSemanticMatch, findTopNSemanticMatches, getApprovedIntentIds, getIn
 import { recordPilotMatch, isPilotEnabled } from "./pilot-stats";
 import { ensureRuntimeIntentsInCanonical, validateRuntimeIntents, getApprovedIntentSet } from "./canonical-intents";
 import { isNormalizationEnabled, normalizeInput, fuzzyLabelFallback, logFuzzyMatch } from "./input-normalization";
-import { isEscalationEnabled, validateEmail, createEscalation, detectFrustration } from "./case-escalation";
+import { isEscalationEnabled, isPureservicePostEnabled, validateEmail, createEscalation, detectFrustration, buildChatTranscript, getCategoryFromIntent } from "./case-escalation";
+import { chatbotCreatedCases, escalationsOutbox } from "@shared/schema";
+import { scrubText } from "./gdpr-scrubber";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -44,6 +46,78 @@ function getPriceNum(key: string): number | undefined {
   return priceCache.get(key);
 }
 
+interface PureserviceCreateConfig {
+  fields: { key: string; label: string; hint?: string }[];
+  category1: string;
+  category2: string;
+  note?: string;
+}
+
+const PURESERVICE_CREATE_CONFIGS: Record<string, PureserviceCreateConfig> = {
+  RefundRequest: {
+    fields: [
+      { key: "e-post", label: "E-postadresse", hint: "Vi bruker e-post til å slå opp dyr/abonnement" },
+      { key: "betalingsmetode", label: "Betalingsmetode", hint: "F.eks. kort, Vipps, faktura" },
+      { key: "beløp", label: "Beløp (kr)", hint: "Hvor mye ønsker du refundert?" },
+      { key: "transaksjonsdato", label: "Transaksjonsdato", hint: "Når ble betalingen gjort?" },
+    ],
+    category1: "Min side",
+    category2: "Betalingshistorikk",
+    note: "E-post brukes til å slå opp dyr/abonnement – ikke spør om chipnummer",
+  },
+  MergeDuplicateRegistrations: {
+    fields: [
+      { key: "e-post", label: "E-postadresse" },
+      { key: "chipnummer_1", label: "Chipnummer 1 (15 siffer)" },
+      { key: "chipnummer_2", label: "Chipnummer 2 (15 siffer)" },
+      { key: "dyrets_navn", label: "Dyrets navn" },
+      { key: "beskrivelse", label: "Beskrivelse av problemet", hint: "F.eks. to profiler, feil eier, etc." },
+    ],
+    category1: "Min side",
+    category2: "Registreringer",
+  },
+  ChipCorrection: {
+    fields: [
+      { key: "e-post", label: "E-postadresse" },
+      { key: "gammelt_chipnummer", label: "Gammelt chipnummer (15 siffer)" },
+      { key: "nytt_chipnummer", label: "Nytt chipnummer (15 siffer)" },
+      { key: "veterinærnavn", label: "Veterinærens navn" },
+      { key: "veterinærklinikk", label: "Veterinærklinikk" },
+      { key: "dyrets_navn", label: "Dyrets navn" },
+      { key: "dyrets_art", label: "Dyrets art", hint: "F.eks. hund, katt" },
+    ],
+    category1: "Min side",
+    category2: "Chipkorrigering",
+    note: "Dyrets navn + art brukes for å verifisere signalement",
+  },
+  QRTagLost: {
+    fields: [
+      { key: "navn", label: "Ditt fulle navn" },
+      { key: "adresse", label: "Postadresse" },
+      { key: "e-post", label: "E-postadresse" },
+    ],
+    category1: "QR-brikke",
+    category2: "Tapt",
+  },
+  QRTagDamaged: {
+    fields: [
+      { key: "navn", label: "Ditt fulle navn" },
+      { key: "adresse", label: "Postadresse" },
+      { key: "e-post", label: "E-postadresse" },
+    ],
+    category1: "QR-brikke",
+    category2: "Erstatning",
+  },
+  UpdateAuthContact: {
+    fields: [
+      { key: "felt_som_skal_endres", label: "Hva skal endres?", hint: "E-postadresse eller telefonnummer" },
+      { key: "ny_verdi", label: "Ny verdi", hint: "Den nye e-postadressen eller det nye telefonnummeret" },
+    ],
+    category1: "Min side",
+    category2: "Kontaktinfo",
+  },
+};
+
 interface SessionState {
   intent?: string;
   playbook?: PlaybookEntry;
@@ -55,6 +129,9 @@ interface SessionState {
   chipLookupResult?: ChipLookupResult;
   directIntentFlow?: string;
   loginHelpStep?: "awaiting_phone" | "awaiting_sms_confirm";
+  pureserviceCreateFlow?: "collecting" | "confirming";
+  pureserviceCreateIntent?: string;
+  pureserviceCreateFieldIndex?: number;
   escalationFlow?: "awaiting_resolution_feedback" | "awaiting_email" | "completed";
   escalationContext?: {
     intentId: string | null;
@@ -87,7 +164,9 @@ interface IntentQuickMatch {
 const INTENT_PATTERNS: IntentQuickMatch[] = [
   // ── ID-søk ──────────────────────────────────────────────
   { intent: "WhyIDMark", regex: /hvorfor.*id.?merk|bør.*(?:id.?)?merk|fordel.*(?:chip|id.?merk)|id.?merk.*(?:fordel|viktig)|poenget med.*id|viktig.*id.?merk|hvorfor.*chippe/i },
-  { intent: "CheckContactData", regex: /kontrollere.*kontakt|kontaktdata.*(?:riktig|oppdater)|sjekke.*kontakt|verifisere.*kontakt|kontaktinfo|stemmer.*kontakt/i },
+  { intent: "ContactInfoDisambiguate", regex: /kontrollere.*kontakt|kontaktdata.*(?:riktig|oppdater)|sjekke.*kontakt|verifisere.*kontakt|kontaktinfo|stemmer.*kontakt|endre.*kontakt/i },
+  { intent: "UpdateContactInfo", regex: /endre.*(?:navn|adresse)|feil.*(?:navn|adresse)|oppdatere.*(?:navn|adresse)/i },
+  { intent: "UpdateAuthContact", regex: /endre.*(?:e-?post|telefon)|feil.*(?:e-?post|telefonnummer)|bytte.*(?:e-?post|telefon)/i },
   { intent: "InactiveRegistration", regex: /ikke søkbar|kjaledyr.*søkbar|dyr.*søkbar|inaktiv.*registr|registrering.*inaktiv|dukker ikke opp.*søk|finnes ikke.*søk/i },
 
   // ── DyreID-appen ────────────────────────────────────────
@@ -102,7 +181,7 @@ const INTENT_PATTERNS: IntentQuickMatch[] = [
 
   // ── Min side ────────────────────────────────────────────
   { intent: "EmailError", regex: /(?:feilmelding|feil|problem).*e-?post|ugyldig.*e-?post|e-?post.*(?:feil|fungerer ikke)|(?:kan ikke|klarer ikke).*(?:endre.*)?e-?post/i },
-  { intent: "PhoneError", regex: /(?:feilmelding|feil|problem).*(?:telefon|tlf|nummer)|ugyldig.*nummer|telefon.*(?:feil|vises feil|fungerer ikke)|(?:kan ikke|klarer ikke).*(?:endre.*)?(?:telefon|nummer)/i },
+  { intent: "UpdateAuthContact", regex: /(?:feilmelding|feil|problem).*(?:telefon|tlf|nummer)|ugyldig.*nummer|telefon.*(?:feil|vises feil|fungerer ikke)|(?:kan ikke|klarer ikke).*(?:endre.*)?(?:telefon|nummer)/i },
   { intent: "LoginProblem", regex: /(?:får|greier|klarer) ikke.*(?:logg|komm)|hvorfor.*(?:får|kan) (?:jeg )?ikke.*logg|(?:logg|login|innlogg).*(?:fungerer|virker).*ikke|(?:logg|login|innlogg).*(?:feiler|feil(?:er|melding)?)|problem.*(?:innlogg|login|å logg)|feil.*(?:ved|med).*innlogg|innloggingsproblemer|feil passord|(?:umulig|ikke mulig).*(?:å )?logg|feilmelding.*(?:logg|login)|(?:logg|login).*problem|(?:noe|alt).*(?:galt|feil).*(?:innlogg|login)/i },
   { intent: "LoginIssue", regex: /logg.*inn|innlogg|login|passord|bankid.*(?:logg|inn)|hvordan.*komm.*inn|hjelp.*(?:med )?(?:å )?logg/i },
   { intent: "SMSEmailNotification", regex: /(?:hvorfor|har).*(?:fått|mottatt).*(?:sms|e-?post|melding)|(?:sms|e-?post).*(?:fra|varsel).*(?:dyreid|oss)|dyreid.*(?:sms|e-?post|sendte|kontaktet)|(?:fått|mottatt).*(?:sms|e-?post|melding|tekstmelding).*(?:dyreid|fra)/i },
@@ -1607,6 +1686,27 @@ function handleDirectIntent(
     };
   }
 
+  if (intent === "ContactInfoDisambiguate") {
+    return {
+      text: "Hva ønsker du å endre?\n\n→ **Navn eller adresse** (løses med det samme)\n→ **E-postadresse** (krever verifisering)\n→ **Telefonnummer** (krever verifisering)",
+      suggestions: [
+        { label: "Navn eller adresse", action: "SUBTOPIC", data: { intent: "UpdateContactInfo", query: "endre navn adresse" } },
+        { label: "E-postadresse", action: "SUBTOPIC", data: { intent: "UpdateAuthContact", query: "endre e-post" } },
+        { label: "Telefonnummer", action: "SUBTOPIC", data: { intent: "UpdateAuthContact", query: "endre telefon" } },
+      ],
+      model: "direct-contact-disambiguate",
+    };
+  }
+
+  if (intent === "UpdateContactInfo") {
+    return {
+      text: "Du kan endre navn og adresse direkte på Min Side under **Kontaktinformasjon**.\n\nLogg inn på [Min Side](https://minside.dyreid.no) og oppdater informasjonen din der.",
+      requiresLogin: !isAuthenticated,
+      model: "direct-update-contact-info",
+      requestFeedback: true,
+    };
+  }
+
   if (intent === "GDPRDelete") {
     return {
       text: "**Sletting av profil (GDPR)**\n\nDu har rett til å be om sletting av dine personopplysninger i henhold til GDPR.\n\n**Viktig å vite:**\n- Sletting av profilen fjerner alle dine personopplysninger fra DyreID\n- Dyrene dine vil bli avregistrert fra din profil\n- Denne handlingen kan ikke angres\n- Chipregistreringen på dyrene dine forblir aktiv, men uten koblet eier\n\n**Slik ber du om sletting:**\nSend en e-post til **personvern@dyreid.no** med:\n1. Ditt fulle navn\n2. Telefonnummer registrert i DyreID\n3. Bekreftelse på at du ønsker sletting\n\nBehandlingstid er normalt 30 dager i henhold til GDPR-regelverket.\n\nHvis du bare ønsker å endre eller oppdatere informasjonen din, kan jeg hjelpe deg med det etter innlogging.",
@@ -2324,6 +2424,176 @@ async function handlePlaybookResponse(
     };
   }
 
+  if (actionType === "PURESERVICE_CREATE") {
+    const config = PURESERVICE_CREATE_CONFIGS[playbook.intent];
+    if (!config) {
+      return {
+        text: playbook.combinedResponse || "Denne henvendelsen krever manuell behandling. Kontakt support@dyreid.no.",
+        model: "pureservice-create-no-config",
+        requestFeedback: true,
+      };
+    }
+
+    if (!session.pureserviceCreateFlow) {
+      session.pureserviceCreateFlow = "collecting";
+      session.pureserviceCreateIntent = playbook.intent;
+      session.pureserviceCreateFieldIndex = 0;
+      session.collectedData = {};
+    }
+
+    if (session.pureserviceCreateFlow === "collecting") {
+      const fieldIdx = session.pureserviceCreateFieldIndex || 0;
+
+      if (fieldIdx > 0 && fieldIdx <= config.fields.length) {
+        const prevField = config.fields[fieldIdx - 1];
+        session.collectedData[prevField.key] = userMessage.trim();
+      }
+
+      if (fieldIdx < config.fields.length) {
+        const nextField = config.fields[fieldIdx];
+        session.pureserviceCreateFieldIndex = fieldIdx + 1;
+        let prompt = `**${nextField.label}:**`;
+        if (nextField.hint) prompt += `\n_${nextField.hint}_`;
+        if (fieldIdx === 0 && playbook.combinedResponse) {
+          prompt = `${playbook.combinedResponse}\n\nFor å opprette en sak trenger jeg noen opplysninger.\n\n${prompt}`;
+        }
+        return {
+          text: prompt,
+          model: `pureservice-collect-${nextField.key}`,
+        };
+      }
+
+      const lastField = config.fields[config.fields.length - 1];
+      session.collectedData[lastField.key] = userMessage.trim();
+
+      const collectedEmail = session.collectedData["e-post"];
+      if (collectedEmail && !validateEmail(collectedEmail)) {
+        session.pureserviceCreateFieldIndex = config.fields.findIndex(f => f.key === "e-post") + 1;
+        delete session.collectedData["e-post"];
+        return {
+          text: "E-postadressen ser ikke riktig ut. Vennligst oppgi en gyldig e-postadresse:",
+          model: "pureservice-email-invalid",
+        };
+      }
+
+      let summary = "**Oppsummering av saken:**\n\n";
+      for (const field of config.fields) {
+        summary += `- **${field.label}:** ${session.collectedData[field.key] || "–"}\n`;
+      }
+      summary += "\nStemmer dette? (Ja / Nei)";
+      session.pureserviceCreateFlow = "confirming";
+      return {
+        text: summary,
+        model: "pureservice-confirm",
+      };
+    }
+
+    if (session.pureserviceCreateFlow === "confirming") {
+      const isYes = /^(ja|yes|jep|japp|jepp|stemmer|ok|riktig|bekreft|👍)$/i.test(userMessage.trim());
+      const isNo = /^(nei|no|nope|feil|ikke riktig|avbryt|👎)$/i.test(userMessage.trim());
+
+      if (isNo) {
+        session.pureserviceCreateFlow = "collecting";
+        session.pureserviceCreateFieldIndex = 0;
+        session.collectedData = {};
+        return {
+          text: "Greit, la oss starte på nytt.\n\n**" + config.fields[0].label + ":**" + (config.fields[0].hint ? `\n_${config.fields[0].hint}_` : ""),
+          model: "pureservice-restart",
+        };
+      }
+
+      if (!isYes) {
+        return {
+          text: "Vennligst bekreft med **Ja** eller **Nei**.",
+          model: "pureservice-confirm-retry",
+        };
+      }
+
+      try {
+        const email = session.collectedData["e-post"] || session.collectedData["navn"] || "ukjent";
+        const intentId = session.pureserviceCreateIntent || playbook.intent;
+        const sessionIdStr = `conv-${conversationId}`;
+
+        await db.insert(chatbotCreatedCases).values({
+          sessionId: sessionIdStr,
+          intentId,
+          collectedData: session.collectedData,
+          status: "pending",
+        });
+
+        const rawTranscript = await buildChatTranscript(conversationId);
+        const scrubbedTranscript = scrubText(rawTranscript);
+
+        const shortSummary = intentId.replace(/([A-Z])/g, " $1").trim();
+        const subject = `DyreID Chatbot – ${intentId} – ${shortSummary}`;
+
+        const descParts = [
+          `--- Automatisk opprettet av DyreID Chatbot (PURESERVICE_CREATE) ---`,
+          ``,
+          `Intent: ${intentId}`,
+          `Kategori: ${config.category1} > ${config.category2}`,
+          ``,
+          `--- Innsamlet informasjon ---`,
+          ``,
+          ...config.fields.map(f => `${f.label}: ${session.collectedData[f.key] || "–"}`),
+          ``,
+          `--- Samtalelogg (scrubbet) ---`,
+          ``,
+          scrubbedTranscript,
+        ].join("\n");
+
+        await db.insert(escalationsOutbox).values({
+          conversationId,
+          sessionId: sessionIdStr,
+          intentId,
+          matchedBy: "pureservice_create",
+          userEmail: (session.collectedData["e-post"] || "ukjent@ukjent.no").toLowerCase().trim(),
+          subject,
+          description: descParts,
+          category1Id: config.category1,
+          category2Id: config.category2,
+          status: isPureservicePostEnabled() ? "ready_to_post" : "pending",
+          chatTranscript: scrubbedTranscript,
+          metadata: {
+            source: "chatbot_pureservice_create",
+            collectedData: session.collectedData,
+            intentId,
+          },
+        });
+
+        session.pureserviceCreateFlow = undefined;
+        session.pureserviceCreateIntent = undefined;
+        session.pureserviceCreateFieldIndex = undefined;
+        session.collectedData = {};
+        session.hasEscalated = true;
+
+        return {
+          text: "Vi har opprettet en sak og tar kontakt med deg snart. Er det noe annet jeg kan hjelpe med?",
+          actionExecuted: true,
+          actionType: "PURESERVICE_CREATE",
+          actionSuccess: true,
+          model: "pureservice-created",
+        };
+      } catch (err: any) {
+        console.error(`[PureserviceCreate] Failed for ${playbook.intent}:`, err.message);
+        session.pureserviceCreateFlow = undefined;
+        session.pureserviceCreateIntent = undefined;
+        session.pureserviceCreateFieldIndex = undefined;
+        session.escalationFlow = "awaiting_email";
+        session.escalationContext = {
+          intentId: playbook.intent,
+          matchedBy: "pureservice_create_fallback",
+          semanticScore: null,
+          triggerType: "block",
+        };
+        return {
+          text: "Beklager, det oppsto en feil. Oppgi e-postadressen din så oppretter vi en supportsak manuelt:",
+          model: "pureservice-create-error",
+        };
+      }
+    }
+  }
+
   if (actionType === "FORM_FILL" || actionType === "NAVIGATION") {
     return {
       text: playbook.combinedResponse || playbook.resolutionSteps || "Folg instruksjonene for a fullere dette.",
@@ -2656,6 +2926,56 @@ export async function* streamChatResponse(
     }
   }
 
+  if (session.pureserviceCreateFlow) {
+    const psIntent = session.pureserviceCreateIntent;
+    const psConfig = psIntent ? PURESERVICE_CREATE_CONFIGS[psIntent] : null;
+    if (psConfig) {
+      const playbook = psIntent ? await storage.getPlaybookByIntent(psIntent) : null;
+      if (playbook) {
+        const psResponse = await handlePlaybookResponse(
+          playbook, session, conversationId, userMessage,
+          ownerId || null, ownerContext, storedUserContext, isAuthenticated
+        );
+        if (psResponse) {
+          const metadata: any = {
+            model: psResponse.model,
+            matchedIntent: psIntent,
+            pureserviceCreate: true,
+          };
+          if (psResponse.actionExecuted) {
+            metadata.actionExecuted = true;
+            metadata.actionType = psResponse.actionType;
+            metadata.actionSuccess = psResponse.actionSuccess;
+          }
+          const msg = await storage.createMessage({
+            conversationId,
+            role: "assistant",
+            content: psResponse.text,
+            metadata,
+          });
+          const interaction = await storage.logChatbotInteraction({
+            conversationId,
+            messageId: msg.id,
+            userQuestion: userMessage,
+            botResponse: psResponse.text,
+            responseMethod: psResponse.model,
+            matchedIntent: psIntent || null,
+            actionsExecuted: psResponse.actionExecuted ? [{ action: psResponse.actionType, success: psResponse.actionSuccess }] : null,
+            authenticated: isAuthenticated,
+            responseTimeMs: Date.now() - startTime,
+          });
+          lastInteractionId = interaction.id;
+          await db.update(messages).set({ metadata: { ...metadata, interactionId: interaction.id } }).where(eq(messages.id, msg.id));
+          yield psResponse.text;
+          return;
+        }
+      }
+    }
+    session.pureserviceCreateFlow = undefined;
+    session.pureserviceCreateIntent = undefined;
+    session.pureserviceCreateFieldIndex = undefined;
+  }
+
   if (session.chipLookupFlow) {
     const newTopicIntent = quickIntentMatch(userMessage);
     const isCategorySwitch = detectCategoryMenu(userMessage) !== null;
@@ -2828,7 +3148,7 @@ export async function* streamChatResponse(
     }
   }
 
-  const DIRECT_INTENTS = ["ViewMyPets", "OwnershipTransferWeb", "OwnershipTransferApp", "ReportLostPet", "ReportFoundPet", "QRTagActivation", "PetDeceased", "NKKOwnership", "LoginIssue", "LoginProblem", "UnregisteredChip578", "ForeignRegistration", "ForeignRegistrationCost", "WrongInfo", "WrongOwner", "MissingPetProfile", "InactiveRegistration", "NewRegistration", "SmartTagActivation", "SmartTagQRActivation", "SmartTagConnection", "SmartTagMissing", "SmartTagPosition", "SmartTagSound", "SmartTagMultiple", "GDPRDelete", "LostFoundInfo", "SearchableMisuse", "FamilySharing", "FamilySharingRequest", "FamilySharingPermissions", "FamilySharingRequirement", "PetNotInSystem"];
+  const DIRECT_INTENTS = ["ViewMyPets", "OwnershipTransferWeb", "OwnershipTransferApp", "ReportLostPet", "ReportFoundPet", "QRTagActivation", "PetDeceased", "NKKOwnership", "LoginIssue", "LoginProblem", "UnregisteredChip578", "ForeignRegistration", "ForeignRegistrationCost", "WrongInfo", "WrongOwner", "MissingPetProfile", "InactiveRegistration", "NewRegistration", "SmartTagActivation", "SmartTagQRActivation", "SmartTagConnection", "SmartTagMissing", "SmartTagPosition", "SmartTagSound", "SmartTagMultiple", "GDPRDelete", "LostFoundInfo", "SearchableMisuse", "FamilySharing", "FamilySharingRequest", "FamilySharingPermissions", "FamilySharingRequirement", "PetNotInSystem", "ContactInfoDisambiguate", "UpdateContactInfo"];
   if ((intent && DIRECT_INTENTS.includes(intent)) || session.directIntentFlow || session.loginHelpStep) {
     let effectiveIntent = session.directIntentFlow || intent || "";
     let directResponse = handleDirectIntent(effectiveIntent, session, isAuthenticated, ownerContext, storedUserContext || null, userMessage);
