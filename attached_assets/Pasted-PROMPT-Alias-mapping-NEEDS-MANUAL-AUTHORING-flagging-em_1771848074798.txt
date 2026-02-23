@@ -1,0 +1,138 @@
+PROMPT: Alias mapping + NEEDS_MANUAL_AUTHORING flagging
+        + embedding-reindeksering
+
+Execute in order. Report after each step.
+
+═══════════════════════════════════════════════════════
+STEP 1 – Alias keyword injection (fix 258 mismatched tickets)
+═══════════════════════════════════════════════════════
+
+These intents exist in Playbook but aren't matching because
+classifier variants use different names. Add the variant names
+as additional keywords on each canonical intent:
+
+FamilySharing:
+  add keywords: ["familiedeling", "familietilgang", "dele med familie",
+                 "FamilySharingRequest", "familiemedlem"]
+
+ReportFoundPet:
+  add keywords: ["funnet dyr", "fant en hund", "fant en katt",
+                 "FoundPetReport", "funnet ukjent dyr", "funnet annen art",
+                 "funnet ikke hund eller katt"]
+
+LoginProblem:
+  add keywords: ["kommer ikke inn", "feil passord", "glemt passord",
+                 "LoginIssue", "LoginPasswordReset", "kan ikke logge inn",
+                 "tilbakestille passord"]
+
+AppLanguageSettings:
+  add keywords: ["appen er på engelsk", "bytte språk",
+                 "AppLanguage", "AppLanguageChange",
+                 "AppChangeLanguage", "AppLanguageSetting"]
+
+AppPushNotificationIssue:
+  add keywords: ["får ikke varsler", "varsler virker ikke",
+                 "AppPushNotifications", "AppNotifications",
+                 "PushNotificationsIssue", "PushNotifications",
+                 "PushNotificationIssue"]
+
+SmartTagBatteryInfo:
+  add keywords: ["SmartTagBattery", "batteri smart tag",
+                 "bytte batteri", "hvor lenge varer batteriet"]
+
+ChipCorrection:
+  add keywords: ["feil chipnummer registrert", "UpdateChipNumber",
+                 "CorrectRegisteredChip", "WrongInfo_UpdateChip",
+                 "ChipReplacement", "veterinær registrerte feil"]
+
+MergeDuplicateRegistrations:
+  add keywords: ["to profiler", "duplikat", "dobbeltregistrering",
+                 "DuplicateRegistration", "DuplicateRegistrationMerge",
+                 "MergeRegistrations", "slå sammen"]
+
+RefundRequest:
+  add keywords: ["dobbeltbelastet", "trukket to ganger",
+                 "DoubleChargeRefund", "BillingRefund", "BillingDoubleCharge",
+                 "SubscriptionDoubleCharge", "RefundDoubleCharge",
+                 "DuplicateChargeRefund", "PaymentRefund", "SubscriptionRefund"]
+
+QRTagReassign:
+  add keywords: ["QR-brikke viser feil dyr", "koble brikke til annet dyr",
+                 "QRUpdateContact", "QRReassignTag", "QRTagRelink",
+                 "QRAssignCorrection", "flytte brikke"]
+
+QRTagDamaged:
+  add keywords: ["QR-brikke skannes ikke", "slitt brikke", "uleselig kode",
+                 "QRTagReplacement", "QRTagReplace", "brikken virker ikke"]
+
+PetDeceased:
+  add keywords: ["si opp etter dødsfall", "avslutte etter avliving",
+                 "CancelSubscription_PetDeceased",
+                 "CancelSubscription / PetDeceased"]
+
+After adding: regenerate embeddings for all 12 updated intents.
+Report: keywords added, embeddings updated.
+
+═══════════════════════════════════════════════════════
+STEP 2 – Flag 5 intents as NEEDS_MANUAL_AUTHORING
+═══════════════════════════════════════════════════════
+
+All candidates below have sourcePureserviceId=null across
+all sample tickets, meaning they are duplicates of unknown
+origin — not verified real agent responses. Do NOT activate.
+Seed into playbook_candidates for manual authoring.
+
+SmartTagNotifications:
+  status: DEPRECATED_MITT_SPOR
+  reason: "Alle 16 tickets gjelder sone/geofence-varsler fra
+           Mitt Spor. Smart Tag har ikke geofence-funksjonalitet."
+
+SmartTagReassign:
+  status: NEEDS_MANUAL_AUTHORING
+  reason: "sourcePureserviceId=null på alle tickets – duplikater.
+           UI-steg 'Koble til annet dyr' er ikke verifisert
+           i Min Side. Krever bekreftelse fra produktteam."
+
+SubscriptionAddPet:
+  status: NEEDS_MANUAL_AUTHORING
+  reason: "sourcePureserviceId=null på alle tickets – duplikater.
+           Oppgraderingssvaret er GDPR-skadet: plannavnet er
+           fjernet av scrubber ('<PERSON> plan').
+           Krever manuell authoring med korrekte plandetaljer."
+
+AppCrash:
+  status: NEEDS_MANUAL_AUTHORING
+  reason: "sourcePureserviceId=null på alle tickets – duplikater.
+           Svar er delvis GDPR-skadet: 'Prøv å <PERSON> appen'
+           der 'slette' er fjernet av scrubber.
+           Merk: svaret for iOS (slett + reinstaller) er
+           kjent korrekt, men Android mangler helt."
+
+QRTagOrderExtra:
+  status: NEEDS_MANUAL_AUTHORING
+  reason: "sourcePureserviceId=null på alle tickets – duplikater.
+           Selve svaret ('Min Side > Dine dyr > Bestill QR-brikke,
+           99 kr') er konsistent med service_prices-tabellen,
+           men UI-stien er ikke verifisert mot faktisk Min Side.
+           Lettest å manuelt bekrefte av de fem."
+
+═══════════════════════════════════════════════════════
+STEP 3 – Coverage report
+═══════════════════════════════════════════════════════
+
+After Step 1 embeddings are regenerated, run:
+
+  SELECT
+    COUNT(*) as total,
+    SUM(CASE WHEN pb.intent IS NOT NULL THEN 1 ELSE 0 END) as covered,
+    ROUND(100.0 * SUM(CASE WHEN pb.intent IS NOT NULL
+      THEN 1 ELSE 0 END) / COUNT(*), 1) as coverage_pct
+  FROM intent_classifications ic
+  LEFT JOIN playbook_entries pb ON pb.intent = ic.intent;
+
+Report:
+1. Coverage % before/after Step 1 (baseline: 60%)
+2. 12 intents with updated keywords (list)
+3. 5 intents flagged in playbook_candidates (list)
+4. Embeddings regenerated (count)
+5. Remaining uncovered intents with >3 tickets
