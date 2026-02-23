@@ -1,0 +1,120 @@
+PROMPT: Tre mapping-problemer
+
+Execute in order. Report after each step.
+
+═══════════════════════════════════════════════════════
+STEP 1 – FamilySharing: remap til eksisterende subintenter
+═══════════════════════════════════════════════════════
+
+Playbook har ingen generell FamilySharing-intent.
+60 ticket-klassifikasjoner med intent="FamilySharing"
+og 17 med intent="FamilySharingRequest" må remappes
+til korrekt subintent.
+
+Kjør følgende remap på intent_classifications:
+
+Regel 1 – intent IN ('FamilySharing','FamilySharingRequest')
+  der required_action eller keywords inneholder
+  'invitasjon' ELLER 'invite' ELLER 'invitation'
+  ELLER 'e-post' ELLER 'resend'
+  → remap til: FamilySharingExisting
+
+Regel 2 – intent IN ('FamilySharing','FamilySharingRequest')
+  der required_action eller keywords inneholder
+  'fjerne' ELLER 'remove' ELLER 'tilgang' ELLER 'access'
+  → remap til: FamilyAccessLost
+
+Regel 3 – alle gjenværende intent='FamilySharing'
+  eller 'FamilySharingRequest' (required_action tom
+  eller ingen av reglene over traff)
+  → remap til: FamilySharingExisting
+
+Report: antall rader remappet per regel.
+
+═══════════════════════════════════════════════════════
+STEP 2 – ReportFoundPet: til playbook_candidates
+═══════════════════════════════════════════════════════
+
+Sjekk først: har noen av de 37 ReportFoundPet-tickets
+sourcePureserviceId satt (ikke null)?
+
+→ Hvis ja: list dem opp og bruk som treningsgrunnlag,
+  opprett intent direkte i playbook_entries.
+
+→ Hvis alle null: opprett i playbook_candidates med:
+
+intent_id:    ReportFoundPet
+action_type:  INFO_ONLY
+requires_login: false
+status:       NEEDS_MANUAL_AUTHORING
+keywords:     ["funnet hund", "funnet katt", "funnet dyr",
+               "fant et dyr", "FoundPetReport",
+               "funnet annen art", "hva gjør jeg når
+               jeg finner et dyr", "fant fremmed hund"]
+combined_response: (tom – forfates manuelt)
+reason:       "37 tickets, alle sourcePureserviceId=null.
+               Svaret må forfattes manuelt: hva skal
+               kunden gjøre når de finner et fremmed dyr?"
+
+FLAG for manuell vurdering: vurder om ReportFoundPet
+skal slås sammen med LostFoundInfo eller stå separat.
+
+═══════════════════════════════════════════════════════
+STEP 3 – QRTagActivation: splitt type A og type B
+═══════════════════════════════════════════════════════
+
+De 21 QRTagActivation-tickets inneholder to ulike
+problemer som er blandet sammen:
+
+Type B – "QR-brikken viser feil dyr"
+  → hører til QRTagReassign (allerede aktiv i playbook)
+
+Remap type B til QRTagReassign:
+  UPDATE intent_classifications
+  SET intent = 'QRTagReassign'
+  WHERE intent = 'QRTagActivation'
+  AND (
+    customer_question ILIKE '%feil dyr%'
+    OR keywords ILIKE '%feil dyr%'
+    OR keywords ILIKE '%koble%'
+    OR customer_question ILIKE '%viser feil%'
+    OR customer_question ILIKE '%koblet til forrige%'
+  );
+
+Type A – "Jeg har mottatt brikken, hvordan aktiverer jeg den?"
+  → QRTagActivation (beholder intent-navn)
+  → combined_response er allerede satt fra tidligere i dag
+  → ingen endring nødvendig
+
+Report:
+  - Antall type B remappet til QRTagReassign
+  - Antall type A beholdt som QRTagActivation
+  - Bekreft at QRTagActivation combined_response er aktiv
+
+═══════════════════════════════════════════════════════
+STEP 4 – Regenerer embeddings + coverage-rapport
+═══════════════════════════════════════════════════════
+
+Regenerer embeddings for:
+  FamilySharingExisting, FamilyAccessLost, QRTagReassign,
+  QRTagActivation
+
+Kjør deretter coverage-query:
+  SELECT
+    COUNT(*) as total,
+    SUM(CASE WHEN pb.intent IS NOT NULL THEN 1 ELSE 0 END)
+      as covered,
+    ROUND(100.0 * SUM(CASE WHEN pb.intent IS NOT NULL
+      THEN 1 ELSE 0 END) / COUNT(*), 1) as coverage_pct
+  FROM intent_classifications ic
+  LEFT JOIN playbook_entries pb ON pb.intent = ic.intent
+  WHERE pb.is_active = true OR pb.intent IS NULL;
+
+Report:
+1. FamilySharing-remap: antall per regel
+2. ReportFoundPet: sourcePureserviceId-sjekk resultat
+   + opprettet i playbook_candidates eller playbook_entries
+3. QRTagActivation type B remappet til QRTagReassign (antall)
+4. Embeddings regenerert (count)
+5. Coverage % før/etter (baseline: 67.6%)
+6. Gjenstående uncovered intenter med >3 tickets
