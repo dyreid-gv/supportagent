@@ -215,6 +215,7 @@ const INTENT_PATTERNS: IntentQuickMatch[] = [
   { intent: "SmartTagSound", regex: /(?:smart.?tag|tag).*(?:lyd|piper?|bråk|alarm|ringer|lager lyd)|(?:lyd|piper?|bråk).*(?:smart.?tag|tag)/i },
 
   // ── QR-brikke (specific subtypes BEFORE general) ────────
+  { intent: "QRTagOrderExtra", regex: /bestill.*(?:ekstra|ny|flere).*(?:qr|brikke)|(?:ekstra|ny|flere).*(?:qr|brikke).*bestill|kjøpe.*(?:qr|brikke)|(?:qr|brikke).*(?:kjøpe|bestill)|(?:bestill|vil ha).*(?:qr|brikke)/i },
   { intent: "QRTagLost", regex: /mistet.*(?:qr|brikke)|(?:qr|brikke).*(?:mistet|borte|forsvunnet|falt av)|tapt.*(?:qr|brikke)|mista.*(?:qr|brikke)|(?:hund|katt).*mistet.*(?:qr|brikke)/i },
   { intent: "QRRequiresIDMark", regex: /(?:må|treng|krev|behøv|forutsett).*(?:id.?merk|chip|microchip).*(?:qr|brikke)|(?:qr|brikke).*(?:krav|uten).*(?:chip|id)|(?:id.?merk|chip).*(?:krav|nødvendig).*(?:qr|brikke)|(?:chip|chippet).*for.*qr/i },
   { intent: "QRPricingModel", regex: /qr.*(?:abonnement|engang|pris|kost|betal|månedlig)|(?:abonnement|engang|pris|kost|betal|månedlig).*qr|(?:koster|pris).*(?:qr|brikke)|(?:qr|brikke).*(?:koster|pris)/i },
@@ -2419,12 +2420,21 @@ async function handlePlaybookResponse(
     };
   }
 
-  if (actionType === "API_CALL" && !isAuthenticated) {
+  if (actionType === "API_CALL" && !isAuthenticated && playbook.requiresLogin !== false) {
     return {
       text: `For å ${playbook.primaryAction || "utføre denne handlingen"}, må du logge inn først. Klikk på knappen under for å logge inn med engangskode (OTP).`,
       requiresLogin: true,
       suggestions: [{ label: "Logg inn med OTP", action: "REQUEST_LOGIN" }],
       model: "playbook-guide-login",
+    };
+  }
+
+  if (actionType === "API_CALL" && !isAuthenticated && playbook.requiresLogin === false) {
+    return {
+      text: substitutePrices(playbook.combinedResponse || playbook.resolutionSteps || `Jeg kan hjelpe deg med ${playbook.primaryAction || playbook.intent}.`),
+      suggestions: generateSuggestions(playbook),
+      helpCenterLink: playbook.helpCenterArticleUrl,
+      model: "playbook-info-no-login",
     };
   }
 
