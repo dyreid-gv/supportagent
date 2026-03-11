@@ -1,0 +1,147 @@
+PROMPT: Kategori B – Slett 8 hardkodede blokker i chatbot.ts
+        + oppdater/opprett 4 DB-entries + 1 alias
+
+BAKGRUNN:
+8 hardkodede if (intent === ...) blokker i chatbot.ts
+overstyrer databasen med feil innhold (AI-generert, 
+uverifisert). Korrekt løsning: slett blokkene og la DB
+være eneste sannhetskilde.
+
+Kilde for alle svar: dyreid.no/smarttag og dyreid.no/qrbrikke
+
+VERIFISERTE FAKTA FRA DYREID.NO:
+Smart Tag:
+- Aktivering: Skann QR-koden → registrer på dyreid.no →
+  legg til i «Hvor er» (iOS) / «Finn enheten min» (Android)
+- INGEN Bluetooth-pairing mot DyreID-appen
+- Spores via Apple/Android sporingsnettverk (ikke GPS)
+- Viser siste kjente posisjon – ikke sanntid
+- Alarm aktiveres fra sporingsapp (IKKE DyreID-appen):
+  10 sekunder, 60–80 dB
+- Batteri: CR2032, 6–9 mnd, brukerbyttbar
+- Maks 3 brikker på ett abonnement (kjøpt samtidig)
+
+QR-brikke:
+- Aktivering: Åpne kamera på telefon → skann QR-koden
+  → følg instruksjon på dyreid.no
+- NFC brukes av FINNEREN, ikke av eier til aktivering
+- Kjæledyret MÅ være ID-merket i DyreID
+- Basis gratis. Premium: {{PRICE:qr_premium_aar}}/år
+
+══════════════════════════════════════════════════════
+DEL 1 – BARE SLETT (DB-svar er allerede korrekt)
+══════════════════════════════════════════════════════
+
+Slett følgende blokker fra chatbot.ts:
+
+1. linje ~1833: if (intent === "SmartTagConnection")
+   DB-svar: korrekt to-stegs aktivering
+
+2. linje ~1842: if (intent === "SmartTagMissing")
+   DB-svar: korrekt fabrikkreset-prosedyre
+
+3. linje ~1851: if (intent === "SmartTagPosition")
+   DB-svar: korrekt – ingen GPS, sporingsnettverk
+
+4. linje ~1869: if (intent === "SmartTagMultiple")
+   DB-svar: korrekt – inkl. 3-brikker-på-ett-abonnement
+
+══════════════════════════════════════════════════════
+DEL 2 – SLETT + OPPDATER DB
+══════════════════════════════════════════════════════
+
+─────────────────────────────────────────────────────
+FIX A – QRTagActivation (linje ~1806)
+─────────────────────────────────────────────────────
+Slett blokken. Den er en duplikat av blokken på linje ~871.
+Linje ~871 beholdes.
+
+Oppdater DB combined_response (nåværende sier feil at
+eier må laste ned appen og bruke NFC for aktivering):
+
+"Slik aktiverer du QR-brikken:
+
+1. Ta brikken ut av forpakningen
+2. Åpne kameraet på telefonen og skann QR-koden
+3. Følg instruksjonen på skjermen for å koble
+   brikken til din profil i DyreID
+
+Brikken er klar til bruk når den er koblet til profilen.
+
+Kjæledyret ditt må være ID-merket og registrert
+i DyreID for at brikken skal fungere.
+
+Basis er gratis. Premium ({{PRICE:qr_premium_aar}}/år)
+gir SMS-varsling ved skanning og geolokasjon."
+
+help_center_article_url:
+https://www.dyreid.no/hjelp-qr-brikke/35-aktivere-qr
+
+─────────────────────────────────────────────────────
+FIX B – SmartTagActivation (linje ~1815)
+─────────────────────────────────────────────────────
+Slett blokken. Opprett DB-entry:
+
+action_type: INFO_ONLY
+
+combined_response:
+"**Slik aktiverer du Smart Tag – 3 steg:**
+
+**Steg 1 – Registrer på dyreid.no:**
+Skann QR-koden på Smart Tag med kameraet på
+telefonen og følg instruksjonene for å koble
+taggen til dyrets profil.
+
+**Steg 2 – Aktiver posisjonssporing:**
+- iPhone: Åpne «Hvor er» → legg til objekt
+- Android: Åpne «Finn enheten min» → legg til enhet
+Hold Smart Tag nær telefonen (ulåst skjerm).
+Brikken vises som **Loshall Tag** i listen.
+
+**Steg 3 – Fest på halsbåndet. God tur!**
+
+Trenger du hjelp? Se instruksjonsvideoer på
+dyreid.no/smarttag"
+
+help_center_article_url:
+https://www.dyreid.no/smarttag
+
+─────────────────────────────────────────────────────
+FIX C – SmartTagQRActivation (linje ~1824)
+─────────────────────────────────────────────────────
+Slett blokken.
+
+Opprett SmartTagQRActivation som ALIAS for SmartTagActivation.
+(Å aktivere QR på Smart Tag er ikke en egen operasjon –
+det er steg 1 i standard Smart Tag-aktivering.)
+
+Bruk samme alias-struktur som eksisterende aliaser i systemet.
+
+─────────────────────────────────────────────────────
+FIX D – SmartTagSound (linje ~1860)
+─────────────────────────────────────────────────────
+Slett blokken. Oppdater DB-entry (nåværende svar er for
+kort og sier feil at alarmen aktiveres via «DyreID-appen»):
+
+combined_response:
+"**Slik spiller du av lyd på Smart Tag:**
+
+- **iPhone:** Åpne «Hvor er» → velg Smart Tag
+  → trykk «Spill av lyd»
+- **Android:** Åpne «Finn enheten min» → velg taggen
+  → trykk «Spill av lyd»
+
+Alarmen varer i **10 sekunder** og er **60–80 dB**.
+
+Hører du en lyd fra taggen uten at du selv utløste den?
+Det kan skyldes at noen i nærheten har aktivert den fra
+sin sporingsapp, eller at batteriet er lavt (CR2032)."
+
+help_center_article_url:
+https://www.dyreid.no/smarttag
+
+══════════════════════════════════════════════════════
+ETTER ALLE ENDRINGER – RAPPORT:
+══════════════════════════════════════════════════════
+1. Antall hardkodede blokker slettet (skal være 8)
+2. B

@@ -1,0 +1,187 @@
+PROMPT: Korriger 8 playbook-entries – feil action_type og feil/manglende innhold
+
+BAKGRUNN:
+Disse 8 intentene hadde hardkodede blokker i chatbot.ts
+som nå er slettet. DB-svarene brukes direkte, men flere
+har feil action_type og/eller for kort/feil innhold.
+
+Kilde for alle svar: dyreid.no/hjelpesenter (verifisert)
+
+═══════════════════════════════════════════════════════
+FIX 1 – ForeignRegistration
+═══════════════════════════════════════════════════════
+Nåværende action_type: API_CALL  ← FEIL, trigger login
+Riktig action_type: INFO_ONLY
+
+Oppdater combined_response:
+"Har kjæledyret ditt et ID-nummer som ikke begynner
+med 578 (norsk landkode), er det ID-merket i utlandet
+og må registreres i Norge. ID-brikker som ikke er 
+forhåndsregistrert i DyreID kan begynne med 578, men
+behandles som utlandsregistrering/etterregistrering. 
+
+**Slik gjør du det:**
+1. Ta med dyret til en veterinær eller klinikk
+2. Veterinæren leser av chipnummeret og registrerer
+   dyret i DyreIDs register via journalsystemet
+3. Du mottar SMS og/eller e-post med betalingslenke
+4. Dyret er søkbart i registeret når betaling er mottatt
+
+Merk: Du trenger ikke sette inn ny chip."
+
+help_center_article_url:
+https://www.dyreid.no/hjelp-utenlandsregistrering/33-hvordan-fa-dyret-registrert-i-norge
+
+═══════════════════════════════════════════════════════
+FIX 2 – ForeignRegistrationCost
+═══════════════════════════════════════════════════════
+action_type: INFO_ONLY  ← OK, beholdes
+
+Oppdater combined_response (utvid):
+"Å registrere et dyr med utenlandsk chip i Norge
+koster {{PRICE:utenlandsregistrering}}.
+
+Registrering gjøres hos veterinær – veterinæren leser
+av chip og registrerer dyret i DyreIDs register.
+Du mottar betalingslenke på SMS/e-post etterpå.
+
+Har du utenlandsk hund med stamtavle?
+Kontakt Norsk Kennel Klub (NKK) – de har egne priser
+og prosedyrer for NKK-registrerte hunder."
+
+═══════════════════════════════════════════════════════
+FIX 3 – NKKOwnership
+═══════════════════════════════════════════════════════
+action_type: INFO_ONLY  ← OK
+
+Oppdater combined_response:
+"Eierskifte av NKK-registrert hund håndteres direkte
+av Norsk Kennel Klub (NKK) – ikke av DyreID.
+
+**To måter å gjennomføre eierskiftet:**
+- Elektronisk via «Min side» på nkk.no
+- Send NKKs eierskifteskjema per post til NKK
+
+Eierskifte hos NKK har en egen kostnad (betales av ny eier).
+
+Når NKK har gjennomført eierskiftet, oppdateres
+DyreID automatisk. Du trenger ikke kontakte oss separat.
+
+Sender du eierskifteskjema til DyreID ved en feil,
+videresender vi det til NKK.
+
+Mer informasjon: www.nkk.no"
+
+help_center_article_url: beholdes som er
+
+═══════════════════════════════════════════════════════
+FIX 4 – NewRegistration
+═══════════════════════════════════════════════════════
+Nåværende action_type: API_CALL  ← FEIL, trigger login
+Riktig action_type: INFO_ONLY
+
+Oppdater combined_response:
+"Registrering av nytt dyr i DyreID gjøres hos veterinær.
+
+**Slik gjør du det:**
+1. Ta med kjæledyret til en veterinær
+2. Veterinæren setter inn en mikrochip (om dyret ikke
+   allerede har en)
+3. Veterinæren registrerer dyret i DyreID via
+   journalsystemet
+4. Du får tilgang til Min Side og kan administrere
+   dyrets profil
+
+**Pris:** {{PRICE:registrering_ny}} registreringsavgift til DyreID. 
+Veterinær vil ta betalt for jobben og eventuelt selve ID-chippen"
+
+═══════════════════════════════════════════════════════
+FIX 5 – LostFoundInfo
+═══════════════════════════════════════════════════════
+action_type: INFO_ONLY  ← OK
+
+Oppdater combined_response (fyll ut fullstendig):
+"Savnet & Funnet er fullintegrert med DyreIDs
+ID-database.
+
+**Slik melder du dyret savnet:**
+Logg inn på Min Side → rapporter dyret som savnet.
+All informasjon om deg og dyret er forhåndsutfylt.
+Du velger selv om ID-nummer skal vises i annonsen.
+
+**Slik melder du et funnet dyr:**
+Rapporter via Savnet & Funnet-tjenesten.
+DyreID formidler kontakt mellom finner og eier –
+din kontaktinfo deles ikke direkte.
+
+**Jeg kan hjelpe deg her i chatten:**
+- Meld ditt dyr savnet (krever innlogging)
+- Meld et funnet dyr"
+
+suggestions:
+- { label: 'Meld savnet', action: 'SELECT_PET',
+    data: { intent: 'ReportLostPet' } }
+- { label: 'Meld funnet', action: 'SELECT_PET',
+    data: { intent: 'ReportFoundPet' } }
+
+═══════════════════════════════════════════════════════
+FIX 6 – SearchableMisuse
+═══════════════════════════════════════════════════════
+action_type: INFO_ONLY  ← OK
+
+Oppdater combined_response:
+"Søkbar på 1-2-3 er utformet slik at informasjonen
+alltid formidles gjennom DyreID.
+
+**Slik er tjenesten beskyttet mot misbruk:**
+- Kontakt mellom finner og eier skjer via DyreID –
+  eierens direkte kontaktinfo deles ikke
+- Brukere må ha en profil hos DyreID for å benytte
+  formidlingstjenesten
+- Dyreeiere kan selv velge om ID-nummer skal vises
+
+Mistenker du misbruk? Kontakt oss på support@dyreid.no"
+
+═══════════════════════════════════════════════════════
+FIX 7 – FamilySharingPermissions
+═══════════════════════════════════════════════════════
+action_type: INFO_ONLY  ← OK
+
+Oppdater combined_response:
+"Familiemedlemmer du deler tilgang med kan se
+informasjon om kjæledyret ditt og få tilgang til
+artikler, nyttig informasjon og helsedata i appen.
+
+**Kun registrert eier kan:**
+- Gjøre endringer på kjæledyrets informasjon
+- Starte eller godkjenne eierskifte
+- Melde dyr savnet eller funnet
+
+Familiemedlemmer har kun lesetilgang."
+
+═══════════════════════════════════════════════════════
+FIX 8 – FamilySharingRequirement
+═══════════════════════════════════════════════════════
+action_type: INFO_ONLY  ← OK
+
+Oppdater combined_response:
+"For å bruke familiedeling i DyreID-appen trenger
+du et **DyreID+**-abonnement.
+
+Med DyreID+ kan du dele tilgang til kjæledyrets
+informasjon med andre familiemedlemmer. Hele familien
+får oversikt over kjæledyrets behov og helse.
+
+Pris: {{PRICE:dyreid_pluss_aar}}/år eller
+{{PRICE:dyreid_pluss_maaned}}/mnd"
+
+═══════════════════════════════════════════════════════
+ETTER ALLE FIX – RAPPORT:
+═══════════════════════════════════════════════════════
+1. Hvilke action_type-felter ble endret?
+2. Test: "Hvordan registrere hund fra utlandet?"
+   → Skal IKKE vise innloggingsknapp lenger
+3. Test: "Registrere nytt dyr"
+   → Skal IKKE vise innloggingsknapp
+4. Bekreft alle 8 entries oppdatert i DB
+5. Regenerer embeddings for endrede entries

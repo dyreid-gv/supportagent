@@ -1,0 +1,79 @@
+PROMPT: Før Playbook Builder – rydd opp norske intent-navn
+
+PROBLEM:
+Intent-klassifiseringen har brukt norske kategori-navn
+som intent-navn på mange tickets:
+  Eierskifte → OwnershipTransferWeb / OwnershipTransferApp
+  DyreID-appen → AppAccess / LoginProblem
+  Min side → (avhenger av kontekst)
+  ID-søk → ChipLookup / WrongOwner
+  Utenlandsregistrering → ForeignRegistration
+  QR-brikke → QRTagActivation / QRTagLost
+
+Dette er årsaken til 480 review-kø-items og 75.1% coverage.
+
+══════════════════════════════════════════════════════
+STEG 1 – Legg til i INTENT_ALIASES
+══════════════════════════════════════════════════════
+
+Eierskifte → OwnershipTransferWeb
+DyreID-appen → AppAccess
+Min-side → LoginProblem
+ID-søk → ChipLookup
+Utenlandsregistrering → ForeignRegistration
+QR-brikke → QRTagActivation
+FamilySharingExisting → FamilySharing
+ForeignRegistration_FollowUp → ForeignRegistration
+GeneralInquiry_InternalTest → [slett fra kø]
+RoutingIssue → [slett fra kø]
+WrongOwnerOnIDSearch → WrongOwner
+
+══════════════════════════════════════════════════════
+STEG 2 – Bulk-reklassifiser intent_classifications
+══════════════════════════════════════════════════════
+
+UPDATE intent_classifications
+SET intent = '[kanonisk]', manually_reviewed = true
+WHERE intent = '[norsk variant]'
+AND ticket_id IN (SELECT id FROM scrubbed_tickets
+                  WHERE created_at >= '2025-01-01');
+
+Kjør for alle mappingene over.
+
+══════════════════════════════════════════════════════
+STEG 3 – Legg til 3 nye canonical intents
+══════════════════════════════════════════════════════
+
+SmartTagBattery (14 tickets):
+  action_type: INFO_ONLY
+  combined_response: [skriv – bekreft med DyreID:
+  er batteriet i Smart Tag utbyttbart?]
+
+AppLanguage (10 tickets):
+  action_type: INFO_ONLY
+  combined_response: [skriv – hvordan bytte språk
+  i DyreID-appen]
+
+QRTagReplacement (7 tickets):
+  action_type: PURESERVICE_CREATE
+  combined_response: [skriv – QR-brikke er skadet
+  eller mistet, bestill ny]
+
+══════════════════════════════════════════════════════
+STEG 4 – Kjør Playbook Builder
+══════════════════════════════════════════════════════
+
+ETTER reklassifisering og nye aliases er på plass.
+Kall /api/training/generate-playbook
+
+══════════════════════════════════════════════════════
+RAPPORT:
+══════════════════════════════════════════════════════
+1. Antall reklassifisert via bulk-UPDATE
+2. Antall aliases lagt til (total INTENT_ALIASES)
+3. Review-kø: ny pending-telling etter reklassifisering
+   (forventet: under 80, ned fra 480)
+4. Oppdatert coverage % etter reklassifisering
+5. Bekreft SmartTagBattery, AppLanguage, QRTagReplacement
+   opprettet med combined_response
+6. Antall playbook candidates generert av Builder

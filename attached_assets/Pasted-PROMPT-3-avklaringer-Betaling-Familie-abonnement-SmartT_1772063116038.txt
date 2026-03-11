@@ -1,0 +1,115 @@
+PROMPT: 3 avklaringer – Betaling, Familie-abonnement, SmartTagNotifications
+
+══════════════════════════════════════════════════════
+FIX 1 – BillingInquiry: oppdater combined_response
+══════════════════════════════════════════════════════
+
+Oppdater combined_response (beholder PURESERVICE_CREATE):
+"Betalingsspørsmål håndteres av vårt support-team –
+det finnes ikke selvbetjening for faktura eller
+betalingshistorikk i DyreID.
+
+Vi hjelper deg med:
+- Bekreftelse på betalingsmetode
+- Informasjon om neste trekk
+- Kopi av kvittering
+- AvtaleGiro-spørsmål
+- Uventede trekk eller feil beløp
+
+Fortell oss hva du lurer på, så slår vi opp
+saken din:"
+
+══════════════════════════════════════════════════════
+FIX 2 – Familie-abonnement: korriger feilkoblingen
+══════════════════════════════════════════════════════
+
+BAKGRUNN:
+Playbook Builder koblet «Familie-abonnement» feil.
+Fakta:
+- «Familie» i DyreID = FamilySharing (deling av
+  tilgang, allerede dekket av FamilySharing-intenten)
+- Smart Tag: maks 3 brikker på samme abonnement
+  (dekkes av SubscriptionAddPet-flyten i koden)
+- Det finnes ikke et eget «Familie-abonnement»-produkt
+
+HANDLING:
+1. Legg til i INTENT_ALIASES:
+   FamilySubscription → FamilySharing
+   FamilyPlan → FamilySharing
+   AddPetsFamily → SubscriptionAddPet
+
+2. Hvis det finnes playbook_entries med intent
+   «FamilySubscription», «FamilyPlan» eller innhold
+   som nevner «5 dyr» eller «Familie-abonnement»
+   som eget produkt → slett eller deaktiver.
+
+3. Reklassifiser de 10 ticketene:
+   - Tickets om dele tilgang med familie
+     → FamilySharing
+   - Tickets om legge til dyr på Smart Tag-abonnement
+     → SubscriptionAddPet
+
+══════════════════════════════════════════════════════
+FIX 3 – SmartTagNotifications: oppdater combined_response
+══════════════════════════════════════════════════════
+
+BAKGRUNN:
+16 tickets spør om geofence/sone-varsler.
+DyreID hadde tidligere «Mitt Spor» (GPS-tracker med
+geofencing) som er avviklet. Smart Tag har ikke
+geofencing, men «Hvor er»-appen har en
+separasjonsvarsel-funksjon som delvis kan dekke behovet.
+
+Oppdater combined_response for SmartTagNotifications:
+
+"Smart Tag støtter ikke geofencing slik det
+tidligere produktet Mitt Spor hadde.
+Smart Tag viser siste kjente posisjon via
+Apple «Hvor er» (iPhone) eller
+«Finn enheten min» (Android).
+
+**Varsel om separasjon (iPhone – «Hvor er»):**
+«Hvor er» kan i noen tilfeller varsle deg hvis
+taggen fjerner seg fra deg:
+Åpne «Hvor er» → Objekter → velg Smart Tag →
+Varsle når etterlatt → slå på
+
+OBS: Sett IKKE hjemstedet som klarert sted hvis
+du vil varsles når dyret forlater hjemmet – men
+da kan du også få varsler mens dyret beveger seg
+inne. Funksjonen er ikke designet som geofencing,
+men kan fungere som et primitivt alternativ.
+
+Se dyreid.no/smarttag for fullstendig oversikt
+over Smart Tag-funksjonalitet."
+
+help_center_article_url:
+https://www.dyreid.no/smarttag
+
+LEGG TIL i INTENT_ALIASES:
+MittSporGeofence → SmartTagNotifications
+GeofenceAlert → SmartTagNotifications
+SoneVarsel → SmartTagNotifications
+
+══════════════════════════════════════════════════════
+RAPPORT:
+══════════════════════════════════════════════════════
+1. BillingInquiry combined_response oppdatert
+2. Familie-feilkobling rettet, 3 aliaser lagt til,
+   10 tickets reklassifisert
+3. SmartTagNotifications oppdatert med Mitt Spor-info
+   og separasjonsvarsel-forklaring
+4. Bekreft ingen entries har «5 dyr» eller
+   «Familie-abonnement» som eget produkt
+5. Test:
+   "Har ikke mottatt faktura" → BillingInquiry
+     → tydelig at support hjelper, ingen selvbetjening
+   "Familieabonnement for hund og katt"
+     → alias → FamilySharing eller SubscriptionAddPet
+   "Sone-varsel på Smart Tag" → SmartTagNotifications
+     → Mitt Spor nevnt, separasjonsvarsel forklart
+6. Regenerer embeddings for endrede entries
+7. Reklassifiser de 26 berørte tickets i
+   intent_classifications
+8. Kjør Playbook Builder etter reklassifisering
+9. Oppdatert reell dekning og antall aktive entries

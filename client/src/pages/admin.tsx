@@ -103,12 +103,12 @@ const TABLE_LABELS: Record<string, string> = {
   hjelpesenter_categories: "Hjelpesenter-kategorier (kodeverk)",
   category_mappings: "Kategorimappinger",
   intent_classifications: "Intent-klassifiseringer",
-  resolution_patterns: "Losningsmonstre",
+  resolution_patterns: "Løsningsmønstre",
   playbook_entries: "Playbook-oppslag",
   uncategorized_themes: "Ukategoriserte temaer",
   uncertainty_cases: "Usikkerhetssaker",
-  review_queue: "Review-ko",
-  training_runs: "Treningskjoringer",
+  review_queue: "Review-kø",
+  training_runs: "Treningskjøringer",
 };
 
 function downloadFile(url: string, filename: string) {
@@ -260,19 +260,19 @@ function CandidateEditor({
             />
           </div>
           <div>
-            <Label htmlFor="resolutionSteps">Losningssteg (valgfritt)</Label>
+            <Label htmlFor="resolutionSteps">Løsningssteg (valgfritt)</Label>
             <Textarea
               id="resolutionSteps"
               value={form.resolutionSteps}
               onChange={(e) => setForm({ ...form, resolutionSteps: e.target.value })}
               rows={4}
-              placeholder="Steg-for-steg losning..."
+              placeholder="Steg-for-steg løsning..."
               disabled={!isEditable}
               data-testid="textarea-resolution-steps"
             />
           </div>
           <div>
-            <Label htmlFor="keywords">Nokkelord (kommaseparert)</Label>
+            <Label htmlFor="keywords">Nøkkelord (kommaseparert)</Label>
             <Input
               id="keywords"
               value={form.keywords}
@@ -518,7 +518,7 @@ function ManualAuthoringSection() {
           <CardContent className="py-8 text-center">
             <PenTool className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
             <p className="text-sm text-muted-foreground">
-              Ingen kandidater enna. Klikk "Seed initielle kandidater" for a opprette SmartTagBatteryInfo og SmartTagNotificationIssue.
+              Ingen kandidater ennå. Klikk "Seed initielle kandidater" for å opprette SmartTagBatteryInfo og SmartTagNotificationIssue.
             </p>
           </CardContent>
         </Card>

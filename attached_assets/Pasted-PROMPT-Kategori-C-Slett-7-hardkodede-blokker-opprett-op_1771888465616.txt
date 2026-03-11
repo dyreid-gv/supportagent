@@ -1,0 +1,212 @@
+PROMPT: Kategori C – Slett 7 hardkodede blokker + opprett/oppdater DB
+
+BAKGRUNN:
+7 intenter har hardkodede blokker i chatbot.ts som må fjernes.
+For disse må DB-entries opprettes eller oppdateres før blokkene slettes.
+
+══════════════════════════════════════════════════════
+DEL 1 – SLETT + OPPDATER DB (intent finnes, combined_response er null)
+══════════════════════════════════════════════════════
+
+─────────────────────────────────────────────────────
+FIX 1 – OwnershipTransferApp (linje ~1905)
+─────────────────────────────────────────────────────
+Slett blokken.
+
+action_type: INFO_ONLY (ikke API_CALL – appen håndterer dette)
+
+combined_response:
+"Du kan gjennomføre eierskifte direkte i DyreID-appen:
+
+1. Logg inn i appen
+2. Velg dyret du vil overføre
+3. Trykk **Eierskifte**
+4. Søk opp ny eier (automatsik søk på telefonnummer). 
+Hvis ny eier har reservert seg må du fylle inn alle data
+5. Betalingslink opprettes automatisk og sendes
+6. Eierskiftet er fullført ved betaling
+
+**Pris:** {{PRICE:eierskifte}} (belastes selger)
+
+Vil du heller gjøre eierskiftet her i chatten?"
+
+suggestions:
+- { label: "Gjør eierskifte her i chatten",
+    action: "SELECT_PET",
+    data: { intent: "OwnershipTransferWeb" } }
+
+help_center_article_url:
+https://www.dyreid.no/hjelp-eierskifte/32-hvordan-foreta-eierskifte-av-et-kjaeledyr
+
+─────────────────────────────────────────────────────
+FIX 2 – GDPRDelete (linje ~1937)
+─────────────────────────────────────────────────────
+Slett blokken.
+
+action_type: PURESERVICE_CREATE
+(Sletting av personopplysninger er manuell sak, ikke e-post)
+
+Legg til i PURESERVICE_CREATE_CONFIGS:
+  GDPRDelete: {
+    fields: [
+      { key: "navn", label: "Ditt fulle navn" },
+      { key: "telefon", label: "Telefonnummer registrert i DyreID" },
+      { key: "e-post", label: "E-postadresse registrert i DyreID" },
+    ],
+    category1: "Min side",
+    category2: "GDPR – Sletting",
+    note: "Kunden bekrefter sletting ved å oppgi disse opplysningene",
+  }
+
+combined_response:
+"Du har rett til å be om sletting av dine personopplysninger
+i henhold til GDPR.
+
+**Viktig å vite før du sletter:**
+- Alle dine personopplysninger fjernes fra DyreID
+- Dyrene dine avregistreres fra din profil
+- Chipregistreringen på dyrene forblir aktiv, men uten eier
+- Denne handlingen kan ikke angres
+- Behandlingstid: normalt 30 dager
+
+For å opprette slettesak trenger jeg noen opplysninger."
+
+requiresLogin: false
+
+─────────────────────────────────────────────────────
+FIX 3 – InactiveRegistration (linje ~1778)
+─────────────────────────────────────────────────────
+Slett blokken.
+
+action_type: INFO_ONLY
+
+combined_response:
+"Hvis et dyr ikke er søkbart i DyreID kan det skyldes:
+
+**Chipnummer starter med 578, men dyret finnes ikke?**
+Dette er sannsynligvis en uregistrert 578-brikke
+(ikke forhåndsbetalt hos DyreID). Se svar om
+utenlandsregistrering – samme prosess gjelder.
+
+**Chipnummer starter ikke med 578?**
+Dyret er ID-merket i utlandet og må etterregistreres
+i Norge via veterinær. Koster {{PRICE:utenlandsregistrering}}.
+
+**Usikker på chipnummeret?**
+Søk opp dyret direkte i DyreIDs register."
+
+suggestions:
+- { label: "Søk opp chipnummer",
+    action: "SELECT_PET",
+    data: { intent: "ChipLookup" } }
+- { label: "Registrere dyr fra utlandet",
+    action: "SUBTOPIC",
+    data: { intent: "ForeignRegistration" } }
+
+help_center_article_url:
+https://www.dyreid.no/hjelp-id-sok/22-kjaeledyret-mitt-er-ikke-sokbart
+
+══════════════════════════════════════════════════════
+DEL 2 – SLETT + OPPRETT DB (mangler i DB helt)
+══════════════════════════════════════════════════════
+
+─────────────────────────────────────────────────────
+FIX 4 – UnregisteredChip578 (linje ~1878)
+─────────────────────────────────────────────────────
+Slett blokken. Opprett DB-entry som ALIAS for ForeignRegistration.
+
+Rasjonale: En uregistrert 578-brikke er funksjonelt identisk
+med en utenlandsregistrering – samme prosess, samme pris,
+samme veterinærbesøk. Én sannhetskilde.
+
+─────────────────────────────────────────────────────
+FIX 5 – PetNotInSystem (linje ~1989)
+─────────────────────────────────────────────────────
+Slett blokken. Opprett DB-entry:
+
+action_type: INFO_ONLY
+
+combined_response:
+"Finner du ikke dyret ditt i DyreID kan det skyldes:
+
+1. **Ikke registrert** – Registrering gjøres hos veterinær
+2. **Utenlandsk chip** – Må etterregistreres ({{PRICE:utenlandsregistrering}})
+3. **Uregistrert 578-brikke** – Behandles som utenlandsregistrering
+4. **Feil chipnummer** – Sjekk at du har riktig nummer
+5. **Registrert på tidligere eier** – Krever eierskifte
+
+Har du chipnummeret? Jeg kan søke det opp for deg."
+
+suggestions:
+- { label: "Søk opp chipnummer",
+    action: "SELECT_PET",
+    data: { intent: "ChipLookup" } }
+- { label: "Registrere dyr fra utlandet",
+    action: "SUBTOPIC",
+    data: { intent: "ForeignRegistration" } }
+
+─────────────────────────────────────────────────────
+FIX 6 – FamilySharing (linje ~1965)
+─────────────────────────────────────────────────────
+Slett blokken. Opprett DB-entry:
+
+action_type: INFO_ONLY
+
+combined_response:
+"Med familiedeling kan du dele tilgang til kjæledyrets
+informasjon med andre familiemedlemmer i DyreID-appen.
+
+**Slik setter du opp familiedeling:**
+1. Åpne DyreID-appen
+2. Gå til kjæledyrets profil
+3. Trykk **Del tilgang**
+4. Søk opp familiemedlemmet på navn, telefon eller e-post
+5. Personen mottar invitasjon i appen
+
+**Krever DyreID+** ({{PRICE:dyreid_pluss_aar}}/år)
+
+Familiemedlemmer får lesetilgang – kun registrert eier
+kan gjøre endringer."
+
+help_center_article_url:
+https://www.dyreid.no/familiedeling/117-kan-jeg-bruke-familiedeling-med-noen-som-allerede-har-et-kjaeledyr
+
+─────────────────────────────────────────────────────
+FIX 7 – FamilySharingRequest (linje ~1973)
+─────────────────────────────────────────────────────
+Slett blokken. Opprett DB-entry:
+
+action_type: INFO_ONLY
+
+combined_response:
+"Har en familiedeling-forespørsel ikke blitt akseptert?
+
+Vanlige årsaker:
+- Personen har ikke sett invitasjonen – be dem sjekke
+  DyreID-appen under Varsler eller Innstillinger
+- Feil telefonnummer – dobbeltsjekk og send på nytt
+- Personen mangler DyreID-konto – de må registrere seg
+  i appen først
+- Invitasjonen er utløpt (14 dager) – send en ny
+
+Personen du inviterer trenger ikke ha et kjæledyr fra før."
+
+help_center_article_url:
+https://www.dyreid.no/familiedeling/117-kan-jeg-bruke-familiedeling-med-noen-som-allerede-har-et-kjaeledyr
+
+══════════════════════════════════════════════════════
+ETTER ALLE ENDRINGER – RAPPORT:
+══════════════════════════════════════════════════════
+1. Antall hardkodede blokker slettet (skal være 7)
+2. Bekreft GDPRDelete lagt til i PURESERVICE_CREATE_CONFIGS
+3. Bekreft UnregisteredChip578 er alias for ForeignRegistration
+4. Test:
+   "Slette profilen min GDPR" → PURESERVICE_CREATE flyt,
+     spør om navn/telefon/e-post (IKKE innlogging)
+   "Dyret mitt er ikke søkbart" → InactiveRegistration
+     med ChipLookup-knapp
+   "Deler tilgang med familie" → FamilySharing
+   "Forespørselen min ble ikke akseptert" → FamilySharingRequest
+   "Uregistrert 578-brikke" → alias → ForeignRegistration-svar
+5. Regenerer embeddings for alle endrede/nye entries
+6. Oppdatert dekning og antall aktive entries

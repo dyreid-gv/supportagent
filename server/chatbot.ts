@@ -55,6 +55,7 @@ interface PureserviceCreateConfig {
   category1: string;
   category2: string;
   note?: string;
+  confirmationText?: string;
 }
 
 const PURESERVICE_CREATE_CONFIGS: Record<string, PureserviceCreateConfig> = {
@@ -68,6 +69,7 @@ const PURESERVICE_CREATE_CONFIGS: Record<string, PureserviceCreateConfig> = {
     category1: "Min side",
     category2: "Betalingshistorikk",
     note: "E-post brukes til å slå opp dyr/abonnement – ikke spør om chipnummer",
+    confirmationText: "Behandlingstid er normalt 2–3 virkedager.",
   },
   MergeDuplicateRegistrations: {
     fields: [
@@ -130,15 +132,34 @@ const PURESERVICE_CREATE_CONFIGS: Record<string, PureserviceCreateConfig> = {
     category2: "Oppsigelse",
     note: "Kunden ønsker oppsigelse. Abonnementet skal sies opp og ikke fornyes etter endt periode.",
   },
-  SmartTagReassign: {
+  SmartTagTransferPet: {
     fields: [
-      { key: "navn", label: "Ditt fulle navn" },
       { key: "e-post", label: "E-postadresse" },
-      { key: "telefon", label: "Telefonnummer" },
+      { key: "chip-gammelt-dyr", label: "Chip-nr. gammelt dyr", hint: "Dyret brikken er koblet til i dag" },
+      { key: "chip-nytt-dyr", label: "Chip-nr. nytt dyr", hint: "Dyret brikken skal kobles til" },
     ],
     category1: "Smart Tag",
-    category2: "Flytte til annet dyr",
-    note: "Kunden ønsker å koble Smart Tag til et annet dyr. Trenger manuell behandling.",
+    category2: "Overføre Smart Tag til nytt dyr",
+  },
+  AddSmartTagPetToSubscription: {
+    fields: [
+      { key: "e-post", label: "E-postadresse", hint: "Knyttet til din DyreID-konto" },
+      { key: "antall-dyr", label: "Antall dyr totalt", hint: "Inkludert det/de du vil legge til" },
+      { key: "beskrivelse", label: "Beskriv ønsket endring", hint: "F.eks. har 1 hund fra før, vil legge til katt" },
+    ],
+    category1: "Smart Tag",
+    category2: "Ekstra dyr på abonnement",
+  },
+  GDPRDelete: {
+    fields: [
+      { key: "navn", label: "Ditt fulle navn" },
+      { key: "telefon", label: "Telefonnummer registrert i DyreID" },
+      { key: "e-post", label: "E-postadresse registrert i DyreID" },
+    ],
+    category1: "Min side",
+    category2: "GDPR – Sletting",
+    note: "Kunden bekrefter sletting ved å oppgi disse opplysningene",
+    confirmationText: "Behandlingstid er normalt 30 dager i henhold til GDPR-regelverket.",
   },
   GeneralInquiryBusiness: {
     fields: [
@@ -150,6 +171,25 @@ const PURESERVICE_CREATE_CONFIGS: Record<string, PureserviceCreateConfig> = {
     category1: "B2B_Inquiries",
     category2: "Forretningshenvendelse",
     note: "B2B/strategisk henvendelse – rutes til business@dyreid.no, ikke ordinær supportkø",
+  },
+  BillingInquiry: {
+    fields: [
+      { key: "e-post", label: "E-postadresse", hint: "Brukes til å slå opp kontoen din" },
+      { key: "beskrivelse", label: "Beskriv spørsmålet", hint: "F.eks. ukjent trekk, feil beløp, mangler kvittering" },
+    ],
+    category1: "Min side",
+    category2: "Betalingshistorikk",
+  },
+  OwnershipTransferDead: {
+    fields: [
+      { key: "navn", label: "Ditt fulle navn" },
+      { key: "adresse", label: "Adresse" },
+      { key: "telefon", label: "Telefonnummer" },
+      { key: "e-post", label: "E-postadresse" },
+    ],
+    category1: "Eierskifte",
+    category2: "Eierskifte ved dødsfall",
+    confirmationText: `Vi bekrefter å ha mottatt din henvendelse. For å gå videre trenger vi dokumentasjon. Vi har opprettet en sak for eierskifte etter tidligere eier – stemmer dette?\n\nSend følgende som svar på denne e-posten:\n• Dødsattest for tidligere eier\n• Dokumentasjon på ny eiers identitet (navn, adresse, telefonnummer og e-post er allerede registrert i saken)\n\nMed vennlig hilsen\nDyreID Support`,
   },
 };
 
@@ -223,7 +263,7 @@ const INTENT_PATTERNS: IntentQuickMatch[] = [
   { intent: "LoginIssue", regex: /logg.*inn|innlogg|login|passord|bankid.*(?:logg|inn)|hvordan.*komm.*inn|hjelp.*(?:med )?(?:å )?logg/i },
   { intent: "SMSEmailNotification", regex: /(?:hvorfor|har).*(?:fått|mottatt).*(?:sms|e-?post|melding)|(?:sms|e-?post).*(?:fra|varsel).*(?:dyreid|oss)|dyreid.*(?:sms|e-?post|sendte|kontaktet)|(?:fått|mottatt).*(?:sms|e-?post|melding|tekstmelding).*(?:dyreid|fra)/i },
   { intent: "ProfileVerification", regex: /har jeg.*(?:min side|profil|konto)|finnes.*(?:profil|konto)|eksisterer.*(?:konto|profil)|er jeg.*(?:registrert|i dyreid|i systemet)|har jeg en/i },
-  { intent: "AddContactInfo", regex: /legge til.*telefon|legge til.*e-?post|flere.*nummer|flere.*kontakt/i },
+  { intent: "AddContactInfo", regex: /legge til.*telefon|legge til.*e-?post|flere.*nummer|flere.*kontakt|omsorgsperson/i },
   { intent: "WrongInfo", regex: /feil informasjon|feil.*(?:opplysning|data|info)(?!.*eier)|korrigere|endre.*opplysning|feil.*navn|endre.*navn|rett.*opp|feil.*profil(?!.*eier)|oppdater.*(?:navn|info)|feilregistrert|dyrenavn.*feil|navn.*feil|endre.*rase|feil.*rase|endre.*kjønn|feil.*kjønn|endre.*fødsel|feil.*fødsel|informasjon.*stemmer.*ikke/i },
   { intent: "MissingPetProfile", regex: /mangler.*(?:dyr|kjæledyr|hund|katt)|(?:dyr|hund|katt|kjæledyr).*(?:vises ikke|borte|mangler|finnes ikke).*(?:min side|profil)|(?:et av|kjæledyret).*borte.*(?:fra|på)|(?:kjæledyr|dyr|hund|katt).*(?:finnes ikke|vises ikke).*min side/i },
   { intent: "OwnershipTransferDead", regex: /(?:eier|person).*(?:er )?død|dødsfall.*eier|arv.*(?:dyr|hund|katt)|(?:eierskift|overf[øo]r).*(?:død|dødsfall|avdød)|avdød.*(?:person|eier)|tilhørte.*avdød|gått bort|overta.*(?:dyr|hund|katt).*(?:eier.*)?(?:død|døde|gått bort)|(?:eierskift|overf[øo]r).*(?:etter|når).*(?:død|gått bort)/i },
@@ -240,14 +280,16 @@ const INTENT_PATTERNS: IntentQuickMatch[] = [
 
   // ── Smart Tag ───────────────────────────────────────────
   { intent: "SmartTagQRActivation", regex: /qr.*smart.?tag|smart.?tag.*qr|aktivere.*qr.*tag|qr.?kode.*smart/i },
-  { intent: "SmartTagActivation", regex: /aktivere.*smart.?tag|smart.?tag.*(?:aktivere|setup|oppsett)|sette opp.*smart|komme i gang.*smart|(?:bruke|starte|ta i bruk).*smart.?tag|smart.?tag.*(?:kom i gang)/i },
+  { intent: "SmartTagNotifications", regex: /(?:smart.?tag|tag).*(?:varsl|notifik|push|melding)|(?:varsl|notifik|push|melding).*(?:smart.?tag|tag)|(?:rare|ukjente?).*(?:varsl|melding).*(?:smart|tag|sporing|brikke)|(?:sette opp|skru av|slå av).*varsl.*(?:smart|tag)|(?:smart|tag).*(?:sette opp|skru av|slå av).*varsl|personvern.*varsling.*tag|uønsket.*sporing|sette opp.*varsle?r?.*smart/i },
+  { intent: "SmartTagActivation", regex: /aktivere.*smart.?tag|smart.?tag.*(?:aktivere|setup|oppsett)|sette opp.*smart(?!.*varsl)|komme i gang.*smart|(?:bruke|starte|ta i bruk).*smart.?tag|smart.?tag.*(?:kom i gang)/i },
   { intent: "SmartTagMultiple", regex: /flere.*(?:smart\s*)?tag|bare.*(?:en|én).*(?:tag|kobl)|smart.?tag.*flere|koblet til én|koble.*flere|(?:to|tre|nummer to|nummer 2|andre).*smart.?tag|smart.?tag.*nummer|(?:kan ikke|får ikke).*koble.*(?:til )?flere/i },
   { intent: "SmartTagConnection", regex: /koble.*smart.?tag|smart.?tag.*kobl|bluetooth.*(?:tag|smart)|(?:kan ikke|får ikke).*koble|legge til.*smart|smart.?tag.*(?:pairing|tilkobling|bluetooth)|tilkobling.*smart/i },
   { intent: "SmartTagMissing", regex: /(?:finner ikke|forsvunnet|borte|vises ikke|mistet).*smart.?tag|smart.?tag.*(?:forsvunnet|borte|vises ikke|forsvant)/i },
   { intent: "SmartTagPosition", regex: /(?:posisjon|lokasjon|plassering|gps|sporing).*(?:smart.?tag|oppdater)|smart.?tag.*(?:posisjon|lokasjon|plassering|gps|sporing)/i },
   { intent: "SmartTagBatteryInfo", regex: /(?:smart.?tag|tag).*(?:batter|cr2032|strøm|lad)|(?:batter|cr2032|strøm|lad).*(?:smart.?tag|tag)|bytte.*batter.*(?:smart|tag)|(?:smart|tag).*bytte.*batter|hvor lenge.*(?:smart|tag).*(?:varer|holder)/i },
   { intent: "SmartTagSound", regex: /(?:smart.?tag|tag).*(?:lyd|piper?|bråk|alarm|ringer|lager lyd)|(?:lyd|piper?|bråk).*(?:smart.?tag|tag)/i },
-  { intent: "SmartTagReassign", regex: /(?:smart.?tag|tag).*(?:annet dyr|ny (?:hund|katt|valp)|flytte|gjenbruk|bytte dyr)|(?:flytte|gjenbruk|bytte).*(?:smart.?tag|tag)|koble.*(?:smart.?tag|tag).*(?:annet|ny)|(?:annet dyr|ny (?:hund|katt|valp)).*(?:smart.?tag|tag)/i },
+  { intent: "SmartTagTransferPet", regex: /(?:smart.?tag|tag).*(?:annet dyr|ny (?:hund|katt|valp)|flytte|gjenbruk|bytte dyr|overføre)|(?:flytte|gjenbruk|bytte|overføre).*(?:smart.?tag|tag)|koble.*(?:smart.?tag|tag).*(?:annet|ny)|(?:annet dyr|ny (?:hund|katt|valp)).*(?:smart.?tag|tag)/i },
+  { intent: "SmartTagNotifications", regex: /(?:smart.?tag|tag).*(?:varsl|notifik|push|melding)|(?:varsl|notifik|push|melding).*(?:smart.?tag|tag)|(?:rare|ukjente?).*(?:varsl|melding).*(?:smart|tag|sporing|brikke)|(?:sette opp|skru av|slå av).*varsl.*(?:smart|tag)|(?:smart|tag).*(?:sette opp|skru av|slå av).*varsl|personvern.*varsling.*tag|uønsket.*sporing/i },
 
   // ── QR-brikke (specific subtypes BEFORE general) ────────
   { intent: "QRPremiumInfo", regex: /qr.*premium|premium.*qr|basis.*(?:vs|eller).*premium|oppgrader.*qr|sms.*varsling.*qr|geolokasjon.*qr/i },
@@ -286,6 +328,7 @@ const INTENT_PATTERNS: IntentQuickMatch[] = [
   { intent: "FamilySharingExisting", regex: /familiedeling.*eksisterende|deling.*allerede.*kjæledyr/i },
 
   // ── Chip-oppslag / Feil eier / Registrering ──────────────
+  { intent: "DuplicateRegistration", regex: /(?:duplikat|dobbel|to).*(?:profil|registrering)|(?:registrert|profil).*(?:to ganger|dobbelt)|(?:to|2).*(?:profiler|registrering).*(?:samme|dyr|hund|katt)|slå sammen.*(?:registrering|profil)|(?:hund|katt|dyr).*(?:registrert|profil).*(?:to|flere|dobbelt)/i },
   { intent: "WrongOwner", regex: /(?:feil|gal|annen).*(?:eier|person).*(?:registrert|står)|registrert.*(?:på|hos).*(?:feil|gal|annen)|(?:dyr|hund|katt).*(?:på|tilhører|står på).*(?:feil|gal|annen|noen andre)|feil.*eier|(?:eier|eierskap).*feil/i },
   { intent: "PetNotInSystem", regex: /finnes ikke.*(?:system|register)|(?:dyr|hund|katt).*(?:finnes|dukker|er).*ikke|finner ikke.*(?:dyr|hund|katt)|ikke (?:i )?(?:registeret|systemet)|mangler.*register|(?:hund|katt|dyr).*ikke registrert/i },
   { intent: "ChipLookup", regex: /chip.?(?:nummer|søk|sjekk|oppslag|registrering)|søke?.*(?:opp )?chip|finne.*(?:eier.*chip|dyr.*chip)|(?:slå|søke?).*opp.*(?:chip|id)|id.?(?:nummer|søk).*(?:søk|oppslag)|(?:hvem|finne).*eier.*chip|fant.*(?:en|et).*(?:katt|hund|dyr).*chip/i },
@@ -295,9 +338,63 @@ const INTENT_PATTERNS: IntentQuickMatch[] = [
   { intent: "CancelSubscription", regex: /(?:si opp|avslutte|kansellere?|stoppe|ikke fornye?).*abonnement|abonnement.*(?:si opp|avslutte|kansellere?|stopp|oppsigelse)|oppsigelse.*abonnement|si opp.*(?:dyreID\+|dyreID pluss)/i },
   { intent: "SubscriptionAddPet", regex: /(?:legge til|flere|utvide|ekstra).*(?:dyr|kjæledyr|katt|hund).*(?:abonnement|samme)|(?:abonnement|samme).*(?:flere|legge til).*(?:dyr|kjæledyr)|(?:tre|to|inntil).*dyr.*(?:abonnement|samme)|kan.*(?:jeg )?ha.*flere.*(?:katt|hund|dyr)/i },
 
+  // ── Betaling ───────────────────────────────────────────
+  { intent: "BillingInquiry", regex: /(?:ukjent|feil|uventet|rart).*(?:trekk|belast|betal|faktura)|(?:trekk|belast|betal).*(?:ukjent|feil|uventet)|mangler.*(?:kvittering|faktura)|(?:kvittering|faktura).*(?:mangler|ikke mottatt)|betalingshistorikk|sjekke.*(?:betal|trekk|faktura)|hva (?:er|ble).*(?:trukket|belastet)/i },
+  { intent: "DoubleChargeRefund", regex: /(?:dobbelt?|to ganger).*(?:betalt|trukket|belastet|trekk)|(?:betalt|trukket|belastet).*(?:dobbelt?|to ganger)|dobbeltbetaling|dobbeltrekk/i },
+
   // ── Generell ────────────────────────────────────────────
   { intent: "GeneralInquiryBusiness", regex: /samarbeid|partnerskap|api.?tilgang|forskning.*dyreid|integrasjon.*dyreid|forhandler|white.?label|presse.*dyreid|media.*henvendelse|registerdata|pyramidion|kjæledyrstatistikk|vi ønsker å samarbeide/i },
 ];
+
+const INTENT_ALIASES: Record<string, string> = {
+  DuplicateRegistration: "MergeDuplicateRegistrations",
+  DoubleChargeRefund: "RefundRequest",
+  AddPetsToSubscription: "AddSmartTagPetToSubscription",
+  AddPetToSubscription: "AddSmartTagPetToSubscription",
+  AddAnimalsToSubscription: "AddSmartTagPetToSubscription",
+  AddPetsFamily: "AddSmartTagPetToSubscription",
+  SmartTagNotificationSetup: "SmartTagNotifications",
+  SmartTagNotificationIssue: "SmartTagNotifications",
+  MittSporGeofence: "SmartTagNotifications",
+  GeofenceAlert: "SmartTagNotifications",
+  SoneVarsel: "SmartTagNotifications",
+  SmartTagBattery: "SmartTagBatteryInfo",
+  SmartTagReassign: "SmartTagTransferPet",
+  QRTagReassign: "SmartTagTransferPet",
+  QRTagDamaged: "QRTagOrderExtra",
+  QRTagOrder: "QRTagOrderExtra",
+  QRTagReplacement: "QRTagOrderExtra",
+  SubscriptionChange: "SubscriptionUpgrade",
+  UpgradeSubscription: "SubscriptionUpgrade",
+  PremiumUpgrade: "SubscriptionUpgrade",
+  AppLanguage: "AppLanguageSettings",
+  AppLanguageChange: "AppLanguageSettings",
+  NonSupportedSpecies: "NonSupportedSpeciesHelp",
+  FoundBirdWithRing: "NonSupportedSpeciesHelp",
+  UnsupportedSpecies: "NonSupportedSpeciesHelp",
+  PasswordReset: "LoginProblem",
+  ForeignRegistration_FollowUp: "ForeignRegistrationProcess",
+  CheckPaymentMethod: "BillingInquiry",
+  PaymentInquiry: "BillingInquiry",
+  PaymentMethodInquiry: "BillingInquiry",
+  InvoiceQuery: "BillingInquiry",
+  InvoiceNotReceived: "BillingInquiry",
+  InvoiceQuery_AvtaleGiro: "BillingInquiry",
+  SubscriptionCoverage: "SubscriptionManagement",
+  SubscriptionBilling: "SubscriptionManagement",
+  TwoFactorInfo: "TwoFactorAuth",
+  TwoFactorAuthQuestion: "TwoFactorAuth",
+  TwoFactorQuery: "TwoFactorAuth",
+  TwoFactorAuthInfo: "TwoFactorAuth",
+  GeneralInquiry: "GeneralInquiryPersonal",
+  GeneralInquiry_InternalTest: "GeneralInquiryPersonal",
+  FamilySubscription: "FamilySharing",
+  FamilyPlan: "FamilySharing",
+};
+
+function resolveIntentAlias(intent: string): string {
+  return INTENT_ALIASES[intent] || intent;
+}
 
 interface CategorySubtopic {
   label: string;
@@ -868,13 +965,6 @@ async function executePlaybookAction(
     };
   }
 
-  if (intent === "QRTagActivation" || intent === "ActivateQRTag") {
-    return {
-      text: "QR-brikken aktiveres i **DyreID-appen**, ikke via Min Side.\n\nSlik aktiverer du brikken:\n\n1. Åpne DyreID-appen\n2. Klikk på QR-brikke-ikonet på forsiden eller under Meny\n3. Skann QR-koden på brikken\n4. Skriv inn telefonnummeret ditt\n5. Skriv inn chipnummer på kjæledyret\n6. Kryss av for kontaktdata som skal vises ved skanning\n7. Husk å aktivere pushvarsel i appen\n\nHar du problemer med å skanne koden i appen? Prøv å skanne den med kameraet på mobilen i stedet.",
-      requestFeedback: true,
-      model: "action-qr-app-redirect",
-    };
-  }
 
   if (intent === "SubscriptionManagement" || intent === "RenewSubscription") {
     const tagId = collectedData.tagId;
@@ -1517,14 +1607,16 @@ function handleDirectIntent(
     };
   }
 
-  if (intent === "SmartTagReassign") {
+  if (intent === "SmartTagTransferPet") {
     session.pureserviceCreateFlow = "collecting";
-    session.pureserviceCreateIntent = "SmartTagReassign";
-    session.pureserviceCreateFieldIndex = 1;
+    session.pureserviceCreateIntent = "SmartTagTransferPet";
+    session.pureserviceCreateFieldIndex = 0;
     session.collectedData = {};
+    const config = PURESERVICE_CREATE_CONFIGS["SmartTagTransferPet"];
+    const firstField = config.fields[0];
     return {
-      text: "Per i dag kan ikke dette gjøres selv i appen – vi hjelper deg med dette.\n\nKan du oppgi navn, e-postadresse og telefonnummer?\n\n**Ditt fulle navn:**",
-      model: "direct-smart-tag-reassign-start",
+      text: `Smart Tag overføres til nytt dyr av vårt team.\n\nVi trenger chip-nummer på begge dyrene for å gjennomføre overføringen.\n\n**${firstField.label}:**${firstField.hint ? ` _(${firstField.hint})_` : ""}`,
+      model: "direct-smart-tag-transfer-start",
     };
   }
 
@@ -1772,236 +1864,6 @@ function handleDirectIntent(
       model: "direct-missingpet-info",
       requestFeedback: true,
       pets: animals.length > 0 ? animals.filter((a: any) => a.status === "active").map((a: any) => formatPetForMetadata(a, "sandbox")) : minSidePets,
-    };
-  }
-
-  if (intent === "InactiveRegistration") {
-    return {
-      text: "Hvis kjæledyret ditt ikke er søkbart i DyreID, kan det skyldes:\n\n1. **Registreringen er ikke betalt** - Sjekk at registreringsavgiften er betalt\n2. **Nylig registrert** - Det kan ta opptil 24 timer før dyret er søkbart\n3. **Inaktiv chip** - Chipen kan ha blitt deaktivert\n\nFor å sjekke status og aktivere registreringen, klikk på knappen under for å logge inn med engangskode (OTP).",
-      requiresLogin: true,
-      helpCenterLink: `${HJELPESENTER_BASE}/hjelp-id-sok/3-kjaledyret-er-ikke-sokbart`,
-      model: "direct-inactive-info",
-      requestFeedback: true,
-    };
-  }
-
-  if (intent === "NewRegistration") {
-    return {
-      text: `For å registrere et nytt dyr i DyreID, må du ta det med til en **veterinær**.\n\n**Slik gjør du:**\n1. Bestill time hos en veterinærklinikk\n2. Veterinæren implanterer en mikrochip (hvis dyret ikke allerede har en)\n3. Veterinæren registrerer dyret i DyreID\n4. Du får tilgang til Min Side og kan administrere dyrets profil\n\n**Pris:** Registrering koster vanligvis ${getPrice("registrering_ny")} (inkl. chip og registrering).\n\nHar dyret allerede en chip? Da kan du sjekke om det er registrert ved å oppgi chipnummeret.`,
-      helpCenterLink: `${HJELPESENTER_BASE}/hjelp-id-sok/1-hvorfor-bor-jeg-id-merke`,
-      model: "direct-newreg-info",
-      requestFeedback: true,
-    };
-  }
-
-  if (intent === "NKKOwnership") {
-    return {
-      text: "Eierskifte av NKK-registrert hund håndteres av **Norsk Kennelklubb (NKK)**.\n\nNKK har egne regler og prosedyrer for eierskifte av stambokførte hunder. Du må kontakte NKKs sekretariat direkte for å gjennomføre eierskiftet.\n\n**Kontakt NKK:**\nBesøk NKKs sekretariat-side for kontaktinformasjon og veiledning:\nhttps://www.nkk.no/om-nkk/sekretariatet/\n\nNår eierskiftet er registrert hos NKK, vil oppdateringen også gjelde i DyreID.",
-      helpCenterLink: `${HJELPESENTER_BASE}/hjelp-eierskifte/41-eierskifte-av-nkk-registrert-hund`,
-      model: "direct-nkk-info",
-      requestFeedback: true,
-    };
-  }
-
-  if (intent === "QRTagActivation") {
-    return {
-      text: "QR-brikken må aktiveres i **DyreID-appen** før du tar den i bruk. Alle som finner kjæledyret ditt kan skanne QR-brikken og ringe deg direkte.\n\nSlik aktiverer du brikken:\n\n1. Åpne DyreID-appen\n2. Klikk på QR-brikke-ikonet på forsiden eller under Meny\n3. Skann QR-koden på brikken\n4. Skriv inn telefonnummeret ditt\n5. Skriv inn chipnummer på kjæledyret\n6. Kryss av for kontaktdata som skal vises ved skanning\n7. Husk å aktivere pushvarsel i appen\n\nHar du problemer med å skanne koden i appen? Prøv å skanne den med kameraet på mobilen i stedet.",
-      helpCenterLink: `${HJELPESENTER_BASE}/hjelp-qr-brikke/35-aktivere-qr`,
-      model: "direct-qr-info",
-      requestFeedback: true,
-    };
-  }
-
-  if (intent === "SmartTagActivation") {
-    return {
-      text: "**Slik aktiverer du Smart Tag:**\n\n1. Last ned **DyreID-appen** fra App Store eller Google Play\n2. Opprett en bruker eller logg inn\n3. Trykk på **Smart Tag**-ikonet i appen\n4. Hold Smart Tag inntil telefonen til den kobles\n5. Følg instruksjonene i appen for å knytte taggen til dyret ditt\n\n**Tips:** Sørg for at Bluetooth er aktivert på telefonen. Smart Tag bruker Bluetooth Low Energy (BLE) for tilkobling.\n\nHvis du har problemer med tilkoblingen, prøv å starte appen på nytt og hold taggen helt inntil telefonen.",
-      helpCenterLink: `${HJELPESENTER_BASE}/hjelp-smart-tag/25-aktivering-smart-tag`,
-      model: "direct-smart-tag-info",
-      requestFeedback: true,
-    };
-  }
-
-  if (intent === "SmartTagQRActivation") {
-    return {
-      text: "**Aktivere QR-koden på Smart Tag:**\n\nSmart Tag har en innebygd QR-kode som kan skannes av alle med en smarttelefon.\n\n1. Åpne **DyreID-appen**\n2. Gå til **Smart Tag**-seksjonen\n3. Velg taggen du vil aktivere QR for\n4. Trykk på **Aktiver QR-kode**\n5. Velg hvilke kontaktopplysninger som skal vises ved skanning\n\nNår QR-koden er aktivert, kan den som finner dyret ditt skanne koden og kontakte deg direkte uten å se sensitive opplysninger.",
-      helpCenterLink: `${HJELPESENTER_BASE}/hjelp-smart-tag/26-aktiver-qr-smart-tag`,
-      model: "direct-smart-tag-info",
-      requestFeedback: true,
-    };
-  }
-
-  if (intent === "SmartTagConnection") {
-    return {
-      text: "**Problemer med å koble til Smart Tag?**\n\nHer er noen feilsøkingssteg:\n\n1. **Sjekk Bluetooth** – Sørg for at Bluetooth er slått på i telefonens innstillinger\n2. **Nærhet** – Hold Smart Tag helt inntil telefonen under tilkobling\n3. **Start appen på nytt** – Lukk DyreID-appen helt og åpne den igjen\n4. **Restart telefonen** – Noen ganger hjelper det å starte telefonen på nytt\n5. **Batteri** – Sjekk at Smart Tag har strøm (den skal pipe/blinke ved aktivering)\n6. **Oppdater appen** – Sørg for at du har siste versjon av DyreID-appen\n\n**Viktig:** Smart Tag bruker Bluetooth Low Energy (BLE). Noen eldre telefoner støtter ikke dette. Sjekk at telefonen din er kompatibel.",
-      helpCenterLink: `${HJELPESENTER_BASE}/hjelp-smart-tag/27-kan-ikke-koble-smart-tag`,
-      model: "direct-smart-tag-info",
-      requestFeedback: true,
-    };
-  }
-
-  if (intent === "SmartTagMissing") {
-    return {
-      text: "**Smart Tag forsvunnet fra appen?**\n\nHvis Smart Tag ikke lenger vises i DyreID-appen, prøv følgende:\n\n1. **Lukk og åpne appen** – Noen ganger må appen oppdateres\n2. **Sjekk Bluetooth** – Sørg for at Bluetooth er aktivert\n3. **Rekkevidde** – Smart Tag må være innenfor Bluetooth-rekkevidde (ca. 10-15 meter)\n4. **Logg ut og inn igjen** – Gå til innstillinger i appen, logg ut og logg inn på nytt\n5. **Legg til på nytt** – Hvis taggen fortsatt ikke vises, prøv å legge den til på nytt via Smart Tag-menyen\n\nHvis ingen av stegene fungerer, kan det være et problem med taggens batteri eller en teknisk feil. Kontakt oss på **support@dyreid.no** for videre hjelp.",
-      helpCenterLink: `${HJELPESENTER_BASE}/hjelp-smart-tag/28-smart-tag-forsvunnet`,
-      model: "direct-smart-tag-info",
-      requestFeedback: true,
-    };
-  }
-
-  if (intent === "SmartTagPosition") {
-    return {
-      text: "**Smart Tag-posisjonen oppdateres ikke?**\n\nSmart Tag oppdaterer posisjonen via Bluetooth, noe som betyr at den trenger en tilkoblet telefon i nærheten for å sende posisjon.\n\n**Slik fungerer det:**\n- Posisjonen oppdateres når Smart Tag er innenfor Bluetooth-rekkevidde av telefonen din (ca. 10-15 meter)\n- Hvis dyret er utenfor rekkevidde, vises siste kjente posisjon\n- Andre DyreID-brukere i nærheten kan også oppdatere posisjonen anonymt\n\n**Feilsøking:**\n1. Sjekk at Bluetooth er aktivert på telefonen\n2. Sjekk at appen har tillatelse til bakgrunnsoppdatering\n3. Sjekk at appen har plasseringstillatelse\n4. Sørg for at batteriet i taggen ikke er tomt",
-      helpCenterLink: `${HJELPESENTER_BASE}/hjelp-smart-tag/29-smart-tag-posisjon`,
-      model: "direct-smart-tag-info",
-      requestFeedback: true,
-    };
-  }
-
-  if (intent === "SmartTagSound") {
-    return {
-      text: "**Smart Tag lager lyder av seg selv?**\n\nHvis Smart Tag piper eller lager lyder uventet, kan det skyldes flere ting:\n\n1. **Lavt batteri** – Taggen varsler når batteriet begynner å bli lavt\n2. **Adskillelsesvarsel** – Hvis du har aktivert varsel ved adskillelse, vil taggen pipe når den mister kontakt med telefonen\n3. **Finn min tag-funksjon** – Noen i nærheten kan ha aktivert \"Finn min tag\" i appen\n\n**Slik stopper du lyden:**\n- Åpne DyreID-appen og sjekk Smart Tag-innstillingene\n- Deaktiver adskillelsesvarsel hvis du ikke ønsker det\n- Sjekk batterinivået i appen\n\nHvis lydene fortsetter uten åpenbar grunn, prøv å ta ut og sette inn batteriet på nytt.",
-      helpCenterLink: `${HJELPESENTER_BASE}/hjelp-smart-tag/30-smart-tag-lyd`,
-      model: "direct-smart-tag-info",
-      requestFeedback: true,
-    };
-  }
-
-  if (intent === "SmartTagMultiple") {
-    return {
-      text: "**Problemer med flere Smart Tags?**\n\nHvis du har flere Smart Tags men bare klarer å koble til én, prøv dette:\n\n1. **Koble til én om gangen** – Aktiver og koble til én Smart Tag ferdig før du starter med neste\n2. **Hold avstand** – Legg de andre taggene i et annet rom mens du kobler til én\n3. **Unike navn** – Gi hver tag et unikt navn (f.eks. dyrets navn) så de er lette å skille\n4. **Start på nytt mellom tilkoblinger** – Lukk appen mellom hver tilkobling\n\n**OBS:** Hver Smart Tag kan kun kobles til ett dyr. Sørg for at du velger riktig dyr for hver tag under oppsettet.",
-      helpCenterLink: `${HJELPESENTER_BASE}/hjelp-smart-tag/31-smart-tag-flere`,
-      model: "direct-smart-tag-info",
-      requestFeedback: true,
-    };
-  }
-
-  if (intent === "UnregisteredChip578") {
-    return {
-      text: `**Uregistrert 578-brikke**\n\nNoen ID-merker som begynner med **578** (Norges landskode) er likevel ikke registrert hos DyreID. Dette gjelder brikker som ikke er **forhåndsbetalte** hos oss – de er såkalte uregistrerte brikker og betraktes som **utlandsregistrerte**.\n\nDette betyr at selv om dyret er ID-merket hos en veterinær i Norge, er ikke chipen automatisk registrert i DyreID-registeret.\n\n**Hva må du gjøre?**\nFor å få dyret registrert i DyreID med en slik brikke, må du ta kontakt med en veterinær som kan registrere chipen hos oss. Dette koster **${getPrice("utenlandsregistrering")}** og følger samme prosedyre som for utlandsregistrering.\n\nLes mer om prosessen her:\nhttps://hjelpesenter.dyreid.no/hjelp-utenlandsregistrering/43-registrering-norge`,
-      helpCenterLink: `${HJELPESENTER_BASE}/hjelp-utenlandsregistrering/43-registrering-norge`,
-      model: "direct-unregistered-578",
-      requestFeedback: true,
-    };
-  }
-
-  if (intent === "ForeignRegistration") {
-    return {
-      text: `**Registrering av dyr med utenlandsk eller uregistrert chip i Norge**\n\nFor å registrere et dyr i DyreID som har en utenlandsk chip, eller en **uregistrert 578-brikke** (brikke som begynner med 578 men ikke er forhåndsbetalt hos oss), må du ta kontakt med en **veterinær**.\n\n**OBS:** Ikke alle brikker som begynner med 578 er registrert hos DyreID. Noen 578-brikker er ikke forhåndsbetalte og betraktes som utlandsregistrerte. Disse må registreres på nytt.\n\n**Slik gjør du:**\n1. Bestill time hos en veterinærklinikk\n2. Veterinæren skanner chipen og registrerer dyret i DyreID\n3. Registreringen koster **${getPrice("utenlandsregistrering")}**\n4. Du får tilgang til Min Side og kan administrere dyrets profil\n\nLes mer: https://hjelpesenter.dyreid.no/hjelp-utenlandsregistrering/43-registrering-norge`,
-      helpCenterLink: `${HJELPESENTER_BASE}/hjelp-utenlandsregistrering/43-registrering-norge`,
-      model: "direct-foreign-registration",
-      requestFeedback: true,
-    };
-  }
-
-  if (intent === "ForeignRegistrationCost") {
-    return {
-      text: `**Pris for registrering av dyr i Norge**\n\nRegistrering av dyr med utenlandsk chip eller uregistrert 578-brikke koster **${getPrice("utenlandsregistrering")}**. Dette inkluderer:\n\n- Registrering i DyreID-registeret\n- Tilgang til Min Side for administrasjon av dyrets profil\n- Søkbarhet i DyreID-systemet\n\n**Slik gjør du:**\n1. Bestill time hos en veterinærklinikk\n2. Veterinæren skanner chipen og registrerer dyret\n3. Du betaler registreringsavgiften på **${getPrice("utenlandsregistrering")}**\n\nFor norske dyr som allerede har forhåndsbetalt chip er registreringen inkludert i chipprisen (vanligvis ${getPrice("registrering_ny")} totalt hos veterinær).`,
-      helpCenterLink: `${HJELPESENTER_BASE}/hjelp-utenlandsregistrering/43-registrering-norge`,
-      model: "direct-foreign-registration-cost",
-      requestFeedback: true,
-    };
-  }
-
-  if (intent === "OwnershipTransferApp") {
-    return {
-      text: `**Eierskifte via DyreID-appen**\n\nDu kan gjennomføre eierskifte direkte i DyreID-appen. Slik gjør du:\n\n1. Åpne **DyreID-appen**\n2. Gå til dyret du vil overføre\n3. Trykk på **Eierskifte** eller **Overfør eierskap**\n4. Skriv inn ny eiers mobilnummer\n5. Ny eier mottar en SMS med bekreftelseslenke\n6. Ny eier bekrefter og betaler eierskiftegebyret\n\n**Pris:** Eierskifte koster ${getPrice("eierskifte")}.\n\n**Viktig:**\n- Begge parter må ha DyreID-konto\n- Ny eier må godkjenne overføringen innen 14 dager\n- Eierskiftet fullføres først etter betaling\n\nVil du heller gjøre eierskiftet her i chatten? Da kan jeg hjelpe deg etter innlogging.`,
-      suggestions: [
-        { label: "Gjør eierskifte her", action: "SELECT_PET", data: { intent: "OwnershipTransferWeb" } },
-      ],
-      model: "direct-ownership-transfer-app",
-      requestFeedback: true,
-    };
-  }
-
-  if (intent === "ContactInfoDisambiguate") {
-    return {
-      text: "Hva ønsker du å endre?\n\n→ **Navn eller adresse** (løses med det samme)\n→ **E-postadresse** (krever verifisering)\n→ **Telefonnummer** (krever verifisering)",
-      suggestions: [
-        { label: "Navn eller adresse", action: "SUBTOPIC", data: { intent: "UpdateContactInfo", query: "endre navn adresse" } },
-        { label: "E-postadresse", action: "SUBTOPIC", data: { intent: "UpdateAuthContact", query: "endre e-post" } },
-        { label: "Telefonnummer", action: "SUBTOPIC", data: { intent: "UpdateAuthContact", query: "endre telefon" } },
-      ],
-      model: "direct-contact-disambiguate",
-    };
-  }
-
-  if (intent === "UpdateContactInfo") {
-    return {
-      text: "Du kan endre navn og adresse direkte på Min Side under **Kontaktinformasjon**.\n\nLogg inn på [Min Side](https://minside.dyreid.no) og oppdater informasjonen din der.",
-      requiresLogin: !isAuthenticated,
-      model: "direct-update-contact-info",
-      requestFeedback: true,
-    };
-  }
-
-  if (intent === "GDPRDelete") {
-    return {
-      text: "**Sletting av profil (GDPR)**\n\nDu har rett til å be om sletting av dine personopplysninger i henhold til GDPR.\n\n**Viktig å vite:**\n- Sletting av profilen fjerner alle dine personopplysninger fra DyreID\n- Dyrene dine vil bli avregistrert fra din profil\n- Denne handlingen kan ikke angres\n- Chipregistreringen på dyrene dine forblir aktiv, men uten koblet eier\n\n**Slik ber du om sletting:**\nSend en e-post til **personvern@dyreid.no** med:\n1. Ditt fulle navn\n2. Telefonnummer registrert i DyreID\n3. Bekreftelse på at du ønsker sletting\n\nBehandlingstid er normalt 30 dager i henhold til GDPR-regelverket.\n\nHvis du bare ønsker å endre eller oppdatere informasjonen din, kan jeg hjelpe deg med det etter innlogging.",
-      model: "direct-gdpr-delete",
-      requestFeedback: true,
-    };
-  }
-
-  if (intent === "LostFoundInfo") {
-    return {
-      text: "**Slik fungerer Savnet og Funnet-tjenesten i DyreID:**\n\nNår du melder et dyr savnet, skjer følgende:\n\n1. **SMS-varsling** – Alle DyreID-brukere i nærområdet får automatisk SMS om det savnede dyret\n2. **Push-varsel** – Brukere med DyreID-appen mottar push-notifikasjoner\n3. **Savnet-status** – Dyret markeres som savnet i DyreID-registeret\n4. **QR/Smart Tag** – Hvis noen skanner dyrets QR-brikke eller Smart Tag, får du umiddelbart beskjed\n5. **Søkbar på 1-2-3** – Andre kan søke opp dyret og se at det er meldt savnet\n\n**For å melde savnet:** Logg inn her i chatten med OTP, så aktiverer jeg varslingen for deg.\n**For å melde funnet:** Samme prosess – logg inn, og jeg markerer dyret som funnet og deaktiverer varslingene.\n\nVil du melde et dyr savnet eller funnet?",
-      suggestions: [
-        { label: "Meld savnet", action: "SELECT_PET", data: { intent: "ReportLostPet" } },
-        { label: "Meld funnet", action: "SELECT_PET", data: { intent: "ReportFoundPet" } },
-      ],
-      model: "direct-lost-found-info",
-      requestFeedback: true,
-    };
-  }
-
-  if (intent === "SearchableMisuse") {
-    return {
-      text: "**Sikkerhet og personvern for Søkbar på 1-2-3**\n\nDyreID tar personvern på alvor. Slik er tjenesten beskyttet mot misbruk:\n\n1. **Begrenset informasjon** – Ved søk vises kun dyrets navn, art og rase. Eierens fulle personopplysninger vises ikke\n2. **Kontaktskjema** – Den som søker kan sende melding via et kontaktskjema, uten å se eierens direkte kontaktinfo\n3. **Logging** – Alle søk logges for å kunne spore eventuelt misbruk\n4. **Rapportering** – Mistenkelig aktivitet kan rapporteres til DyreID\n\n**Viktig:** Chipnummeret alene gir ikke tilgang til sensitiv informasjon. Det kreves innlogging for å se eller endre eierdata.\n\nHvis du mistenker misbruk av tjenesten, kontakt oss på **support@dyreid.no**.",
-      model: "direct-searchable-misuse",
-      requestFeedback: true,
-    };
-  }
-
-  if (intent === "FamilySharing") {
-    return {
-      text: "**Slik deler du tilgang med familiemedlemmer i DyreID:**\n\nMed familiedeling kan andre i husstanden se og følge med på kjæledyrene deres i DyreID-appen.\n\n**Slik setter du opp familiedeling:**\n1. Åpne **DyreID-appen**\n2. Gå til **Innstillinger** → **Familiedeling**\n3. Trykk **Legg til familiemedlem**\n4. Skriv inn mobilnummeret til personen du vil dele med\n5. Personen mottar en invitasjon og må godkjenne\n\n**Krav:**\n- Du trenger **DyreID+**-abonnement for å bruke familiedeling\n- Personen du deler med må ha en DyreID-konto\n\n**Hva kan de du deler med gjøre?**\n- Se dyrets profil og informasjon\n- Motta varsler om savnet/funnet\n- Se posisjon via Smart Tag\n- De kan **ikke** gjøre endringer på dyrets profil eller starte eierskifte",
-      model: "direct-family-sharing",
-      requestFeedback: true,
-    };
-  }
-
-  if (intent === "FamilySharingRequest") {
-    return {
-      text: "**Familiedeling-forespørsel ikke akseptert?**\n\nHvis en familiedeling-forespørsel ikke blir akseptert, kan det skyldes:\n\n1. **Ikke sett invitasjonen** – Personen har kanskje ikke sjekket DyreID-appen\n2. **Feil nummer** – Dobbeltsjekk at du skrev inn riktig mobilnummer\n3. **Mangler DyreID-konto** – Personen må ha en DyreID-konto for å godkjenne\n4. **Utløpt invitasjon** – Invitasjoner utløper etter 14 dager\n\n**Slik løser du det:**\n- Be personen åpne DyreID-appen og sjekke under **Varsler** eller **Innstillinger** → **Familiedeling**\n- Prøv å sende invitasjonen på nytt\n- Sørg for at personen har lastet ned og logget inn i DyreID-appen først\n\nHvis problemet vedvarer, kontakt oss på **support@dyreid.no**.",
-      model: "direct-family-sharing-request",
-      requestFeedback: true,
-    };
-  }
-
-  if (intent === "FamilySharingPermissions") {
-    return {
-      text: "**Hva kan de du deler med gjøre?**\n\nPersoner du har delt tilgang med via familiedeling har **begrenset tilgang**:\n\n**De KAN:**\n- Se dyrets profil (navn, art, rase, bilde)\n- Motta push-varsler om savnet/funnet\n- Se dyrets posisjon via Smart Tag\n- Se QR-brikke-status\n\n**De kan IKKE:**\n- Endre dyrets profilinformasjon\n- Starte eller godkjenne eierskifte\n- Melde dyret savnet eller funnet\n- Slette dyret fra registeret\n- Endre eierens kontaktinformasjon\n\nKun den registrerte eieren har full tilgang til å gjøre endringer. Familiedeling gir kun lesetilgang og varsler.",
-      model: "direct-family-sharing-permissions",
-      requestFeedback: true,
-    };
-  }
-
-  if (intent === "PetNotInSystem") {
-    return {
-      text: `**Finner ikke dyret i registeret?**\n\nDet kan være flere grunner til at dyret ditt ikke finnes i DyreID:\n\n1. **Ikke registrert** – Dyret er kanskje ikke registrert i DyreID ennå. Registrering gjøres hos veterinær\n2. **Utenlandsk chip** – Hvis dyret har en utenlandsk chip, må det registreres på nytt i Norge (koster ${getPrice("utenlandsregistrering")})\n3. **Uregistrert 578-brikke** – Noen norske 578-chipper er ikke forhåndsbetalt og må registreres separat\n4. **Feil chipnummer** – Dobbeltsjekk at du har riktig chipnummer\n5. **Registrert på annen person** – Dyret kan være registrert på en tidligere eier\n\n**Hva kan du gjøre?**\n- Har du chipnummeret? Jeg kan søke det opp for deg\n- Kontakt veterinæren som chipet dyret for å sjekke registreringsstatus\n\nVil du at jeg søker opp et chipnummer?`,
-      suggestions: [
-        { label: "Søk opp chipnummer", action: "SELECT_PET", data: { intent: "ChipLookup" } },
-      ],
-      model: "direct-pet-not-in-system",
-      requestFeedback: true,
-    };
-  }
-
-  if (intent === "FamilySharingRequirement") {
-    return {
-      text: `**Krever familiedeling DyreID+?**\n\nJa, familiedeling er en del av **DyreID+**-abonnementet.\n\n**DyreID+ inkluderer:**\n- Familiedeling med opptil 5 personer\n- Utvidet Smart Tag-funksjonalitet\n- Prioritert kundeservice\n- Avanserte varsler og notifikasjoner\n\n**Pris:** DyreID+ koster ${getPrice("dyreid_pluss_maaned")}/mnd eller ${getPrice("dyreid_pluss_aar")}/år.\n\nDu kan oppgradere til DyreID+ direkte i DyreID-appen under **Innstillinger** → **Abonnement**.`,
-      model: "direct-family-sharing-requirement",
-      requestFeedback: true,
     };
   }
 
@@ -2461,7 +2323,8 @@ async function matchUserIntent(
     }
   }
 
-  const quickIntent = quickIntentMatch(effectiveMessage);
+  const rawQuickIntent = quickIntentMatch(effectiveMessage);
+  const quickIntent = rawQuickIntent ? resolveIntentAlias(rawQuickIntent) : null;
   if (quickIntent) {
     const playbook = await storage.getPlaybookByIntent(quickIntent);
     session.intent = quickIntent;
@@ -2469,6 +2332,7 @@ async function matchUserIntent(
     session.collectedData = {};
     debugInfo.matchedBy = "regex";
     debugInfo.finalIntentId = quickIntent;
+    if (rawQuickIntent !== quickIntent) (debugInfo as any).aliasFrom = rawQuickIntent;
     debugInfo.responseMethod = playbook ? (playbook.actionType === "API_CALL" ? "API_CALL" : "INFO") : "DIRECT";
     return { intent: quickIntent, playbook: playbook || null, method: "quick-match", debug: debugInfo };
   }
@@ -2761,7 +2625,7 @@ async function handlePlaybookResponse(
         const scrubbedTranscript = scrubText(rawTranscript);
 
         const shortSummary = intentId.replace(/([A-Z])/g, " $1").trim();
-        const subject = `DyreID Chatbot – ${intentId} – ${shortSummary}`;
+        const subject = `Opprettet sak hos DyreID – ${shortSummary}`;
 
         const descParts = [
           `--- Automatisk opprettet av DyreID Chatbot (PURESERVICE_CREATE) ---`,
@@ -2778,7 +2642,7 @@ async function handlePlaybookResponse(
           scrubbedTranscript,
         ].join("\n");
 
-        await db.insert(escalationsOutbox).values({
+        const escalationResult = await db.insert(escalationsOutbox).values({
           conversationId,
           sessionId: sessionIdStr,
           intentId,
@@ -2794,8 +2658,11 @@ async function handlePlaybookResponse(
             source: "chatbot_pureservice_create",
             collectedData: session.collectedData,
             intentId,
+            confirmationText: config.confirmationText || "Vi behandler henvendelsen og tar kontakt så snart som mulig.",
           },
-        });
+        }).returning({ id: escalationsOutbox.id });
+
+        const ticketId = escalationResult[0]?.id || "–";
 
         session.pureserviceCreateFlow = undefined;
         session.pureserviceCreateIntent = undefined;
@@ -2804,7 +2671,7 @@ async function handlePlaybookResponse(
         session.hasEscalated = true;
 
         return {
-          text: "Vi har opprettet en sak og tar kontakt med deg snart. Er det noe annet jeg kan hjelpe med?",
+          text: `Takk! Vi har opprettet sak **#${ticketId}** for deg. Du mottar en bekreftelse på e-post med saksnummer. Svar på e-posten for å legge til informasjon.`,
           actionExecuted: true,
           actionType: "PURESERVICE_CREATE",
           actionSuccess: true,
@@ -2898,7 +2765,8 @@ export async function testIntentMatch(query: string): Promise<{
   // 2. Regex matching
   for (const pattern of INTENT_PATTERNS) {
     if (pattern.regex.test(query) || pattern.regex.test(normalized)) {
-      return tagCanonical(pattern.intent, { matchedIntent: pattern.intent, method: "regex", model: "regex-match" });
+      const resolved = resolveIntentAlias(pattern.intent);
+      return tagCanonical(resolved, { matchedIntent: resolved, method: "regex", model: "regex-match" });
     }
   }
   
@@ -3384,7 +3252,7 @@ export async function* streamChatResponse(
     }
   }
 
-  const DIRECT_INTENTS = ["ViewMyPets", "OwnershipTransferWeb", "OwnershipTransferApp", "ReportLostPet", "ReportFoundPet", "QRTagActivation", "QRTagLost", "PetDeceased", "NKKOwnership", "LoginIssue", "LoginProblem", "UnregisteredChip578", "ForeignRegistration", "ForeignRegistrationCost", "WrongInfo", "WrongOwner", "MissingPetProfile", "InactiveRegistration", "NewRegistration", "SmartTagActivation", "SmartTagQRActivation", "SmartTagConnection", "SmartTagMissing", "SmartTagPosition", "SmartTagSound", "SmartTagMultiple", "SmartTagReassign", "GDPRDelete", "LostFoundInfo", "SearchableMisuse", "FamilySharing", "FamilySharingRequest", "FamilySharingPermissions", "FamilySharingRequirement", "PetNotInSystem", "ContactInfoDisambiguate", "UpdateContactInfo", "CancelSubscription", "SubscriptionAddPet"];
+  const DIRECT_INTENTS = ["ViewMyPets", "OwnershipTransferWeb", "OwnershipTransferApp", "ReportLostPet", "ReportFoundPet", "QRTagActivation", "QRTagLost", "PetDeceased", "NKKOwnership", "LoginIssue", "LoginProblem", "UnregisteredChip578", "ForeignRegistration", "ForeignRegistrationCost", "WrongInfo", "WrongOwner", "MissingPetProfile", "InactiveRegistration", "NewRegistration", "SmartTagActivation", "SmartTagQRActivation", "SmartTagConnection", "SmartTagMissing", "SmartTagPosition", "SmartTagSound", "SmartTagMultiple", "SmartTagTransferPet", "GDPRDelete", "LostFoundInfo", "SearchableMisuse", "FamilySharing", "FamilySharingRequest", "FamilySharingPermissions", "FamilySharingRequirement", "PetNotInSystem", "ContactInfoDisambiguate", "UpdateContactInfo", "CancelSubscription", "SubscriptionAddPet"];
   if ((intent && DIRECT_INTENTS.includes(intent)) || session.directIntentFlow || session.loginHelpStep) {
     let effectiveIntent = session.directIntentFlow || intent || "";
     let directResponse = handleDirectIntent(effectiveIntent, session, isAuthenticated, ownerContext, storedUserContext || null, userMessage);

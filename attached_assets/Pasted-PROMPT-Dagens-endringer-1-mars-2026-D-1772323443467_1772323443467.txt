@@ -1,0 +1,247 @@
+PROMPT: Dagens endringer – 1. mars 2026
+
+══════════════════════════════════════════════════════
+DEL 1 – OPPDATER EKSISTERENDE ENTRIES
+══════════════════════════════════════════════════════
+
+BillingInquiry (beholder PURESERVICE_CREATE):
+combined_response:
+"Betalingsspørsmål håndteres av vårt support-team –
+det finnes ikke selvbetjening for faktura eller
+betalingshistorikk i DyreID.
+
+Vi hjelper deg med:
+- Bekreftelse på betalingsmetode
+- Informasjon om neste trekk
+- Kopi av kvittering
+- AvtaleGiro-spørsmål
+- Uventede trekk eller feil beløp
+
+Fortell oss hva du lurer på, så slår vi opp
+saken din:"
+
+──────────────────────────────────────────────────────
+
+SmartTagNotifications:
+combined_response:
+"Smart Tag støtter ikke geofencing slik det
+tidligere produktet Mitt Spor hadde.
+Smart Tag viser siste kjente posisjon via
+Apple «Hvor er» (iPhone) eller
+«Finn enheten min» (Android).
+
+**Varsel om separasjon (iPhone – «Hvor er»):**
+«Hvor er» kan i noen tilfeller varsle deg hvis
+taggen fjerner seg fra deg:
+Åpne «Hvor er» → Objekter → velg Smart Tag →
+Varsle når etterlatt → slå på
+
+OBS: Sett IKKE hjemstedet som klarert sted hvis
+du vil varsles når dyret forlater hjemmet – men
+da kan du også få varsler mens dyret beveger seg
+inne. Funksjonen er ikke designet som geofencing,
+men kan fungere som et primitivt alternativ.
+
+Se dyreid.no/smarttag for fullstendig oversikt."
+
+help_center_article_url: https://www.dyreid.no/smarttag
+
+══════════════════════════════════════════════════════
+DEL 2 – GODKJENN EKSISTERENDE KANDIDAT
+══════════════════════════════════════════════════════
+
+SmartTagBatteryInfo – status NEEDS_MANUAL_AUTHORING
+Batteriet er bekreftet utbyttbart (CR2032).
+Godkjenn via /api/admin/playbook-candidates/:id/approve
+
+══════════════════════════════════════════════════════
+DEL 3 – OPPRETT NYE ENTRIES
+══════════════════════════════════════════════════════
+
+─── AddQRPetToSubscription ───
+action_type: INFO_ONLY
+combined_response:
+"Antall dyr på QR-abonnementet angir du selv
+under registreringen av dyret.
+
+Hvert dyr registreres med sin egen QR-brikke.
+Du kan registrere så mange dyr du ønsker."
+
+─── AddSmartTagPetToSubscription ───
+action_type: PURESERVICE_CREATE
+fields:
+  { key: "e-post", label: "E-postadresse",
+    hint: "Knyttet til din DyreID-konto" }
+  { key: "antall-dyr", label: "Antall dyr totalt",
+    hint: "Inkludert det/de du vil legge til" }
+  { key: "beskrivelse", label: "Beskriv ønsket endring",
+    hint: "F.eks. har 1 hund fra før, vil legge til katt" }
+category1: "Smart Tag"
+category2: "Ekstra dyr på abonnement"
+combined_response:
+"Smart Tag-abonnementet støtter inntil 3 dyr.
+
+Ønsker du å legge til et dyr på eksisterende
+abonnement oppretter vi en sak for deg:
+
+(Maks 3 dyr totalt per abonnement.)"
+
+─── SmartTagTransferPet ───
+action_type: PURESERVICE_CREATE
+fields:
+  { key: "e-post", label: "E-postadresse" }
+  { key: "chip-gammelt-dyr", label: "Chip-nr. gammelt dyr",
+    hint: "Dyret brikken er koblet til i dag" }
+  { key: "chip-nytt-dyr", label: "Chip-nr. nytt dyr",
+    hint: "Dyret brikken skal kobles til" }
+category1: "Smart Tag"
+category2: "Overføre Smart Tag til nytt dyr"
+combined_response:
+"Smart Tag overføres til nytt dyr av vårt team.
+
+Vi trenger chip-nummer på begge dyrene for å
+gjennomføre overføringen. Fyll inn nedenfor:"
+
+─── QRTagOrderExtra ───
+action_type: INFO_ONLY
+combined_response:
+"Du kan bestille ekstra QR-brikke til dyret ditt.
+
+Prisen er {{PRICE:qr_brikke_ekstra}}.
+
+Gå til dyreid.no/bestill for å bestille."
+
+help_center_article_url: https://www.dyreid.no/bestill
+
+NB: Verifiser at {{PRICE:qr_brikke_ekstra}} finnes
+i prisdatabasen med verdi 199 kr.
+Hvis ikke – opprett den.
+
+─── NonSupportedSpeciesHelp ───
+action_type: INFO_ONLY
+combined_response:
+"DyreID er et register for hunder, katter og
+hester – andre arter kan ikke registreres.
+
+**Fant du en skadet eller tapt fugl?**
+Fugl med ring tilhører Ringmerkingssentralen:
+Ring Stavanger Museum på 51 84 60 00.
+
+**Fant du et annet dyr?**
+Kontakt lokalt dyrevern eller nærmeste
+veterinær for videre hjelp."
+
+help_center_article_url:
+https://www.dyreid.no/om-registeret
+
+─── AppLanguageSettings ───
+action_type: INFO_ONLY
+combined_response:
+"DyreID-appen følger telefonens språkinnstilling
+automatisk og støtter norsk og engelsk.
+
+**Endre språk på iPhone:**
+Innstillinger → Generelt → Språk og region
+→ Endre telefonspråk
+
+**Endre språk på Android:**
+Innstillinger → Generelt → Språk
+→ Legg til eller endre språk
+
+Restart appen etter at du har endret språk."
+
+─── SubscriptionUpgrade ───
+action_type: INFO_ONLY
+combined_response:
+"DyreID-appen har to abonnementsnivåer:
+
+**Basis** – gratis
+**Premium** – {{PRICE:premium_monthly}}/mnd
+eller {{PRICE:premium_yearly}}/år
+
+**Slik oppgraderer du til Premium:**
+Åpne DyreID-appen → Innstillinger
+→ velg Premium-abonnement
+
+**Slik avslutter du Premium:**
+Abonnementet administreres via
+Google Play (Android) eller App Store (iPhone).
+Gå til dine aktive abonnementer i butikken
+og velg Avslutt abonnement."
+
+NB: Verifiser prisvariabler:
+{{PRICE:premium_monthly}} → 19 kr
+{{PRICE:premium_yearly}} → 189 kr
+
+══════════════════════════════════════════════════════
+DEL 4 – INTENT_ALIASES
+══════════════════════════════════════════════════════
+
+// Familie-abonnement
+FamilySubscription → FamilySharing
+FamilyPlan → FamilySharing
+AddPetsFamily → AddSmartTagPetToSubscription
+AddPetToSubscription → AddSmartTagPetToSubscription
+AddPetsToSubscription → AddSmartTagPetToSubscription
+
+// SmartTag-varsler
+MittSporGeofence → SmartTagNotifications
+GeofenceAlert → SmartTagNotifications
+SoneVarsel → SmartTagNotifications
+SmartTagNotificationIssue → SmartTagNotifications
+
+// SmartTag batteri
+SmartTagBattery → SmartTagBatteryInfo
+
+// SmartTag overføring
+SmartTagReassign → SmartTagTransferPet
+QRTagReassign → SmartTagTransferPet
+
+// QR-brikke
+QRTagDamaged → QRTagOrderExtra
+QRTagOrder → QRTagOrderExtra
+QRTagReplacement → QRTagOrderExtra
+
+// Abonnement
+SubscriptionChange → SubscriptionUpgrade
+UpgradeSubscription → SubscriptionUpgrade
+PremiumUpgrade → SubscriptionUpgrade
+
+// Språk
+AppLanguage → AppLanguageSettings
+AppLanguageChange → AppLanguageSettings
+
+// 2FA
+TwoFactorAuthInfo → TwoFactorAuth
+
+// Ikke-støttede arter
+NonSupportedSpecies → NonSupportedSpeciesHelp
+FoundBirdWithRing → NonSupportedSpeciesHelp
+UnsupportedSpecies → NonSupportedSpeciesHelp
+
+══════════════════════════════════════════════════════
+DEL 5 – PARKER
+══════════════════════════════════════════════════════
+
+BreederLitterRegistration:
+status: NEEDS_MANUAL_AUTHORING
+note: "1 ticket. Avklar om valpekull-registrering
+og overføring til nye eiere er støttet i DyreID."
+
+══════════════════════════════════════════════════════
+RAPPORT:
+══════════════════════════════════════════════════════
+1. Oppdaterte entries: BillingInquiry,
+   SmartTagNotifications
+2. Godkjent kandidat: SmartTagBatteryInfo
+3. Nye entries opprettet (7):
+   AddQRPetToSubscription, AddSmartTagPetToSubscription,
+   SmartTagTransferPet, QRTagOrderExtra,
+   NonSupportedSpeciesHelp, AppLanguageSettings,
+   SubscriptionUpgrade
+4. Aliases lagt til (antall)
+5. Prisvariabler verifisert/opprettet
+6. Aktive playbook entries totalt
+7. Approved canonical intents totalt
+8. INTENT_ALIASES totalt
+9. Regenerer embeddings for alle nye/endrede entries

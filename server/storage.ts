@@ -49,6 +49,7 @@ import {
 export interface IStorage {
   insertRawTickets(tickets: InsertRawTicket[]): Promise<void>;
   getRawTicketCount(): Promise<number>;
+  getMaxRawTicketId(): Promise<number | null>;
   getUnprocessedRawTickets(limit: number): Promise<typeof rawTickets.$inferSelect[]>;
   markRawTicketProcessed(ticketId: number): Promise<void>;
 
@@ -257,6 +258,11 @@ export class DatabaseStorage implements IStorage {
   async getRawTicketCount(): Promise<number> {
     const result = await db.select({ count: count() }).from(rawTickets);
     return result[0].count;
+  }
+
+  async getMaxRawTicketId(): Promise<number | null> {
+    const result = await db.select({ maxId: sql<number>`MAX(ticket_id)` }).from(rawTickets);
+    return result[0]?.maxId ?? null;
   }
 
   async getUnprocessedRawTickets(limit: number) {

@@ -1,0 +1,127 @@
+PROMPT: Del 1 – Global endring: PURESERVICE_CREATE bekreftelsesmelding
+
+ALLE PURESERVICE_CREATE-flows skal etter opprettelse
+sende kunden en bekreftelsesmelding med ticket-ID.
+
+Implementer dette i PURESERVICE_CREATE-handleren:
+
+E-post til kunde etter opprettelse:
+  Subject: "Opprettet sak hos DyreID – sak #{{TICKET_ID}}"
+
+  Body:
+  "Hei {{NAVN}},
+
+  Vi bekrefter å ha mottatt din henvendelse og har
+  opprettet sak #{{TICKET_ID}}.
+
+  {{KATEGORI_SPESIFIKK_TEKST}}
+
+  Svar på denne e-posten for å legge til informasjon
+  i saken.
+
+  Med vennlig hilsen
+  DyreID Support"
+
+Der {{KATEGORI_SPESIFIKK_TEKST}} er:
+  - Standard (alle andre): "Vi behandler henvendelsen
+    og tar kontakt så snart som mulig."
+  - OwnershipTransferDead: Se Del 2 nedenfor
+  - GDPRDelete: "Behandlingstid er normalt 30 dager
+    i henhold til GDPR-regelverket."
+  - RefundRequest: "Behandlingstid er normalt
+    2–3 virkedager."
+
+Chatbot-tekst som vises til kunden etter opprettelse
+(alle flows):
+"Takk! Vi har opprettet sak **#{{TICKET_ID}}** for deg.
+Du mottar en bekreftelse på e-post med saksnummer.
+Svar på e-posten for å legge til informasjon."
+
+RAPPORT: Bekreft at alle 11 PURESERVICE_CREATE-flows
+sender bekreftelsesmelding med ticket-ID.
+
+══════════════════════════════════════════════════════
+PROMPT: Del 2 – Ny entry: OwnershipTransferDead
+══════════════════════════════════════════════════════
+
+action_type: PURESERVICE_CREATE
+
+Legg til i PURESERVICE_CREATE_CONFIGS:
+  OwnershipTransferDead: {
+    fields: [
+      { key: "navn", label: "Ditt fulle navn" },
+      { key: "adresse", label: "Adresse" },
+      { key: "telefon", label: "Telefonnummer" },
+      { key: "e-post", label: "E-postadresse" },
+    ],
+    category1: "Eierskifte",
+    category2: "Eierskifte ved dødsfall",
+    confirmationText: "Vi bekrefter å ha mottatt din
+      henvendelse. For å gå videre trenger vi
+      dokumentasjon. Vi har opprettet en sak for
+      eierskifte etter tidligere eier – stemmer dette?
+
+      Send følgende som svar på denne e-posten:
+      • Dødsattest for tidligere eier
+      • Dokumentasjon på ny eiers identitet
+        (navn, adresse, telefonnummer og e-post
+        er allerede registrert i saken)
+
+      Med vennlig hilsen
+      DyreID Support"
+  }
+
+combined_response:
+"Eierskifte etter en avdød eier behandles manuelt
+av DyreID.
+
+Vi trenger dokumentasjon for å gjennomføre
+eierskiftet. Fyll inn dine opplysninger så
+oppretter vi en sak for deg:"
+
+help_center_article_url:
+https://www.dyreid.no/hjelp-eierskifte/42-eierskifte-naar-eier-er-dod
+
+══════════════════════════════════════════════════════
+PROMPT: Del 3 – Ny entry: AddContactInfo (omsorgsperson)
+══════════════════════════════════════════════════════
+
+action_type: INFO_ONLY
+
+combined_response:
+"En omsorgsperson er en person som passer dyret
+ditt, men hvor dyret fortsatt er registrert
+på deg som eier.
+
+**Slik legger du til omsorgsperson:**
+1. Logg inn på Min Side
+2. Velg dyret
+3. Trykk **Legg til omsorgsperson**
+4. Fyll inn navn og kontaktinformasjon
+
+Omsorgspersonen vil vises på dyrets profil
+og kan kontaktes hvis dyret blir funnet."
+
+suggestions:
+- { label: "Logg inn på Min Side",
+    action: "SUBTOPIC",
+    data: { intent: "LoginIssue" } }
+
+help_center_article_url:
+https://www.dyreid.no/hjelpesenter
+
+══════════════════════════════════════════════════════
+RAPPORT (etter alle 3 deler):
+══════════════════════════════════════════════════════
+1. Bekreft global bekreftelsesmelding implementert
+   for alle 11 PURESERVICE_CREATE-flows
+2. Bekreft OwnershipTransferDead oppretter sak
+   og sender korrekt bekreftelsesmail med dødsfall-tekst
+3. Bekreft AddContactInfo vises uten innloggingskrav
+4. Test:
+   "Eierskifte, eier er død" → PURESERVICE_CREATE
+     → kunden mottar e-post med ticket-ID og
+       dokumentasjonskrav
+   "Legge til omsorgsperson" → AddContactInfo
+     → Min Side-instruksjon
+5. Oppdatert reell dekning (forventer 92%+)

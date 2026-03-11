@@ -6,7 +6,7 @@ import { scrubbedTickets, playbookEntries } from "@shared/schema";
 import { scrubTicket } from "./gdpr-scrubber";
 import { getClosedTickets, mapPureserviceToRawTicket } from "./integrations/pureservice-v3";
 import { INTENTS, INTENT_DEFINITIONS } from "@shared/intents";
-import { log } from "./index";
+import { log } from "./logger";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -84,7 +84,7 @@ function formatIntentsForPrompt(): string {
     .join("\n");
 }
 
-async function callOpenAI(prompt: string, model: string = "gpt-5-nano", maxTokens: number = 4096, jsonMode: boolean = false): Promise<string> {
+async function callOpenAI(prompt: string, model: string = "gpt-5-mini", maxTokens: number = 4096, jsonMode: boolean = false): Promise<string> {
   const params: any = {
     model,
     max_completion_tokens: maxTokens,
@@ -93,8 +93,21 @@ async function callOpenAI(prompt: string, model: string = "gpt-5-nano", maxToken
   if (jsonMode) {
     params.response_format = { type: "json_object" };
   }
-  const response = await openai.chat.completions.create(params);
-  return response.choices[0]?.message?.content || "";
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const response = await openai.chat.completions.create(params);
+      return response.choices[0]?.message?.content || "";
+    } catch (err: any) {
+      if (err?.status === 429 && attempt < 2) {
+        const wait = (attempt + 1) * 10000;
+        log(`Rate limited, waiting ${wait / 1000}s before retry...`, "training");
+        await new Promise(r => setTimeout(r, wait));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error("callOpenAI: max retries exceeded");
 }
 
 function extractJson(text: string): any {
@@ -125,16 +138,18 @@ function extractJson(text: string): any {
 // ─── WORKFLOW 1: PURESERVICE TICKET INGESTION ─────────────────────────────
 export async function runIngestion(
   onProgress?: (msg: string, pct: number) => void,
-  maxTickets?: number
-): Promise<{ ingested: number; errors: number }> {
+  maxTickets?: number,
+  startPage?: number
+): Promise<{ ingested: number; errors: number; skipped: number }> {
   let totalIngested = 0;
   let totalErrors = 0;
-  let page = 1;
+  let totalSkipped = 0;
+  let page = startPage || 1;
   const pageSize = 100;
   let hasMore = true;
   const limit = maxTickets || Infinity;
 
-  onProgress?.(`Starter ticket-innhenting fra Pureservice${maxTickets ? ` (maks ${maxTickets})` : ''}...`, 0);
+  onProgress?.(`Starter ticket-innhenting fra Pureservice${maxTickets ? ` (maks ${maxTickets})` : ''}${startPage ? ` (fra side ${startPage})` : ''}...`, 0);
 
   while (hasMore) {
     try {
@@ -149,20 +164,31 @@ export async function runIngestion(
       }
 
       const rawTicketData = tickets.map(mapPureserviceToRawTicket);
+      const countBefore = await storage.getRawTicketCount();
       await storage.insertRawTickets(rawTicketData);
-      totalIngested += tickets.length;
+      const countAfter = await storage.getRawTicketCount();
+      const actuallyInserted = countAfter - countBefore;
+      const skippedThisBatch = tickets.length - actuallyInserted;
+      totalIngested += actuallyInserted;
+      totalSkipped += skippedThisBatch;
 
       const target = maxTickets ? Math.min(total, maxTickets) : total;
       const pct = Math.min(100, Math.round((totalIngested / Math.max(target, 1)) * 100));
-      onProgress?.(`Hentet ${totalIngested} av ~${target} tickets (side ${page})`, pct);
+      onProgress?.(`Hentet side ${page}: ${actuallyInserted} nye, ${skippedThisBatch} duplikater (totalt ${totalIngested} nye)`, pct);
 
-      if (totalIngested >= limit || totalIngested >= total || tickets.length < fetchSize) {
+      if (totalIngested >= limit || tickets.length < fetchSize) {
         hasMore = false;
       }
       page++;
 
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 500));
     } catch (err: any) {
+      if (err.message?.includes('429')) {
+        log(`Rate limited on page ${page}, waiting 10s...`, "training");
+        onProgress?.(`Venter 10s (rate-limit på side ${page})...`, -1);
+        await new Promise((r) => setTimeout(r, 10000));
+        continue;
+      }
       totalErrors++;
       log(`Ingestion error page ${page}: ${err.message}`, "training");
       onProgress?.(`Feil på side ${page}: ${err.message}`, -1);
@@ -173,8 +199,8 @@ export async function runIngestion(
     }
   }
 
-  onProgress?.(`Innhenting ferdig: ${totalIngested} tickets, ${totalErrors} feil`, 100);
-  return { ingested: totalIngested, errors: totalErrors };
+  onProgress?.(`Innhenting ferdig: ${totalIngested} nye tickets, ${totalSkipped} duplikater hoppet over, ${totalErrors} feil`, 100);
+  return { ingested: totalIngested, errors: totalErrors, skipped: totalSkipped };
 }
 
 // ─── WORKFLOW 2: GDPR SCRUBBING ──────────────────────────────────────────
@@ -254,8 +280,8 @@ OPPGAVE: Mapper denne Pureservice-ticketen til riktig kategori i DyreID hjelpese
 PURESERVICE TICKET:
 - Pureservice Kategori: ${ticket.category || "Ingen"}
 - Emne: ${ticket.subject || "Ingen"}
-- Kundespørsmål: ${ticket.customerQuestion || "Ingen"}
-- Agentsvar: ${ticket.agentAnswer || "Ingen"}
+- Kundespørsmål: ${(ticket.customerQuestion || "Ingen").slice(0, 800)}
+- Agentsvar: ${(ticket.agentAnswer || "Ingen").slice(0, 800)}
 
 HJELPESENTER KATEGORIER:
 ${categoryList}
@@ -273,7 +299,9 @@ SVAR I JSON:
   "reasoning": "Why this mapping?"
 }`;
 
+        log(`Calling OpenAI for ticket ${ticket.ticketId}...`, "training");
         const text = await callOpenAI(prompt);
+        log(`OpenAI OK for ticket ${ticket.ticketId}, len=${text.length}`, "training");
         const result = extractJson(text);
 
         await storage.insertCategoryMapping({
@@ -290,15 +318,28 @@ SVAR I JSON:
           result.hjelpesenter_subcategory
         );
         totalMapped++;
+        log(`Ticket ${ticket.ticketId} mapped OK (total: ${totalMapped})`, "training");
       } catch (err: any) {
         totalErrors++;
         log(`Category mapping error ticket ${ticket.ticketId}: ${err.message}`, "training");
+        try {
+          await storage.insertCategoryMapping({
+            ticketId: ticket.ticketId,
+            pureserviceCategory: ticket.category,
+            hjelpesenterCategory: "Ukategorisert",
+            hjelpesenterSubcategory: "Feil ved mapping",
+            confidence: 0,
+            reasoning: `Error: ${err.message?.slice(0, 200)}`,
+          });
+          await storage.updateScrubbedTicketMapping(ticket.ticketId, "Ukategorisert", "Feil ved mapping");
+        } catch {}
       }
+      await new Promise(r => setTimeout(r, 300));
     }
 
     const scrubbedCount = await storage.getScrubbedTicketCount();
     const pct = Math.round((totalMapped / Math.max(scrubbedCount, 1)) * 100);
-    onProgress?.(`Mappet ${totalMapped} tickets`, pct);
+    onProgress?.(`Mappet ${totalMapped} tickets (${totalMapped + 1079} totalt)`, pct);
   }
 
   onProgress?.(`Kategorimapping ferdig: ${totalMapped} mappet, ${totalErrors} feil`, 100);
@@ -1005,6 +1046,12 @@ export async function runPlaybookGeneration(
       const totalUses = feedback?.total || 0;
       const successRate = totalUses > 0 ? successfulResolutions / totalUses : 0;
 
+      const existingEntry = await storage.getPlaybookByIntent(intent);
+      const isProtectedActionType = existingEntry?.actionType &&
+        existingEntry.actionType !== 'INFO_ONLY';
+      const hasManualCombinedResponse = existingEntry?.combinedResponse &&
+        existingEntry.combinedResponse.length > 0;
+
       const isActionable = !!mostCommonAction || !!mostCommonEndpoint;
 
       let combinedResponse: string | null = null;
@@ -1056,6 +1103,26 @@ Return kun teksten, ingen JSON.`;
         }
       }
 
+      const finalActionType = isProtectedActionType
+        ? existingEntry!.actionType!
+        : (isActionable ? "API_CALL" : "INFO_ONLY");
+      const finalRequiresLogin = isProtectedActionType
+        ? (existingEntry!.requiresLogin ?? isActionable)
+        : isActionable;
+      const finalRequiresAction = isProtectedActionType
+        ? (existingEntry!.requiresAction ?? isActionable)
+        : isActionable;
+      const finalCombinedResponse = hasManualCombinedResponse
+        ? existingEntry!.combinedResponse
+        : (isActionable ? null : combinedResponse);
+      const finalHelpCenterUrl = (isProtectedActionType && existingEntry?.helpCenterArticleUrl)
+        ? existingEntry.helpCenterArticleUrl
+        : (bestArticle?.url || null);
+
+      if (isProtectedActionType) {
+        log(`Playbook: preserving ${existingEntry!.actionType} for ${intent} (protected)`, "training");
+      }
+
       await storage.upsertPlaybookEntry({
         intent,
         hjelpesenterCategory: mostCommonCategory || null,
@@ -1092,14 +1159,14 @@ Return kun teksten, ingen JSON.`;
         needsImprovement,
 
         helpCenterArticleId: bestArticle?.id || null,
-        helpCenterArticleUrl: bestArticle?.url || null,
+        helpCenterArticleUrl: finalHelpCenterUrl,
         helpCenterArticleTitle: bestArticle?.title || null,
         officialProcedure: null,
         helpCenterContentSummary: bestArticle?.body_text?.substring(0, 500) || null,
 
-        requiresLogin: isActionable,
-        requiresAction: isActionable,
-        actionType: isActionable ? "API_CALL" : "INFO_ONLY",
+        requiresLogin: finalRequiresLogin,
+        requiresAction: finalRequiresAction,
+        actionType: finalActionType,
         apiEndpoint: mostCommonEndpoint || null,
         httpMethod: mostCommonEndpoint ? "POST" : null,
         requiredRuntimeDataArray: mostCommonRuntimeData ? mostCommonRuntimeData.split(",").map((s: string) => s.trim()) : null,
@@ -1107,7 +1174,7 @@ Return kun teksten, ingen JSON.`;
         paymentAmount: null,
 
         chatbotSteps: chatbotStepsArray,
-        combinedResponse: isActionable ? null : combinedResponse,
+        combinedResponse: finalCombinedResponse,
 
         successfulResolutions,
         failedResolutions,
@@ -1179,17 +1246,17 @@ export async function submitManualReview(
 }
 
 async function saveCombinedResult(ticket: any, result: any, metrics: BatchMetrics): Promise<void> {
-  const existingCat = await storage.getCategoryMappingByTicketId(ticket.ticketId);
   const existingIntent = await storage.getIntentClassificationByTicketId(ticket.ticketId);
   const existingRes = await storage.getResolutionPatternByTicketId(ticket.ticketId);
 
-  if (existingCat || existingIntent || existingRes) {
-    log(`Skipping ticket ${ticket.ticketId}: already has results (cat=${!!existingCat}, intent=${!!existingIntent}, res=${!!existingRes})`, "training");
+  if (existingIntent && existingRes) {
+    log(`Skipping ticket ${ticket.ticketId}: already has intent+resolution`, "training");
     metrics.processedTickets++;
     return;
   }
 
-  if (result.hjelpesenter_category) {
+  const existingCat = await storage.getCategoryMappingByTicketId(ticket.ticketId);
+  if (!existingCat && result.hjelpesenter_category) {
     await storage.insertCategoryMapping({
       ticketId: ticket.ticketId,
       pureserviceCategory: ticket.category,
@@ -1205,33 +1272,37 @@ async function saveCombinedResult(ticket: any, result: any, metrics: BatchMetric
     );
   }
 
-  await storage.insertIntentClassification({
-    ticketId: ticket.ticketId,
-    intent: result.intent || "GeneralInquiry",
-    intentConfidence: result.intent_confidence || 0.5,
-    isNewIntent: result.is_new_intent || false,
-    keywords: result.keywords || "",
-    requiredRuntimeData: result.required_runtime_data || "",
-    requiredAction: result.required_action || "",
-    actionEndpoint: result.action_endpoint || "",
-    paymentRequired: result.payment_required || false,
-    autoClosePossible: result.auto_close_possible || false,
-    reasoning: result.intent_reasoning || result.reasoning || "",
-  });
+  if (!existingIntent) {
+    await storage.insertIntentClassification({
+      ticketId: ticket.ticketId,
+      intent: result.intent || "GeneralInquiry",
+      intentConfidence: result.intent_confidence || 0.5,
+      isNewIntent: result.is_new_intent || false,
+      keywords: result.keywords || "",
+      requiredRuntimeData: result.required_runtime_data || "",
+      requiredAction: result.required_action || "",
+      actionEndpoint: result.action_endpoint || "",
+      paymentRequired: result.payment_required || false,
+      autoClosePossible: result.auto_close_possible || false,
+      reasoning: result.intent_reasoning || result.reasoning || "",
+    });
+  }
 
-  const requiredDataStr = Array.isArray(result.required_data) ? result.required_data.join(", ") : (result.required_runtime_data || result.required_data || "");
-  const guidanceStepsStr = Array.isArray(result.guidance_steps) ? result.guidance_steps.join("; ") : "";
-  const resolutionContent = result.actionable ? guidanceStepsStr : (result.info_text || result.resolution_steps || "");
+  if (!existingRes) {
+    const requiredDataStr = Array.isArray(result.required_data) ? result.required_data.join(", ") : (result.required_runtime_data || result.required_data || "");
+    const guidanceStepsStr = Array.isArray(result.guidance_steps) ? result.guidance_steps.join("; ") : "";
+    const resolutionContent = result.actionable ? guidanceStepsStr : (result.info_text || result.resolution_steps || "");
 
-  await storage.insertResolutionPattern({
-    ticketId: ticket.ticketId,
-    intent: result.intent || "GeneralInquiry",
-    customerNeed: result.customer_need || "",
-    dataGathered: requiredDataStr,
-    resolutionSteps: typeof resolutionContent === "object" ? JSON.stringify(resolutionContent) : (resolutionContent || ""),
-    successIndicators: typeof result.success_indicators === "object" ? JSON.stringify(result.success_indicators) : (result.success_indicators || ""),
-    followUpNeeded: result.follow_up_needed || false,
-  });
+    await storage.insertResolutionPattern({
+      ticketId: ticket.ticketId,
+      intent: result.intent || "GeneralInquiry",
+      customerNeed: result.customer_need || "",
+      dataGathered: requiredDataStr,
+      resolutionSteps: typeof resolutionContent === "object" ? JSON.stringify(resolutionContent) : (resolutionContent || ""),
+      successIndicators: typeof result.success_indicators === "object" ? JSON.stringify(result.success_indicators) : (result.success_indicators || ""),
+      followUpNeeded: result.follow_up_needed || false,
+    });
+  }
 
   await storage.updateScrubbedTicketAnalysis(ticket.ticketId, "classified");
   await storage.markResolutionExtracted(ticket.ticketId);
@@ -1715,7 +1786,7 @@ export async function runCombinedBatchAnalysis(
   ticketLimit?: number
 ): Promise<{ metrics: BatchMetrics }> {
   const metrics = createMetrics();
-  const BATCH_SIZE = 10;
+  const BATCH_SIZE = 5;
 
   onProgress?.("Starter kombinert batch-analyse...", 0);
 
@@ -1735,7 +1806,7 @@ export async function runCombinedBatchAnalysis(
     bodySnippet: (t.bodyText || "").substring(0, 100),
   }));
 
-  const PARALLEL_CONCURRENCY = 5;
+  const PARALLEL_CONCURRENCY = 1;
   let totalToProcess = 0;
 
   function buildCombinedPrompt(batch: any[], categoryList: string, intentsStr: string, templateSignatures: any[]): string {

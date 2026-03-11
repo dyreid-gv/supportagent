@@ -55,7 +55,7 @@ import {
   Download,
   ClipboardCheck,
 } from "lucide-react";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import {
   Dialog,
@@ -343,7 +343,7 @@ function CombinedBatchCard() {
           size="sm"
         >
           {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
-          {isRunning ? "Kjorer..." : "Kjor Kombinert Analyse"}
+          {isRunning ? "Kjører..." : "Kjør Kombinert Analyse"}
         </Button>
       </div>
       {isRunning && <Progress value={progress} />}
@@ -378,20 +378,25 @@ function StatCard({
   description?: string;
 }) {
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-        <CardTitle className="text-sm font-medium">{title}</CardTitle>
-        <Icon className="h-4 w-4 text-muted-foreground" />
-      </CardHeader>
-      <CardContent>
-        <div className="text-2xl font-bold" data-testid={`stat-${title.toLowerCase().replace(/\s/g, "-")}`}>
-          {value.toLocaleString()}
-        </div>
-        {description && (
-          <p className="text-xs text-muted-foreground">{description}</p>
-        )}
-      </CardContent>
-    </Card>
+    <div
+      className="bg-white dark:bg-card rounded-lg border border-border shadow-sm p-5"
+      style={{ borderTop: "3px solid #0D5257", boxShadow: "0 2px 8px rgba(13,82,87,0.07)" }}
+    >
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{title}</span>
+        <Icon className="h-4 w-4" style={{ color: "#0D5257" }} />
+      </div>
+      <div
+        className="text-[28px] font-bold"
+        style={{ color: "#0D5257" }}
+        data-testid={`stat-${title.toLowerCase().replace(/\s/g, "-")}`}
+      >
+        {value.toLocaleString()}
+      </div>
+      {description && (
+        <p className="text-xs text-muted-foreground mt-1">{description}</p>
+      )}
+    </div>
   );
 }
 
@@ -431,7 +436,7 @@ function WorkflowCard({
           ) : (
             <Play className="h-4 w-4" />
           )}
-          {isRunning ? "Kjorer..." : "Start"}
+          {isRunning ? "Kjører..." : "Start"}
         </Button>
       </CardHeader>
       <CardContent>
@@ -661,12 +666,28 @@ const WORKFLOW_NAME_MAP: Record<string, string> = {
   category_mapping: "3. Kategorisering",
   uncategorized_analysis: "4. Ukategoriserte",
   intent_classification: "5. Intent",
-  resolution_extraction: "6. Losning",
+  resolution_extraction: "6. Løsning",
   uncertainty_detection: "7. Usikkerhet",
   playbook_generation: "8. Playbook",
 };
 
 export default function Dashboard() {
+  const getTabFromUrl = () => {
+    if (typeof window === "undefined") return "pipeline";
+    return new URLSearchParams(window.location.search).get("tab") || "pipeline";
+  };
+  const [activeTab, setActiveTabState] = useState(getTabFromUrl);
+
+  useEffect(() => {
+    const onPop = () => setActiveTabState(getTabFromUrl());
+    window.addEventListener("popstate", onPop);
+    const interval = setInterval(() => {
+      const current = getTabFromUrl();
+      setActiveTabState(prev => prev !== current ? current : prev);
+    }, 200);
+    return () => { window.removeEventListener("popstate", onPop); clearInterval(interval); };
+  }, []);
+
   const [selectedReview, setSelectedReview] = useState<ReviewQueueItem | null>(null);
 
   const { data, isLoading } = useQuery<TrainingStats>({
@@ -911,72 +932,70 @@ export default function Dashboard() {
         <StatCard title="Mappet" value={stats?.categoryMappings || 0} icon={Tags} />
         <StatCard title="Ukat." value={stats?.uncategorizedThemes || 0} icon={Layers} />
         <StatCard title="Klassif." value={stats?.intentClassifications || 0} icon={Brain} />
-        <StatCard title="Losning" value={stats?.resolutionPatterns || 0} icon={FileText} />
+        <StatCard title="Løsning" value={stats?.resolutionPatterns || 0} icon={FileText} />
         <StatCard title="Usikker" value={stats?.uncertaintyCases || 0} icon={AlertTriangle} />
         <StatCard title="Playbook" value={stats?.playbookEntries || 0} icon={BookOpen} />
         <StatCard title="Review" value={stats?.reviewQueuePending || 0} icon={ClipboardList} />
       </div>
 
-      <Tabs defaultValue="pipeline">
-        <TabsList className="flex-wrap">
-          <TabsTrigger value="pipeline" data-testid="tab-pipeline">
-            Pipeline
-          </TabsTrigger>
-          <TabsTrigger value="playbook" data-testid="tab-playbook">
-            Playbook
-          </TabsTrigger>
-          <TabsTrigger value="review" data-testid="tab-review">
-            Review Kø ({reviewQueue?.length || 0})
-          </TabsTrigger>
-          <TabsTrigger value="themes" data-testid="tab-themes">
-            Temaer
-          </TabsTrigger>
-          <TabsTrigger value="uncertainty" data-testid="tab-uncertainty">
-            Usikkerhet
-          </TabsTrigger>
-          <TabsTrigger value="history" data-testid="tab-history">
-            Historikk
-          </TabsTrigger>
-          <TabsTrigger value="prices" data-testid="tab-prices">
-            Priser ({prices?.length || 0})
-          </TabsTrigger>
-          <TabsTrigger value="templates" data-testid="tab-templates">
-            Autosvar ({responseTemplates?.length || 0})
-          </TabsTrigger>
-          <TabsTrigger value="feedback" data-testid="tab-feedback">
-            Tilbakemelding
-          </TabsTrigger>
-          <TabsTrigger value="article-match" data-testid="tab-article-match">
-            Artikkel-match ({helpCenterMatchStats?.totalMatches || 0})
-          </TabsTrigger>
-          <TabsTrigger value="autoreply-detect" data-testid="tab-autoreply-detect">
-            Autosvar-gjenkjenning
-          </TabsTrigger>
-          <TabsTrigger value="dialog-patterns" data-testid="tab-dialog-patterns">
-            Dialog-mønstre ({dialogPatternStats?.total || 0})
-          </TabsTrigger>
-          <TabsTrigger value="reclassification" data-testid="tab-reclassification">
-            Reklassifisering ({reclassStats?.reclassified || 0})
-          </TabsTrigger>
-          <TabsTrigger value="quality" data-testid="tab-quality">
-            Kvalitet ({qualityStats?.total || 0})
-          </TabsTrigger>
-          <TabsTrigger value="minside-mappings" data-testid="tab-minside-mappings">
-            Min Side-kobling ({minsideMappings?.length || 0})
-          </TabsTrigger>
-          <TabsTrigger value="discovery" data-testid="tab-discovery">
-            Discovery ({stats?.discoveredIntentsPending || 0})
-          </TabsTrigger>
-          <TabsTrigger value="canonical" data-testid="tab-canonical">
-            Canonical Intents
-          </TabsTrigger>
-          <TabsTrigger value="intent-discovery" data-testid="tab-intent-discovery">
-            Intent Discovery
-          </TabsTrigger>
-          <TabsTrigger value="escalations" data-testid="tab-escalations">
-            Case Escalation
-          </TabsTrigger>
-        </TabsList>
+      <Tabs value={activeTab} onValueChange={(val) => {
+        window.history.replaceState({}, "", val === "pipeline" ? "/" : `/?tab=${val}`);
+        setActiveTabState(val);
+      }}>
+        {activeTab === "playbook" && (
+          <TabsList className="mb-4 bg-white dark:bg-card border border-border">
+            <TabsTrigger value="playbook" data-testid="tab-playbook">Playbook</TabsTrigger>
+            <TabsTrigger value="canonical" data-testid="tab-canonical">Canonical Intents</TabsTrigger>
+            <TabsTrigger value="prices" data-testid="tab-prices">Priser ({prices?.length || 0})</TabsTrigger>
+          </TabsList>
+        )}
+        {activeTab === "canonical" && (
+          <TabsList className="mb-4 bg-white dark:bg-card border border-border">
+            <TabsTrigger value="playbook" data-testid="tab-playbook-sub">Playbook</TabsTrigger>
+            <TabsTrigger value="canonical" data-testid="tab-canonical">Canonical Intents</TabsTrigger>
+            <TabsTrigger value="prices" data-testid="tab-prices-sub">Priser ({prices?.length || 0})</TabsTrigger>
+          </TabsList>
+        )}
+        {activeTab === "prices" && (
+          <TabsList className="mb-4 bg-white dark:bg-card border border-border">
+            <TabsTrigger value="playbook" data-testid="tab-playbook-sub2">Playbook</TabsTrigger>
+            <TabsTrigger value="canonical" data-testid="tab-canonical-sub">Canonical Intents</TabsTrigger>
+            <TabsTrigger value="prices" data-testid="tab-prices">Priser ({prices?.length || 0})</TabsTrigger>
+          </TabsList>
+        )}
+        {activeTab === "themes" && (
+          <TabsList className="mb-4 bg-white dark:bg-card border border-border">
+            <TabsTrigger value="themes" data-testid="tab-themes">Temaer</TabsTrigger>
+            <TabsTrigger value="discovery" data-testid="tab-discovery-sub">Discovery ({stats?.discoveredIntentsPending || 0})</TabsTrigger>
+            <TabsTrigger value="intent-discovery" data-testid="tab-intent-discovery-sub">Intent Discovery</TabsTrigger>
+          </TabsList>
+        )}
+        {activeTab === "discovery" && (
+          <TabsList className="mb-4 bg-white dark:bg-card border border-border">
+            <TabsTrigger value="themes" data-testid="tab-themes-sub">Temaer</TabsTrigger>
+            <TabsTrigger value="discovery" data-testid="tab-discovery">Discovery ({stats?.discoveredIntentsPending || 0})</TabsTrigger>
+            <TabsTrigger value="intent-discovery" data-testid="tab-intent-discovery-sub2">Intent Discovery</TabsTrigger>
+          </TabsList>
+        )}
+        {activeTab === "intent-discovery" && (
+          <TabsList className="mb-4 bg-white dark:bg-card border border-border">
+            <TabsTrigger value="themes" data-testid="tab-themes-sub2">Temaer</TabsTrigger>
+            <TabsTrigger value="discovery" data-testid="tab-discovery-sub2">Discovery ({stats?.discoveredIntentsPending || 0})</TabsTrigger>
+            <TabsTrigger value="intent-discovery" data-testid="tab-intent-discovery">Intent Discovery</TabsTrigger>
+          </TabsList>
+        )}
+        {activeTab === "templates" && (
+          <TabsList className="mb-4 bg-white dark:bg-card border border-border">
+            <TabsTrigger value="templates" data-testid="tab-templates">Autosvar ({responseTemplates?.length || 0})</TabsTrigger>
+            <TabsTrigger value="autoreply-detect" data-testid="tab-autoreply-detect-sub">Autosvar-gjenkjenning</TabsTrigger>
+          </TabsList>
+        )}
+        {activeTab === "autoreply-detect" && (
+          <TabsList className="mb-4 bg-white dark:bg-card border border-border">
+            <TabsTrigger value="templates" data-testid="tab-templates-sub">Autosvar ({responseTemplates?.length || 0})</TabsTrigger>
+            <TabsTrigger value="autoreply-detect" data-testid="tab-autoreply-detect">Autosvar-gjenkjenning</TabsTrigger>
+          </TabsList>
+        )}
 
         <TabsContent value="pipeline" className="space-y-4 mt-4">
           <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
@@ -1094,7 +1113,7 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent>
               <p className="text-xs text-muted-foreground mb-3">
-                Kjor kategori + intent + resolusjon i EN API-kall per 10 tickets med 5x parallell prosessering. Estimert &lt;20 timer for 40K tickets.
+                Kjør kategori + intent + resolusjon i EN API-kall per 10 tickets med 5x parallell prosessering. Estimert &lt;20 timer for 40K tickets.
               </p>
               <CombinedBatchCard />
             </CardContent>
@@ -3238,7 +3257,7 @@ function PlaybookTab({ playbook }: { playbook: PlaybookEntry[] | undefined }) {
   };
   const patternLabel: Record<string, string> = {
     autosvar_only: "Kun autosvar",
-    autosvar_quick_resolution: "Rask losning",
+    autosvar_quick_resolution: "Rask løsning",
     autosvar_extended_dialog: "Utvidet dialog",
     direct_human_response: "Direkte svar",
   };
@@ -3261,7 +3280,7 @@ function PlaybookTab({ playbook }: { playbook: PlaybookEntry[] | undefined }) {
     <div className="space-y-4">
       <div className="flex items-center gap-3 flex-wrap">
         <Input
-          placeholder="Sok etter intent, kategori, nokkelord..."
+          placeholder="Søk etter intent, kategori, nøkkelord..."
           value={filter}
           onChange={e => setFilter(e.target.value)}
           className="max-w-sm"
@@ -3346,7 +3365,7 @@ function PlaybookTab({ playbook }: { playbook: PlaybookEntry[] | undefined }) {
           <CardContent className="py-8 text-center">
             <BookOpen className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
             <p className="text-sm text-muted-foreground">
-              Ingen playbook-entries. Kjor treningspipelinen (steg 1-8) for a generere.
+              Ingen playbook-entries. Kjør treningspipelinen (steg 1-8) for å generere.
             </p>
           </CardContent>
         </Card>
@@ -3397,9 +3416,9 @@ function PlaybookTab({ playbook }: { playbook: PlaybookEntry[] | undefined }) {
                     <div className="px-3 pb-3 border-t space-y-3">
                       <div className="grid gap-3 md:grid-cols-2 mt-3">
                         <div className="space-y-2">
-                          <h4 className="text-xs font-semibold text-muted-foreground uppercase">Losning</h4>
+                          <h4 className="text-xs font-semibold text-muted-foreground uppercase">Løsning</h4>
                           {entry.resolutionSteps && <p className="text-sm">{entry.resolutionSteps}</p>}
-                          {entry.keywords && <p className="text-xs text-muted-foreground">Nokkelord: {entry.keywords}</p>}
+                          {entry.keywords && <p className="text-xs text-muted-foreground">Nøkkelord: {entry.keywords}</p>}
                           {entry.officialProcedure && entry.officialProcedure.length > 0 && (
                             <div>
                               <p className="text-xs text-muted-foreground mb-1">Offisiell prosedyre:</p>
@@ -3462,7 +3481,7 @@ function PlaybookTab({ playbook }: { playbook: PlaybookEntry[] | undefined }) {
                               )}
                             </>
                           ) : (
-                            <p className="text-xs text-muted-foreground">Ikke vurdert enna</p>
+                            <p className="text-xs text-muted-foreground">Ikke vurdert ennå</p>
                           )}
                         </div>
                       </div>
@@ -3483,7 +3502,7 @@ function PlaybookTab({ playbook }: { playbook: PlaybookEntry[] | undefined }) {
                         </div>
 
                         <div className="space-y-2">
-                          <h4 className="text-xs font-semibold text-muted-foreground uppercase">Dialog-monster (B)</h4>
+                          <h4 className="text-xs font-semibold text-muted-foreground uppercase">Dialog-mønster (B)</h4>
                           {entry.typicalDialogPattern ? (
                             <>
                               <Badge variant="secondary">{patternLabel[entry.typicalDialogPattern] || entry.typicalDialogPattern}</Badge>
@@ -3540,12 +3559,12 @@ function PlaybookTab({ playbook }: { playbook: PlaybookEntry[] | undefined }) {
                                 <span className="text-xs text-muted-foreground">({entry.totalUses} bruk)</span>
                               </div>
                               <div className="flex items-center gap-2 flex-wrap">
-                                <span className="text-xs text-green-600 dark:text-green-400" data-testid={`text-success-${entry.id}`}>{entry.successfulResolutions || 0} lost</span>
-                                <span className="text-xs text-red-600 dark:text-red-400" data-testid={`text-failed-${entry.id}`}>{entry.failedResolutions || 0} ikke lost</span>
+                                <span className="text-xs text-green-600 dark:text-green-400" data-testid={`text-success-${entry.id}`}>{entry.successfulResolutions || 0} løst</span>
+                                <span className="text-xs text-red-600 dark:text-red-400" data-testid={`text-failed-${entry.id}`}>{entry.failedResolutions || 0} ikke løst</span>
                               </div>
                             </>
                           ) : (
-                            <p className="text-xs text-muted-foreground">Ingen bruksdata enna</p>
+                            <p className="text-xs text-muted-foreground">Ingen bruksdata ennå</p>
                           )}
                         </div>
                       </div>

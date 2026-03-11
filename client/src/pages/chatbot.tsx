@@ -919,7 +919,7 @@ export default function Chatbot() {
           setMinsideUserId(data.userId);
         }
         if (data.mode === "sandbox") {
-          setAuthError("Sandbox-modus: skriv inn vilkarlig kode (f.eks. 123456)");
+          setAuthError("Sandbox-modus: skriv inn vilkårlig kode (f.eks. 123456)");
         }
       } else {
         setAuthError(data.error || "Kunne ikke sende OTP");
@@ -1087,7 +1087,7 @@ export default function Chatbot() {
                 </h2>
                 <p className="text-muted-foreground leading-relaxed">
                   Velkommen! Jeg hjelper deg med alt fra registrering og eierskifte til QR-brikker og Min Side.
-                  Start en samtale for a komme i gang.
+                  Start en samtale for å komme i gang.
                 </p>
               </div>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -1312,11 +1312,11 @@ export default function Chatbot() {
               </div>
               <div>
                 <DialogTitle>
-                  {authStep === "phone" ? "Logg inn pa Min Side" : "Bekreft engangskode"}
+                  {authStep === "phone" ? "Logg inn på Min Side" : "Bekreft engangskode"}
                 </DialogTitle>
                 <DialogDescription className="mt-1">
                   {authStep === "phone"
-                    ? "Skriv inn mobilnummer eller e-post for a identifisere deg."
+                    ? "Skriv inn mobilnummer eller e-post for å identifisere deg."
                     : `En engangskode er sendt til ${authPhone}.`}
                 </DialogDescription>
               </div>

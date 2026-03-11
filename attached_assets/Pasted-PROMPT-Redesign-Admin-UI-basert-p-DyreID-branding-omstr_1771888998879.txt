@@ -1,0 +1,136 @@
+PROMPT: Redesign Admin-UI basert på DyreID-branding
+        + omstrukturering av navigasjon
+
+══════════════════════════════════════════════════════
+DEL 1 – DYREID DESIGNSYSTEM
+══════════════════════════════════════════════════════
+
+Implementer følgende designtokens gjennomgående i admin:
+
+Farger:
+  --color-primary-bg:   #E6F6F8   (lys teal bakgrunn)
+  --color-accent:       #0D5257   (mørk teal – tekst, ikoner, knapper)
+  --color-white:        #FFFFFF
+  --color-text-muted:   #666666
+  --color-border:       #D0E8EA
+  --color-danger:       #C0392B   (varsler, feil)
+  --color-success:      #2ECC71
+
+Logo:
+  https://www.dyreid.no/images/logodyreid.png
+  Alt: "DyreID – eiet av Den norske veterinærforening"
+  Plasseres øverst i sidebar, klikker til Dashboard
+
+Font:
+  font-family: 'Proxima Nova', 'Inter', sans-serif
+  (Last inn Proxima Nova via Adobe Fonts eller CDN om tilgjengelig,
+   ellers fall back til Inter fra Google Fonts)
+
+Radiuser og spacing:
+  border-radius – kort/panel: 8px
+  border-radius – knapper: 5px
+  border-radius – inputs: 50px (piller)
+  base spacing unit: 4px
+
+Knapper:
+  Primary: bg #0D5257, tekst #FFFFFF, hover: 10% mørkere
+  Secondary: bg #E6F6F8, tekst #0D5257, border 1px #0D5257
+  Danger: bg #C0392B, tekst #FFFFFF
+
+Headings: Proxima Nova, color #0D5257
+Body: 16px, color #333
+Sidebar tekst: 14px
+
+══════════════════════════════════════════════════════
+DEL 2 – NY NAVIGASJONSSTRUKTUR
+══════════════════════════════════════════════════════
+
+ERSTATT nåværende navigasjon (sidebar + gul tabblist)
+med følgende struktur:
+
+SIDEBAR (fast venstre, ~220px bred):
+─────────────────────────────────────
+[DyreID-logo]
+"Support AI Admin"
+
+● Dashboard          /admin
+● Chatbot            /chatbot   (eksisterer allerede)
+
+─ KUNNSKAP ──────────────────
+● Playbook           → undertabs: Playbook | Canonical Intents | Priser
+● Pipeline           /admin/pipeline   (steg 1–12)
+
+─ REVIEW ────────────────────
+● Review Kø     (232) badge
+● Usikkerhet
+● Tilbakemelding
+
+─ ANALYSE ───────────────────
+● Temaer / Discovery
+● Dialog-mønstre
+● Min Side-kobling
+● Artikkel-match
+● Reklassifisering
+
+─ SYSTEM ────────────────────
+● Historikk
+● Autosvar
+● Admin
+─────────────────────────────
+
+TABBLIST (gul linje nå):
+Fjern den globale tabblinjen helt.
+Hver seksjon viser kun sine egne undertabs
+som sekundær navigasjon inni innholdsområdet,
+ikke som global header-tab.
+
+══════════════════════════════════════════════════════
+DEL 3 – DASHBOARD REDESIGN
+══════════════════════════════════════════════════════
+
+Redesign dashboardets statistikkort med DyreID-stil:
+
+Hvert kort:
+  bg: #FFFFFF
+  border: 1px solid #D0E8EA
+  border-radius: 8px
+  border-top: 3px solid #0D5257   (accent top-stripe)
+  box-shadow: 0 2px 8px rgba(13,82,87,0.07)
+  padding: 20px 24px
+
+Tall (f.eks. "1 000"): font-size 32px, color #0D5257, bold
+Label (f.eks. "Raw"): font-size 12px, color #666, uppercase, tracking
+
+Kortlayout: beholdes som grid (8 kort på rad).
+
+Pipeline-stegkort:
+  bg: #FFFFFF, border 1px #D0E8EA, radius 8px
+  Stegnummer: liten badge, bg #E6F6F8, tekst #0D5257
+  Start-knapp: primary DyreID-knapp
+  Aktiv/kjørende: border-left 3px #0D5257
+
+Review-badge (232): bg #C0392B, tekst hvit, border-radius 50px
+
+══════════════════════════════════════════════════════
+DEL 4 – GENERELLE UI-REGLER
+══════════════════════════════════════════════════════
+
+- Ingen rene grå admin-farger (#f5f5f5 etc.) – 
+  bruk #E6F6F8 som bakgrunnsfarge der grått ble brukt
+- Tabeller: header bg #E6F6F8, tekst #0D5257
+  alternerende rader: #FFFFFF / #F5FBFC
+- Form inputs: border-radius 50px (pilleform), 
+  border 1px #D0E8EA, focus: border #0D5257
+- Ingen rene gule fremhevinger – bruk #E6F6F8 i stedet
+- Dark mode toggle kan beholdes men er ikke prioritert
+
+══════════════════════════════════════════════════════
+RAPPORT:
+══════════════════════════════════════════════════════
+1. Bekreft sidebar er implementert med de 7 seksjonene
+2. Bekreft global tabblist er fjernet
+3. Bekreft DyreID-logoen vises øverst i sidebar
+4. Bekreft fargene #0D5257 og #E6F6F8 er gjennomgående
+5. Screenshot-lignende tekstbeskrivelse av ny layout
+6. Eventuelle komponenter som ikke lar seg redesigne
+   innenfor eksisterende React-struktur

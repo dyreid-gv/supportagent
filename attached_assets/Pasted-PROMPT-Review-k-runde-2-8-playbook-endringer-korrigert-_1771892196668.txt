@@ -1,0 +1,136 @@
+PROMPT: Review-kø runde 2 – 8 playbook-endringer (korrigert versjon)
+
+BAKGRUNN:
+86 tickets gjenstår etter reklassifisering. Alle svar er
+basert utelukkende på verifisert innhold fra kildekode,
+dyreid.no og offisielle Apple/Google-kilder.
+
+══════════════════════════════════════════════════════
+DEL 1 – OPPRETT NYE ENTRIES (2 stk)
+══════════════════════════════════════════════════════
+
+─────────────────────────────────────────────────────
+NY 1 – SmartTagNotifications (16 tickets)
+─────────────────────────────────────────────────────
+action_type: INFO_ONLY
+
+combined_response:
+"Smart Tag sender varsler via sporingsappen –
+ikke via DyreID-appen.
+
+- iPhone: Varslene administreres i «Hvor er»
+- Android: Varslene administreres i «Finn enheten min»
+
+Se dyreid.no/smarttag for oppdatert veiledning
+til din enhetstype og OS-versjon.
+
+**Mottar du varsler du ikke selv har satt opp?**
+Apple og Google varsler automatisk telefoner som
+beveger seg med en ukjent tag over tid – dette er
+en personvernfunksjon mot uønsket sporing.
+
+Kjenner du igjen brikken (f.eks. et familiemedlems dyr)?
+Trykk på varselet → «Pause varsler» for å skru det av
+for én dag eller permanent. Dette krever at dere
+deler Family Sharing-gruppe (Apple) eller Google-konto."
+
+help_center_article_url:
+https://www.dyreid.no/smarttag
+
+─────────────────────────────────────────────────────
+NY 2 – BillingInquiry (6 tickets)
+─────────────────────────────────────────────────────
+action_type: PURESERVICE_CREATE
+
+Legg til i PURESERVICE_CREATE_CONFIGS:
+  BillingInquiry: {
+    fields: [
+      { key: "e-post", label: "E-postadresse",
+        hint: "Brukes til å slå opp kontoen din" },
+      { key: "beskrivelse", label: "Beskriv spørsmålet",
+        hint: "F.eks. ukjent trekk, feil beløp, mangler kvittering" },
+    ],
+    category1: "Min side",
+    category2: "Betalingshistorikk",
+  }
+
+combined_response:
+"Vi hjelper deg med betalingsspørsmål – vårt team
+har tilgang til din betalingshistorikk og kan
+sjekke dette for deg.
+
+Fortell oss litt om hva du lurer på:"
+
+══════════════════════════════════════════════════════
+DEL 2 – OPPRETT ALIASER (4 stk)
+══════════════════════════════════════════════════════
+
+─────────────────────────────────────────────────────
+ALIAS 1 – DuplicateRegistration → MergeDuplicateRegistrations
+─────────────────────────────────────────────────────
+Samme problem, én sannhetskilde.
+PURESERVICE_CREATE-flyten håndterer dette korrekt.
+
+─────────────────────────────────────────────────────
+ALIAS 2 – DoubleChargeRefund → RefundRequest
+─────────────────────────────────────────────────────
+Dobbeltbetaling er en refusjonssak.
+PURESERVICE_CREATE-flyten håndterer dette korrekt.
+
+─────────────────────────────────────────────────────
+ALIAS 3 – AddPetsToSubscription → SubscriptionAddPet
+─────────────────────────────────────────────────────
+SubscriptionAddPet er allerede STATEFUL_FLOW i koden.
+Spør om Smart Tag eller QR og gir korrekt svar for begge.
+Ingen ny DB-entry nødvendig.
+
+─────────────────────────────────────────────────────
+ALIAS 4 – SmartTagNotificationSetup → SmartTagNotifications
+─────────────────────────────────────────────────────
+Forebyggende alias for varianter av samme spørsmål
+("sette opp varsler", "push-varsler Smart Tag" etc.)
+
+══════════════════════════════════════════════════════
+DEL 3 – OPPDATER EKSISTERENDE ENTRIES (2 stk)
+══════════════════════════════════════════════════════
+
+─────────────────────────────────────────────────────
+OPPDATER – MergeDuplicateRegistrations
+─────────────────────────────────────────────────────
+Ny combined_response (beholder PURESERVICE_CREATE):
+"Har dyret ditt to profiler i DyreID? Dette skjer
+typisk når veterinæren registrerte chipet på nytt,
+eller ved import fra et annet system.
+
+Vi slår dem sammen manuelt – det tar normalt
+1–2 virkedager. Vi trenger opplysninger om
+begge registreringene:"
+
+─────────────────────────────────────────────────────
+OPPDATER – RefundRequest
+─────────────────────────────────────────────────────
+Ny combined_response (beholder PURESERVICE_CREATE):
+"Vi behandler refusjoner manuelt – vanlige årsaker
+er dobbeltbetaling, feilregistrering eller teknisk feil.
+
+For å opprette refusjonssak trenger vi:"
+
+══════════════════════════════════════════════════════
+RAPPORT:
+══════════════════════════════════════════════════════
+1. Nye entries opprettet: SmartTagNotifications, BillingInquiry
+2. Aliaser opprettet: DuplicateRegistration, DoubleChargeRefund,
+   AddPetsToSubscription, SmartTagNotificationSetup
+3. Oppdaterte entries: MergeDuplicateRegistrations, RefundRequest
+4. Bekreft BillingInquiry lagt til i PURESERVICE_CREATE_CONFIGS
+5. Test:
+   "Får rare varsler om Smart Tag" → SmartTagNotifications
+   "Sette opp varsler på Smart Tag" → alias → SmartTagNotifications
+   "Ukjent trekk på kortet" → BillingInquiry (PURESERVICE_CREATE)
+   "Betalt to ganger" → alias → RefundRequest
+   "To profiler på samme hund" → alias → MergeDuplicateRegistrations
+   "Legge til katt på abonnementet" → alias → SubscriptionAddPet (flow)
+6. Regenerer embeddings for alle nye/endrede entries
+7. Kjør reklassifisering av de 86 gjenstående Review-tickets
+   Forventet resultat: under 20 igjen
+8. Oppdatert dekning og antall aktive entries

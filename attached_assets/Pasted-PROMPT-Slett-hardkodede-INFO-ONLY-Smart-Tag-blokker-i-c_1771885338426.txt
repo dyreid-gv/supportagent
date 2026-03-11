@@ -1,0 +1,62 @@
+PROMPT: Slett hardkodede INFO_ONLY Smart Tag-blokker i chatbot.ts
+
+KONTEKST: Funksjonen som inneholder de hardkodede
+if (intent === ...) blokkene returnerer null på slutten.
+Når den returnerer null, bruker koden automatisk
+playbook.combined_response fra databasen.
+
+Løsningen er derfor å SLETTE de hardkodede blokkene –
+ikke erstatte dem med ny hardkoding.
+Databasen har allerede korrekte svar fra dyreid.no/smarttag.
+
+═══════════════════════════════════════════════════════
+SLETT følgende blokker fra chatbot.ts:
+═══════════════════════════════════════════════════════
+
+1. if (intent === "SmartTagActivation") { ... }
+   – ca. linje 1815, returnerer feil Bluetooth-svar
+   – DB har korrekt QR + "Hvor er"-aktivering
+
+2. if (intent === "SmartTagConnection") { ... }
+   – ca. linje 1833, returnerer feil Bluetooth-svar
+   – DB har korrekt to-stegs aktiveringsflyt
+
+3. if (intent === "SmartTagSound") { ... }
+   – ca. linje 1860, returnerer feil om "uønskede lyder"
+   – DB har korrekt "Spill av lyd"-instruksjon
+
+4. if (intent === "SmartTagPosition") { ... }
+   – ca. linje 1851, nevner feil Bluetooth-rekkevidde
+   – DB har korrekt Bluetooth network / ikke GPS
+
+5. if (intent === "SmartTagMissing") { ... }
+   – ca. linje 1842, nevner BLE og Bluetooth-rekkevidde
+   – DB har korrekt feilsøking uten BLE-referanser
+
+6. if (intent === "SmartTagMultiple") { ... }
+   – ca. linje 1869, nevner Bluetooth-tilkobling
+   – DB har korrekt svar
+
+IKKE slett:
+- if (intent === "SmartTagQRActivation") – verifiser
+  om dette er korrekt eller også bør slettes
+- if (intent === "SmartTagReassign") – dette er en
+  PURESERVICE_CREATE-flyt som håndteres separat
+
+═══════════════════════════════════════════════════════
+ETTER SLETTING:
+═══════════════════════════════════════════════════════
+
+Test at disse spørsmålene nå returnerer svar fra DB:
+- "Hvordan aktiverer jeg Smart Tag?"
+- "Smart Tag vises ikke i appen"
+- "Kan jeg spille av lyd på Smart Tag?"
+- "Hvorfor oppdateres ikke posisjonen?"
+
+Report:
+1. Antall blokker slettet og hvilke linjenummer
+2. Bekreft at funktionen nå returnerer null for
+   alle 6 intenter og lar DB-svaret brukes
+3. SmartTagQRActivation – beholdt eller slettet?
+   Begrunn.
+4. Test-resultater for de 4 spørsmålene over

@@ -209,16 +209,61 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/training/import-from-staging", async (req, res) => {
+    sseHeaders(res);
+    const maxTickets = req.body?.maxTickets || 1000;
+    const runId = await storage.createTrainingRun("ingestion", 0);
+
+    try {
+      const { db } = await import("./db");
+      const { sql: drizzleSql } = await import("drizzle-orm");
+      const { mapPureserviceToRawTicket } = await import("./integrations/pureservice-v3");
+
+      const rows = await db.execute(drizzleSql`
+        SELECT raw_json::text as raw_json
+        FROM staging_tickets st
+        WHERE st.ticket_id NOT IN (SELECT ticket_id FROM raw_tickets)
+        ORDER BY st.ticket_id
+        LIMIT ${maxTickets}
+      `);
+
+      const tickets = rows.rows as any[];
+      res.write(`data: ${JSON.stringify({ message: `Fant ${tickets.length} nye staging tickets`, progress: 10 })}\n\n`);
+
+      let imported = 0;
+      const batchSize = 100;
+      for (let i = 0; i < tickets.length; i += batchSize) {
+        const batch = tickets.slice(i, i + batchSize);
+        const rawTickets = batch.map((row: any) => {
+          const ticket = JSON.parse(row.raw_json);
+          return mapPureserviceToRawTicket(ticket);
+        });
+        await storage.insertRawTickets(rawTickets);
+        imported += rawTickets.length;
+        const pct = Math.round((imported / tickets.length) * 100);
+        res.write(`data: ${JSON.stringify({ message: `Importert ${imported}/${tickets.length} tickets`, progress: pct })}\n\n`);
+      }
+
+      await storage.completeTrainingRun(runId, 0);
+      res.write(`data: ${JSON.stringify({ done: true, imported, total: tickets.length })}\n\n`);
+    } catch (error: any) {
+      await storage.completeTrainingRun(runId, 1, error.message);
+      res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+    }
+    res.end();
+  });
+
   // ─── WORKFLOW 1: INGESTION ────────────────────────────────────────
   app.post("/api/training/ingest", async (req, res) => {
     sseHeaders(res);
     const maxTickets = req.body?.maxTickets;
+    const startPage = req.body?.startPage;
     const runId = await storage.createTrainingRun("ingestion", 0);
 
     try {
       const result = await runIngestion((msg, pct) => {
         res.write(`data: ${JSON.stringify({ message: msg, progress: pct })}\n\n`);
-      }, maxTickets);
+      }, maxTickets, startPage);
       await storage.completeTrainingRun(runId, result.errors);
       res.write(`data: ${JSON.stringify({ done: true, ...result })}\n\n`);
     } catch (error: any) {

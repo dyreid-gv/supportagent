@@ -1,0 +1,64 @@
+PROMPT: Rydd review-kø – 49 av 53 tickets
+
+DEL 1 – Avvis + legg til i INTENT_ALIASES (16 stk)
+AddPetsToSubscription → SubscriptionAddPet
+AddPetToSubscription → SubscriptionAddPet
+AddAnimalsToSubscription → SubscriptionAddPet
+PasswordReset → LoginProblem
+ForeignRegistration_FollowUp → ForeignRegistrationProcess
+CheckPaymentMethod → BillingInquiry
+PaymentInquiry → BillingInquiry
+PaymentMethodInquiry → BillingInquiry
+InvoiceQuery → BillingInquiry
+InvoiceNotReceived → BillingInquiry
+InvoiceQuery_AvtaleGiro → BillingInquiry
+SubscriptionCoverage → SubscriptionManagement
+SubscriptionBilling → SubscriptionManagement
+TwoFactorInfo → TwoFactorAuth
+TwoFactorAuthQuestion → TwoFactorAuth
+TwoFactorQuery → TwoFactorAuth
+
+DEL 2 – Allerede godkjent, bare avvis (9 stk)
+SubscriptionAddPet (1)
+SmartTagNotifications (16)
+BillingInquiry (6)
+SubscriptionManagement (1)
+TwoFactorAuth (1) – avvises KUN etter at svar
+  er opprettet i DEL 5
+
+DEL 3 – Slett/avvis (2 stk)
+GeneralInquiry_InternalTest → slett
+GeneralInquiry → avvis, manuell vurdering av ticket
+
+DEL 4 – IKKE rør disse 4 (beholdes i kø):
+LostPetStatus, LostFoundStatusInquiry,
+LostStatusCheck, LostPetReport
+→ Trenger eget playbook-svar – håndteres separat
+
+DEL 5 – Opprett svar FØR avvisning av TwoFactorAuth:
+
+action_type: INFO_ONLY
+
+combined_response:
+"DyreID bruker engangskode (OTP) for innlogging –
+dette er to-faktor autentisering.
+
+Du trenger ikke aktivere noe separat.
+Hver gang du logger inn sendes en ny engangskode
+til e-postadressen eller telefonnummeret som er
+registrert på din profil.
+
+Velg selv om du ønsker kode via SMS eller e-post
+ved innlogging."
+
+══════════════════════════════════════════════════════
+RAPPORT:
+══════════════════════════════════════════════════════
+1. Antall nye aliases lagt til i INTENT_ALIASES (skal være 16)
+2. Antall tickets reklassifisert til kanonisk intent
+3. Bekreft TwoFactorAuth har combined_response
+   før avvisning av ticket
+4. Antall avvist fra kø totalt (skal være 49)
+5. Gjenstående i kø: 4 (LostPet-klyngen)
+6. Regenerer embeddings for TwoFactorAuth
+7. Oppdatert reell dekning %

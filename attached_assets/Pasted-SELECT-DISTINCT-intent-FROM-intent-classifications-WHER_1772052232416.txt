@@ -1,0 +1,158 @@
+SELECT DISTINCT intent FROM intent_classifications WHERE intent IS NOT NULL
+```
+
+Det betyr at den leser **alle 1000 tickets** – inkludert de 232 som var i review-køen – basert på hva `intent`-feltet inneholder *akkurat nå*.
+
+**Hva som avgjør om læringen er korrekt:**
+```
+Tickets med korrekt intent i intent_classifications
+    → Playbook Builder leser dem ✓ → lærer riktig
+
+Tickets med feil/variant intent (f.eks. "AddPetsToSubscription"
+i stedet for "SubscriptionAddPet")
+    → Playbook Builder leser dem ✓ → men lærer feil intent
+```
+
+**Så svaret er: Nei, ikke fullt ut ennå.**
+
+De 124 tickets som ble reklassifisert tidligere (fra 87.6% til 100% coverage) – vi vet ikke om `intent_classifications`-tabellen faktisk ble oppdatert med korrekte intenter, eller om det bare var `canonical_intents`-tabellen som fikk nye entries. Det er det som avgjør.
+
+Her er den samlede prompten som gjør alt i riktig rekkefølge:
+
+---
+```
+PROMPT: Full læringsloop – fra review-kø til Playbook
+
+BAKGRUNN:
+Alle tidligere operasjoner (reklassifisering, review-kø-
+opprydding, alias-mapping) har oppdatert metadata men
+IKKE trigget Playbook Builder. Agenten har dermed ikke
+lært av noen av disse endringene. Denne prompten
+gjennomfører hele løkken i riktig rekkefølge.
+
+══════════════════════════════════════════════════════
+STEG 1 – Verifiser at intent_classifications er korrekt
+══════════════════════════════════════════════════════
+
+Kjør denne spørringen:
+SELECT intent, COUNT(*) as antall
+FROM intent_classifications
+WHERE intent IN (
+  'AddPetsToSubscription', 'AddPetToSubscription',
+  'AddAnimalsToSubscription', 'CheckPaymentMethod',
+  'PaymentInquiry', 'PaymentMethodInquiry',
+  'InvoiceQuery', 'InvoiceNotReceived',
+  'InvoiceQuery_AvtaleGiro', 'SubscriptionCoverage',
+  'SubscriptionBilling', 'TwoFactorInfo',
+  'TwoFactorAuthQuestion', 'TwoFactorQuery',
+  'PasswordReset', 'ForeignRegistration_FollowUp',
+  'LostPetStatus', 'LostFoundStatusInquiry',
+  'LostStatusCheck', 'LostPetReport'
+)
+GROUP BY intent ORDER BY antall DESC;
+
+Hvis noen av disse variant-intentene har tickets →
+oppdater dem til kanonisk intent via:
+UPDATE intent_classifications
+SET intent = '[kanonisk]', manually_reviewed = true
+WHERE intent = '[variant]';
+
+Mapping:
+AddPetsToSubscription → SubscriptionAddPet
+AddPetToSubscription → SubscriptionAddPet
+AddAnimalsToSubscription → SubscriptionAddPet
+PasswordReset → LoginProblem
+ForeignRegistration_FollowUp → ForeignRegistration
+CheckPaymentMethod → BillingInquiry
+PaymentInquiry → BillingInquiry
+PaymentMethodInquiry → BillingInquiry
+InvoiceQuery → BillingInquiry
+InvoiceNotReceived → BillingInquiry
+InvoiceQuery_AvtaleGiro → BillingInquiry
+SubscriptionCoverage → SubscriptionManagement
+SubscriptionBilling → SubscriptionManagement
+TwoFactorInfo → TwoFactorAuth
+TwoFactorAuthQuestion → TwoFactorAuth
+TwoFactorQuery → TwoFactorAuth
+LostPetStatus → [beholdes – ingen kanonisk ennå]
+LostFoundStatusInquiry → [beholdes]
+LostStatusCheck → [beholdes]
+LostPetReport → [beholdes]
+
+══════════════════════════════════════════════════════
+STEG 2 – Rydd review-køen (49 av 53)
+══════════════════════════════════════════════════════
+
+Avvis følgende fra review_queue (status → 'dismissed'):
+- Alle med intent i alias-listen over (28 stk)
+- SmartTagNotifications (16 – allerede godkjent)
+- BillingInquiry (6 – allerede godkjent)
+- SubscriptionAddPet (1), SubscriptionManagement (1)
+- TwoFactorAuth (1) – avvises etter steg 4
+- GeneralInquiry_InternalTest (1 – slett)
+- GeneralInquiry (1 – avvis)
+
+BEHOLD i kø (4 stk):
+LostPetStatus, LostFoundStatusInquiry,
+LostStatusCheck, LostPetReport
+
+══════════════════════════════════════════════════════
+STEG 3 – Legg til i INTENT_ALIASES
+══════════════════════════════════════════════════════
+
+Samme mapping som steg 1 – legg til alle 16 aliaser
+i INTENT_ALIASES-mappen i koden.
+
+══════════════════════════════════════════════════════
+STEG 4 – Opprett TwoFactorAuth svar
+══════════════════════════════════════════════════════
+
+action_type: INFO_ONLY
+combined_response:
+"DyreID bruker engangskode (OTP) for innlogging –
+dette er to-faktor autentisering.
+
+Du trenger ikke aktivere noe separat. Hver gang
+du logger inn sendes en ny engangskode til
+e-postadressen eller telefonnummeret som er
+registrert på din profil.
+
+Velg selv om du ønsker kode via SMS eller e-post
+ved innlogging."
+
+Deretter: avvis TwoFactorAuth fra review-kø.
+
+══════════════════════════════════════════════════════
+STEG 5 – Kjør Playbook Builder (steg 8)
+══════════════════════════════════════════════════════
+
+Kall /api/training/generate-playbook
+
+Dette leser alle 1000 oppdaterte intent_classifications
+og genererer playbook_candidates for alle intenter
+med tickets – inkludert de 232 som lå i review-køen.
+
+══════════════════════════════════════════════════════
+STEG 6 – Gjennomgå og godkjenn candidates
+══════════════════════════════════════════════════════
+
+For hver ny playbook_candidate:
+- Har intenten allerede en aktiv playbook_entry
+  med combined_response? → Sammenlign, behold beste
+- Har intenten INGEN entry? → Godkjenn hvis
+  combined_response er korrekt og komplett
+- Er combined_response generert feil eller
+  ufullstendig? → Marker som NEEDS_MANUAL_AUTHORING
+
+══════════════════════════════════════════════════════
+RAPPORT:
+══════════════════════════════════════════════════════
+1. Antall intent_classifications oppdatert i steg 1
+2. Antall avvist fra review-kø (skal være 49)
+3. Gjenstående i kø: 4 (LostPet-klyngen)
+4. Antall playbook_candidates generert i steg 5
+5. Antall candidates godkjent / needs_manual / avvist
+6. Antall aktive playbook_entries etter godkjenning
+7. Oppdatert reell dekning %
+8. Bekreft alle 232 opprinnelige review-tickets
+   nå har korrekt intent i intent_classifications

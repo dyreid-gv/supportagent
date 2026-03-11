@@ -29,7 +29,8 @@ interface PureserviceTicket {
 
 export async function getClosedTickets(
   page: number = 1,
-  pageSize: number = 50
+  pageSize: number = 50,
+  options?: { excludeBeforeId?: number; sort?: string }
 ): Promise<{ tickets: PureserviceTicket[]; total: number }> {
   const apiKey = process.env.PURESERVICE_API_KEY;
   if (!apiKey) {
@@ -37,9 +38,14 @@ export async function getClosedTickets(
   }
 
   const offset = (page - 1) * pageSize;
+  const sort = options?.sort || "-id";
+  let url = `${BASE}/ticket?sort=${sort}&limit=${pageSize}&offset=${offset}&include=communications`;
+  if (options?.excludeBeforeId) {
+    url += `&filter=id>${options.excludeBeforeId}`;
+  }
 
   const res = await fetch(
-    `${BASE}/ticket?limit=${pageSize}&offset=${offset}&include=communications`,
+    url,
     {
       headers: {
         "Authorization": `Bearer ${apiKey}`,

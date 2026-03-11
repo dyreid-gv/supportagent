@@ -1,0 +1,97 @@
+PROMPT: Kjør pipeline på 1000 tickets fra 2025
+
+══════════════════════════════════════════════════════
+STEG 1 – Innhent 1000 tickets fra 2025
+══════════════════════════════════════════════════════
+
+Kall /api/training/ingest med:
+  fromDate: 2025-01-01
+  toDate: 2025-12-31
+  maxTickets: 1000
+
+Bekreft:
+- Antall hentet
+- Datoer på første og siste ticket
+- Antall hoppet over (duplikater fra forrige kjøring)
+
+══════════════════════════════════════════════════════
+STEG 2 – GDPR-vasking
+══════════════════════════════════════════════════════
+
+Kall /api/training/scrub
+Bekreft antall vasket.
+
+══════════════════════════════════════════════════════
+STEG 3 – Kategorimapping
+══════════════════════════════════════════════════════
+
+Kall /api/training/categorize
+Bekreft antall kategorisert.
+
+══════════════════════════════════════════════════════
+STEG 4 – Ukategorisert analyse
+══════════════════════════════════════════════════════
+
+Kall /api/training/analyze-uncategorized
+Bekreft antall behandlet.
+
+══════════════════════════════════════════════════════
+STEG 5 – Intent-klassifisering
+══════════════════════════════════════════════════════
+
+Kall /api/training/combined-analysis
+  ticketLimit: 1000
+
+Bekreft:
+- Antall klassifisert
+- Fordeling på kjente vs. nye intenter
+- Antall som traff eksisterende canonical intents
+- Antall flagget som new_intent
+
+══════════════════════════════════════════════════════
+STEG 6 – Reklassifisering
+══════════════════════════════════════════════════════
+
+Kall /api/training/reclassify
+
+Bekreft antall reklassifisert.
+
+══════════════════════════════════════════════════════
+STEG 7 – Kvalitetsvurdering
+══════════════════════════════════════════════════════
+
+Kall /api/training/assess-quality
+
+══════════════════════════════════════════════════════
+STEG 8 – Playbook Builder
+══════════════════════════════════════════════════════
+
+Kall /api/training/generate-playbook
+
+Bekreft:
+- Antall candidates generert
+- Ingen eksisterende PURESERVICE_CREATE eller
+  API_CALL entries fikk endret action_type
+- Antall entries som ble beskyttet vs. oppdatert
+
+══════════════════════════════════════════════════════
+STEG 9 – Review-kø analyse
+══════════════════════════════════════════════════════
+
+Kall /api/training/review-queue
+
+Rapport:
+- Antall pending
+- Topp 10 intenter i køen med antall tickets
+- Hvilke er kjente aliases (kan løses umiddelbart)
+- Hvilke er genuint nye (trenger vurdering)
+
+══════════════════════════════════════════════════════
+SLUTTRAPPORT:
+══════════════════════════════════════════════════════
+1. Totalt antall tickets i DB (gamle + nye)
+2. Nye intenter som ikke fantes i de første 1000
+3. Review-kø pending antall
+4. Reell dekning % på de nye 1000 ticketene
+5. Playbook candidates til gjennomgang
+6. Anbefalte neste tiltak basert på funn

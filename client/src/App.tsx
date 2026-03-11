@@ -25,7 +25,18 @@ import {
   GraduationCap,
   BookOpen,
   BarChart3,
+  ClipboardList,
+  AlertTriangle,
+  ThumbsUp,
+  Layers,
+  Shuffle,
+  Globe,
+  Monitor,
+  Link2,
+  Clock,
+  Zap,
 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/dashboard";
 import Chatbot from "@/pages/chatbot";
@@ -34,34 +45,43 @@ import HealthDashboard from "@/pages/health";
 
 const sidebarGroups = [
   {
-    label: "Operations",
+    label: "",
     items: [
       { title: "Dashboard", url: "/", icon: LayoutDashboard },
       { title: "Chatbot", url: "/chat", icon: MessageSquare },
     ],
   },
   {
-    label: "Training",
+    label: "Kunnskap",
     items: [
+      { title: "Playbook", url: "/?tab=playbook", icon: BookOpen },
       { title: "Pipeline", url: "/?tab=pipeline", icon: GraduationCap },
     ],
   },
   {
-    label: "Knowledge",
+    label: "Review",
     items: [
-      { title: "Playbook", url: "/?tab=playbook", icon: BookOpen },
+      { title: "Review Kø", url: "/?tab=review", icon: ClipboardList, badge: true },
+      { title: "Usikkerhet", url: "/?tab=uncertainty", icon: AlertTriangle },
+      { title: "Tilbakemelding", url: "/?tab=feedback", icon: ThumbsUp },
     ],
   },
   {
-    label: "Analytics",
+    label: "Analyse",
     items: [
-      { title: "Health", url: "/admin/health", icon: Activity },
-      { title: "Discovery", url: "/?tab=discovery", icon: BarChart3 },
+      { title: "Temaer / Discovery", url: "/?tab=themes", icon: Layers },
+      { title: "Dialog-mønstre", url: "/?tab=dialog-patterns", icon: BarChart3 },
+      { title: "Min Side-kobling", url: "/?tab=minside-mappings", icon: Monitor },
+      { title: "Artikkel-match", url: "/?tab=article-match", icon: Link2 },
+      { title: "Reklassifisering", url: "/?tab=reclassification", icon: Shuffle },
+      { title: "Health Score", url: "/admin/health", icon: Activity },
     ],
   },
   {
     label: "System",
     items: [
+      { title: "Historikk", url: "/?tab=history", icon: Clock },
+      { title: "Autosvar", url: "/?tab=templates", icon: Zap },
       { title: "Admin", url: "/admin", icon: Settings },
     ],
   },
@@ -69,32 +89,69 @@ const sidebarGroups = [
 
 function AppSidebar() {
   const [location] = useLocation();
+  const searchParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams();
+  const currentTab = searchParams.get("tab");
+
+  const { data: stats } = useQuery<any>({
+    queryKey: ["/api/training/stats"],
+    refetchInterval: 30000,
+  });
+
+  const reviewCount = stats?.stats?.reviewQueuePending || 0;
 
   const isActive = (url: string) => {
-    if (url === "/") return location === "/";
-    if (url.startsWith("/?tab=")) return false;
-    return location === url || location.startsWith(url + "/");
+    if (url === "/") return location === "/" && !currentTab;
+    if (url === "/chat") return location === "/chat";
+    if (url === "/admin/health") return location === "/admin/health";
+    if (url === "/admin") return location === "/admin";
+    if (url.startsWith("/?tab=")) {
+      const tabParam = url.split("tab=")[1];
+      return location === "/" && currentTab === tabParam;
+    }
+    return false;
   };
 
   return (
     <Sidebar>
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel className="text-xs font-bold uppercase tracking-wider">
-            DyreID Support AI
-          </SidebarGroupLabel>
+          <Link href="/">
+            <div className="flex items-center gap-3 px-3 pt-4 pb-2 cursor-pointer" data-testid="link-logo-dashboard">
+              <img
+                src="https://www.dyreid.no/images/logodyreid.png"
+                alt="DyreID – eiet av Den norske veterinærforening"
+                className="h-8 w-auto"
+              />
+            </div>
+          </Link>
+          <p className="px-3 pb-3 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+            Support AI Admin
+          </p>
         </SidebarGroup>
-        {sidebarGroups.map((group) => (
-          <SidebarGroup key={group.label}>
-            <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+        {sidebarGroups.map((group, gi) => (
+          <SidebarGroup key={gi}>
+            {group.label && (
+              <SidebarGroupLabel className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                {group.label}
+              </SidebarGroupLabel>
+            )}
             <SidebarGroupContent>
               <SidebarMenu>
                 {group.items.map((item) => (
                   <SidebarMenuItem key={item.title}>
                     <SidebarMenuButton asChild data-active={isActive(item.url)}>
                       <Link href={item.url}>
-                        <item.icon />
-                        <span>{item.title}</span>
+                        <item.icon className="h-4 w-4" />
+                        <span className="text-[13px]">{item.title}</span>
+                        {"badge" in item && item.badge && reviewCount > 0 && (
+                          <span
+                            className="ml-auto inline-flex items-center justify-center h-5 min-w-[20px] px-1.5 rounded-full text-[10px] font-bold"
+                            style={{ backgroundColor: "#C0392B", color: "#FFFFFF" }}
+                            data-testid="badge-review-count"
+                          >
+                            {reviewCount}
+                          </span>
+                        )}
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
@@ -122,7 +179,7 @@ function Router() {
 
 function App() {
   const style = {
-    "--sidebar-width": "14rem",
+    "--sidebar-width": "15rem",
     "--sidebar-width-icon": "3rem",
   };
 
@@ -134,7 +191,7 @@ function App() {
             <div className="flex h-screen w-full">
               <AppSidebar />
               <div className="flex flex-col flex-1 min-w-0">
-                <header className="flex items-center justify-between gap-2 p-2 border-b">
+                <header className="flex items-center justify-between gap-2 p-2 border-b bg-card">
                   <SidebarTrigger data-testid="button-sidebar-toggle" />
                   <ThemeToggle />
                 </header>
